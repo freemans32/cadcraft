@@ -3647,3 +3647,26 @@ fn solid_hatch_keeps_angle_scale_and_double_flag() {
     assert!(f("41").is_some_and(|s| (s - 2.0).abs() < 1e-12), "{h:?}");
     assert_eq!(group(h, "77"), Some("0"), "{h:?}");
 }
+
+#[test]
+fn wall_styles_xrecord_keeps_valid_styles_and_refuses_other_payloads() {
+    use crate::dxf_ext::{parse_wall_styles, wall_style_chunks};
+    let styles = standard_wall_styles();
+    let text = wall_style_chunks(&styles).expect("chunks").concat();
+    assert_eq!(parse_wall_styles(&text), Some(styles.clone()));
+    assert_eq!(wall_style_chunks(&[]), None, "no XRECORD without styles");
+    // Unusable styles and repeated names are left out; the rest is kept.
+    let mut broken = styles.first().expect("style").clone();
+    broken.name = "Broken".into();
+    broken.components[0].thickness = f64::MAX;
+    let mut twin = styles.first().expect("style").clone();
+    twin.name = twin.name.to_uppercase();
+    twin.components[0].thickness = 1.0;
+    let mixed = [styles.clone(), vec![broken, twin]].concat();
+    let text = wall_style_chunks(&mixed).expect("chunks").concat();
+    assert_eq!(parse_wall_styles(&text), Some(styles));
+    // Other versions, other shapes and damaged text are not wall styles.
+    assert_eq!(parse_wall_styles(r#"{"version":2,"styles":[]}"#), None);
+    assert_eq!(parse_wall_styles(r#"{"version":1,"styles":"#), None);
+    assert_eq!(parse_wall_styles("[]"), None);
+}

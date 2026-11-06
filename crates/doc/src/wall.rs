@@ -491,6 +491,87 @@ impl crate::Drawing {
     }
 }
 
+impl crate::Drawing {
+    /// Adds wall `p` to `space`, its path given in drawing coordinates: an anonymous block holding
+    /// the wall's geometry, and a block reference to it on [`WALL_LAYER`] at the path's first
+    /// point carrying the wall's data. `common` gives the reference's other properties.
+    pub fn add_wall(&mut self, space: &crate::Space, mut common: crate::Common, mut p: WallParams) -> Result<crate::Handle> {
+        let origin = p.path.first().copied().ok_or_else(|| invalid("A wall needs at least two points."))?;
+        for v in &mut p.path {
+            *v -= origin;
+        }
+        let block = self.wall_block(&p)?;
+        self.ensure_wall_layers();
+        common.layer = WALL_LAYER.into();
+        common.xdata = p.replace_xdata(&common.xdata)?;
+        let insert = crate::Insert { block, insert: v3(origin), ..Default::default() };
+        self.add(space, common, EntityKind::Insert(insert))
+    }
+
+    /// Gives wall `h` the parameters `p` (path in the block's coordinates): a new block with the
+    /// new geometry, the old block removed when nothing else refers to it.
+    pub fn regenerate_wall(&mut self, h: crate::Handle, p: &WallParams) -> Result<()> {
+        let e = self.entity(h).ok_or(DocError::NoEntity(h))?;
+        let EntityKind::Insert(old) = &e.kind else { return Err(invalid("The object is not a wall.")) };
+        let old = old.block.clone();
+        let xdata = p.replace_xdata(&e.common.xdata)?;
+        let block = self.wall_block(p)?;
+        self.modify_entity(h, |e| {
+            if let EntityKind::Insert(i) = &mut e.kind {
+                i.block = block;
+            }
+            e.common.xdata = xdata;
+        })?;
+        self.drop_unreferenced_block(&old);
+        Ok(())
+    }
+
+    /// Whether wall `h`'s block still holds the geometry its parameters generate, and the
+    /// reference keeps the wall's size (no scale but a mirror): only then may it be regenerated.
+    pub fn wall_is_intact(&self, h: crate::Handle) -> bool {
+        let Some(e) = self.entity(h) else { return false };
+        let (EntityKind::Insert(i), Some(p)) = (&e.kind, wall_of(e)) else { return false };
+        let unit = |s: f64| (s.abs() - 1.0).abs() <= 1e-9;
+        let Some(b) = self.block(&i.block) else { return false };
+        unit(i.scale.x) && unit(i.scale.y) && i.cols <= 1 && i.rows <= 1 && p.matches(b.entities.iter().map(|e| &e.kind))
+    }
+
+    /// A new anonymous block holding wall `p`'s geometry; returns its name.
+    fn wall_block(&mut self, p: &WallParams) -> Result<String> {
+        let pieces = p.generate()?;
+        let name = self.anonymous_block_name("*U");
+        let mut b = crate::Block::new(&name);
+        b.anonymous = true;
+        for piece in pieces {
+            let common = crate::Common { layer: piece.layer.into(), color: piece.color, ..Default::default() };
+            b.entities.push(crate::Entity { handle: self.new_handle(), common, kind: piece.kind });
+        }
+        self.blocks.insert(name.clone(), std::sync::Arc::new(b));
+        Ok(name)
+    }
+
+    /// The wall layers, created when missing: lines in the default colour, hatches grey.
+    fn ensure_wall_layers(&mut self) {
+        self.ensure_layer(WALL_LAYER);
+        if self.ensure_layer(WALL_PATTERN_LAYER)
+            && let Some(l) = self.layer_mut(WALL_PATTERN_LAYER)
+        {
+            l.color = Color::Index(8);
+        }
+    }
+
+    /// Removes anonymous block `name` when no object refers to it.
+    fn drop_unreferenced_block(&mut self, name: &str) {
+        let refers = |e: &std::sync::Arc<crate::Entity>| matches!(&e.kind, EntityKind::Insert(i) if i.block.eq_ignore_ascii_case(name));
+        let used = self.model.iter().any(refers)
+            || self.layouts.iter().any(|l| l.entities.iter().any(refers))
+            || self.blocks.values().any(|b| b.entities.iter().any(refers) || b.array.as_ref().is_some_and(|a| a.source.eq_ignore_ascii_case(name)));
+        if !used && self.block(name).is_some_and(|b| b.anonymous) {
+            self.blocks.retain(|k, _| !k.eq_ignore_ascii_case(name));
+        }
+    }
+}
+
 /// The wall an object is, when it is a block reference carrying usable wall data.
 pub fn wall_of(e: &crate::Entity) -> Option<WallParams> {
     match &e.kind {
