@@ -237,6 +237,7 @@
 	Enter dimension text (<> = measurement)	Entrez le texte de cotation (<> = mesure)
 	Enter dimension value or [name=expression]	Entrez la valeur de cotation ou [name=expression]
 	Enter dimension variable name to override	Entrez le nom de la variable de cotation à substituer
+	Enter justification	Entrez la justification
 	Enter justification type	Entrez le type de justification
 	Enter leader text	Entrez le texte du repère
 	Enter mline scale	Entrez l'échelle de la multiligne
@@ -258,6 +259,8 @@
 	Enter text (use \P for new paragraphs)	Entrer le texte (utilisez \P pour les nouveaux paragraphes)
 	Enter the number of segments	Entrer le nombre de segments
 	Enter twist direction of helix	Entrer le sens de vrillage de l'hélice
+	Enter wall height (mm)	Entrez la hauteur du mur (mm)
+	Enter wall style name or [?]	Entrez le nom du style de mur ou [?]
 	Entire drawing	Tout le dessin
 	Equal	Égalité
 	Erase	Effacer
@@ -856,6 +859,7 @@
 	Specify start point of arc	Spécifiez le point de départ de l'arc
 	Specify start point of polyline	Spécifiez le point de départ de la polyligne
 	Specify start point of text	Spécifiez le point de départ du texte
+	Specify start point of wall	Spécifiez le point de départ du mur
 	Specify starting width	Spécifiez la largeur de départ
 	Specify starting width for next segment	Spécifiez la largeur de départ du segment suivant
 	Specify tangent direction for the start point of arc	Spécifiez la direction de la tangente au point de départ de l'arc
@@ -965,6 +969,8 @@
 	Viewports	Fenêtres
 	Volume	Volume
 	W	O
+	Wall	Mur
+	Wall Styles	Styles de murs
 	WCS	SCG
 	White	Blanc
 	Width factor	Facteur de largeur
