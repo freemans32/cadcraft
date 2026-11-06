@@ -196,20 +196,92 @@ fn damaged_extended_data_is_not_a_wall() {
     assert_eq!(WallParams::from_xdata(&[tag(1001, WALL_APP), tag(1000, "WALL1"), tag(1000, &json)]), None);
 }
 
+fn entities(p: &WallParams) -> Vec<crate::Entity> {
+    p.generate()
+        .expect("geometry")
+        .into_iter()
+        .map(|x| crate::Entity {
+            handle: crate::Handle(1),
+            common: crate::Common { layer: x.layer.into(), color: x.color, ..Default::default() },
+            kind: x.kind,
+        })
+        .collect()
+}
+
 #[test]
 fn a_wall_matches_its_own_geometry_and_not_an_edited_one() {
     let p = wall(brick(), &[(0.0, 0.0), (1000.0, 0.0), (1000.0, -2000.0)], false, WallJustification::Left);
-    let kinds: Vec<EntityKind> = p.generate().expect("geometry").into_iter().map(|x| x.kind).collect();
-    assert!(p.matches(&kinds));
-    let mut edited = kinds.clone();
-    if let Some(EntityKind::LwPolyline(l)) = edited.first_mut() {
+    let own = entities(&p);
+    assert!(p.matches(&own));
+    let mut moved = own.clone();
+    if let Some(EntityKind::LwPolyline(l)) = moved.first_mut().map(|e| &mut e.kind) {
         l.vertices[1].p.x += 1.0;
     }
-    assert!(!p.matches(&edited));
-    assert!(!p.matches(&kinds[..kinds.len() - 1]));
-    let mut more = kinds;
-    more.push(EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 0.0, 0.0) }));
-    assert!(!p.matches(&more));
+    assert!(!p.matches(&moved), "a vertex moved");
+    let mut relayered = own.clone();
+    relayered[0].common.layer = "Other".into();
+    assert!(!p.matches(&relayered), "an object moved to another layer");
+    let mut recoloured = own.clone();
+    recoloured[0].common.color = Color::Index(1);
+    assert!(!p.matches(&recoloured), "an object recoloured");
+    assert!(!p.matches(&own[..own.len() - 1]), "an object deleted");
+    let mut more = own;
+    more.push(crate::Entity::new(crate::Handle(2), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 0.0, 0.0) })));
+    assert!(!p.matches(&more), "an object added");
+}
+
+#[test]
+fn a_closed_wall_drawn_either_way_marks_its_larger_ring_as_outer() {
+    let cw = [(0.0, 0.0), (5000.0, 0.0), (5000.0, -4000.0), (0.0, -4000.0)];
+    let ccw: Vec<(f64, f64)> = cw.iter().rev().copied().collect();
+    for path in [cw.to_vec(), ccw] {
+        let g = wall(style("Concrete 200"), &path, true, WallJustification::Left).generate().expect("geometry");
+        let h = hatches(&g);
+        let rings = &h[0].loops;
+        let area = |l: &HatchLoop| shoelace(&l.vertices.iter().map(|v| v.p).collect::<Vec<_>>()).abs();
+        let (outer, inner) = if rings[0].outer { (&rings[0], &rings[1]) } else { (&rings[1], &rings[0]) };
+        assert!(outer.outer && !inner.outer);
+        assert!(area(outer) > area(inner), "{path:?}");
+    }
+}
+
+#[test]
+fn an_air_gap_is_never_hatched() {
+    let mut s = style("Timber frame 145");
+    for c in &mut s.components {
+        if c.function == ComponentFunction::AirGap {
+            c.pattern = "ANSI31".into();
+        }
+    }
+    let g = wall(s, &[(0.0, 0.0), (1000.0, 0.0)], false, WallJustification::Left).generate().expect("geometry");
+    assert_eq!(hatches(&g).len(), 3);
+}
+
+#[test]
+fn a_valid_wall_always_survives_its_extended_data() {
+    // Long names in plain, backslash-heavy and non-ASCII text, with the most points: whatever
+    // `validate` accepts, the extended data must give back.
+    for ch in ['a', '\\', 'é', '\u{1f9f1}'] {
+        let mut s = brick();
+        s.name = std::iter::repeat_n(ch, MAX_WALL_NAME_CHARS).collect();
+        s.description = std::iter::repeat_n(ch, MAX_WALL_DESCRIPTION_CHARS).collect();
+        s.components = (0..MAX_WALL_COMPONENTS)
+            .map(|i| {
+                WallComponent::new(
+                    &std::iter::repeat_n(ch, MAX_WALL_NAME_CHARS - 2).chain(format!("{i:02}").chars()).collect::<String>(),
+                    10.0,
+                    ComponentFunction::Structure,
+                )
+            })
+            .collect();
+        let path: Vec<(f64, f64)> =
+            (0..MAX_WALL_VERTICES).map(|i| (i as f64 * 1_000.123_456_789, if i % 2 == 0 { 0.0 } else { 999.987_654_321 })).collect();
+        let p = wall(s, &path, false, WallJustification::Left);
+        match p.validate() {
+            Ok(()) => assert_eq!(WallParams::from_xdata(&p.to_xdata().expect("xdata")), Some(p), "{ch:?}"),
+            Err(e) => assert!(p.to_xdata().is_err(), "{ch:?}: refused for {e}, but its xdata was written"),
+        }
+    }
 }
 
 #[test]

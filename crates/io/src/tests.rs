@@ -3665,6 +3665,11 @@ fn wall_styles_xrecord_keeps_valid_styles_and_refuses_other_payloads() {
     let mixed = [styles.clone(), vec![broken, twin]].concat();
     let text = wall_style_chunks(&mixed).expect("chunks").concat();
     assert_eq!(parse_wall_styles(&text), Some(styles));
+    // Names are trimmed, so a style written with spaces around its name can still be found.
+    let mut spaced = standard_wall_styles().remove(0);
+    spaced.name = format!("  {}  ", spaced.name);
+    let text = wall_style_chunks(&[spaced]).expect("chunks").concat();
+    assert_eq!(parse_wall_styles(&text).map(|v| v[0].name.clone()), Some("Concrete 200".to_string()));
     // Other versions, other shapes and damaged text are not wall styles.
     assert_eq!(parse_wall_styles(r#"{"version":2,"styles":[]}"#), None);
     assert_eq!(parse_wall_styles(r#"{"version":1,"styles":"#), None);

@@ -751,8 +751,8 @@ pub(crate) fn wall_style_chunks(styles: &[WallStyle]) -> Option<Vec<String>> {
     Some(json_chunks(&json))
 }
 
-/// Parse the wall styles XRECORD text: the valid styles, the first of each name; `None` when it
-/// is not a payload we understand.
+/// Parse the wall styles XRECORD text: the valid styles, names trimmed, the first of each name
+/// (case-insensitive); `None` when it is not a payload we understand.
 pub(crate) fn parse_wall_styles(text: &str) -> Option<Vec<WallStyle>> {
     if text.len() > MAX_PAYLOAD {
         return None;
@@ -761,9 +761,11 @@ pub(crate) fn parse_wall_styles(text: &str) -> Option<Vec<WallStyle>> {
     if p.version != 1 || p.styles.len() > MAX_WALL_STYLES {
         return None;
     }
+    let mut seen = std::collections::HashSet::new();
     let mut out: Vec<WallStyle> = Vec::with_capacity(p.styles.len());
-    for s in p.styles {
-        if s.validate().is_ok() && !out.iter().any(|o| o.name.eq_ignore_ascii_case(&s.name)) {
+    for mut s in p.styles {
+        s.name = s.name.trim().to_string();
+        if s.validate().is_ok() && seen.insert(s.name.to_lowercase()) {
             out.push(s);
         }
     }
