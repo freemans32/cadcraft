@@ -8,7 +8,6 @@ use cadcraft_doc::{
 use cadcraft_geom::Vec2;
 use serde_json::{Value, json};
 
-use super::machines::number;
 use super::{CommandSpec, bad, bool_or, str_param};
 
 use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
@@ -16,10 +15,9 @@ use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, St
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("walladd", "Wall", run_walladd)
-            .alias(&["mur"])
             .params("{points, closed?, style?, justification?: left|center|right, height? (mm)} → {handle}")
             .interactive(|s| Ok(Box::new(WallAddM::new(s)))),
-        CommandSpec::new("wallstyleedit", "Wall Styles", run_wallstyleedit).alias(&["stylemur"]).params(
+        CommandSpec::new("wallstyleedit", "Wall Styles", run_wallstyleedit).params(
             "{} → {styles, current} | {name, description?, components?: [{name, thickness (mm), pattern?, patternScale?, \
              patternAngle?, color?, priority?, function?: structure|insulation|finish|membrane|airGap, returnsAtOpenings?}], \
              defaultHeight? (mm), copyFrom?} → {style, regenerated, kept} | {delete: name} | {name, rename: newName}",
@@ -49,17 +47,19 @@ fn params(d: &Drawing, style: WallStyle, points: Vec<Vec2>, closed: bool, justif
     WallParams { style, path: points, closed, justification, height, units: WallUnits::of(d) }
 }
 
-/// Adds wall `p` (drawing coordinates) to the current space; a standard style it uses is copied
-/// into the drawing first, so the drawing keeps it and it can be changed.
+/// Adds wall `p` (drawing coordinates) to the current space; a standard style it uses is then
+/// copied into the drawing, so the drawing keeps it and it can be changed. A wall that can't be
+/// added changes nothing.
 fn add(s: &mut Session, p: WallParams) -> Result<Handle> {
-    p.validate().map_err(|e| other(e.to_string()))?;
     let space = s.space();
     let common = s.current_common();
+    let style = p.style.clone();
     let d = s.doc_mut()?;
-    if d.wall_style(&p.style.name).is_none() {
-        d.wall_styles.push(p.style.clone());
+    let h = d.add_wall(&space, common, p).map_err(|e| other(e.to_string()))?;
+    if d.wall_style(&style.name).is_none() {
+        d.wall_styles.push(style);
     }
-    d.add_wall(&space, common, p).map_err(|e| other(e.to_string()))
+    Ok(h)
 }
 
 fn justification_param(cmd: &str, p: &Value, default: WallJustification) -> Result<WallJustification> {
@@ -74,9 +74,14 @@ fn run_walladd(s: &mut Session, p: &Value) -> Result<Value> {
     if raw.len() > MAX_WALL_VERTICES {
         return Err(bad("walladd", format!("a wall has at most {MAX_WALL_VERTICES} points")));
     }
-    let points: Vec<Vec2> = super::distinct_points(
+    let mut points: Vec<Vec2> = super::distinct_points(
         &raw.iter().map(super::point_value).collect::<Option<Vec<_>>>().ok_or_else(|| bad("walladd", "`points` must be [x, y] points"))?,
     );
+    let closed = bool_or(p, "closed", false);
+    // A closed path may repeat its first point at the end.
+    if closed && points.len() > 3 && points.first().zip(points.last()).is_some_and(|(a, b)| a.near(*b, 1e-12)) {
+        points.pop();
+    }
     let style = match str_param(p, "style") {
         Some(n) => style_named(s.doc()?, n)?,
         None => current_style(s)?,
@@ -86,7 +91,6 @@ fn run_walladd(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => style.default_height,
         Some(v) => v.as_f64().filter(|h| h.is_finite() && *h > 0.0).ok_or_else(|| bad("walladd", "`height` must be a positive number (mm)"))?,
     };
-    let closed = bool_or(p, "closed", false);
     let wall = params(s.doc()?, style, points, closed, justification, height);
     Ok(json!({ "handle": add(s, wall)?.hex() }))
 }
@@ -122,36 +126,38 @@ impl WallAddM {
         let d = s.doc().ok()?;
         Some(params(d, self.style.clone(), pts, closed, self.justification, self.height))
     }
-    /// Adds the wall drawn so far and remembers its settings.
+    /// Adds the wall drawn so far and remembers its settings; the points stay when the wall
+    /// can't be added.
     fn finish(&mut self, s: &mut Session, closed: bool) -> Result<()> {
-        let pts = std::mem::take(&mut self.pts);
-        if let Some(w) = self.wall(s, pts, closed) {
+        if let Some(w) = self.wall(s, self.pts.clone(), closed) {
             add(s, w)?;
         }
+        self.pts.clear();
         s.last_used.wall_style = self.style.name.clone();
         s.last_used.wall_justification = self.justification;
         Ok(())
+    }
+    /// The reason the wall along `pts` can't be drawn, if any.
+    fn problem(&self, s: &Session, pts: Vec<Vec2>, closed: bool) -> Option<String> {
+        self.wall(s, pts, closed).and_then(|w| w.validate().err()).map(|e| e.to_string())
     }
     fn point(&mut self, s: &mut Session, p: Vec2) -> Result<Step> {
         if self.pts.last().is_some_and(|l| l.near(p, 1e-9)) {
             return Ok(Step::Continue);
         }
+        if self.pts.len() >= MAX_WALL_VERTICES {
+            s.echo(format!("A wall has at most {MAX_WALL_VERTICES} points: press Enter to draw it, then start the next wall."));
+            return Ok(Step::Continue);
+        }
         let mut pts = self.pts.clone();
         pts.push(p);
         if pts.len() >= 2
-            && let Some(Err(e)) = self.wall(s, pts.clone(), false).map(|w| w.generate())
+            && let Some(why) = self.problem(s, pts.clone(), false)
         {
-            s.echo(e.to_string());
+            s.echo(why);
             return Ok(Step::Continue);
         }
         self.pts = pts;
-        // A wall holds a bounded number of points: a longer run goes on as a new wall from the
-        // last point.
-        if self.pts.len() >= MAX_WALL_VERTICES {
-            let last = self.pts.last().copied();
-            self.finish(s, false)?;
-            self.pts.extend(last);
-        }
         Ok(Step::Continue)
     }
     fn keyword(&mut self, s: &mut Session, k: &str) -> Result<Step> {
@@ -163,8 +169,8 @@ impl WallAddM {
                 self.pts.pop();
             }
             "Close" if self.pts.len() >= 3 => {
-                if let Some(Err(e)) = self.wall(s, self.pts.clone(), true).map(|w| w.generate()) {
-                    s.echo(e.to_string());
+                if let Some(why) = self.problem(s, self.pts.clone(), true) {
+                    s.echo(why);
                     return Ok(Step::Continue);
                 }
                 self.finish(s, true)?;
@@ -193,7 +199,10 @@ impl WallAddM {
                 self.justification = WallJustification::parse(t).ok_or_else(|| other("Enter Left, Center or Right."))?;
             }
             (Ask::Height, Some(t)) => {
-                self.height = number(t)
+                // Millimetres whatever the drawing's units: a plain number, not a distance.
+                self.height = t
+                    .parse::<f64>()
+                    .ok()
                     .filter(|h| h.is_finite() && *h > 0.0 && *h <= cadcraft_doc::MAX_WALL_SIZE_MM)
                     .ok_or_else(|| other("Requires a positive height in millimetres."))?;
             }
@@ -226,9 +235,7 @@ impl Interactive for WallAddM {
         match self.ask {
             Ask::Style => return Prompt::new("Enter wall style name or [?]", Accept::TEXT).default(self.style.name.clone()),
             Ask::Justification => {
-                return Prompt::new("Enter justification", super::curves::KW)
-                    .kw(&["Left", "Center", "Right"])
-                    .default(self.justification.name().to_lowercase());
+                return Prompt::new("Enter justification", super::curves::KW).kw(&["Left", "Center", "Right"]).default(self.justification.name());
             }
             Ask::Height => return Prompt::new("Enter wall height (mm)", Accept::NUMBER).default(format!("{}", self.height)),
             Ask::Point => {}
@@ -319,8 +326,11 @@ fn update_walls(d: &mut Drawing, name: &str, new: &WallStyle) -> Result<(usize, 
             kept += 1;
             continue;
         }
-        d.regenerate_wall(h, &w).map_err(|e| other(e.to_string()))?;
-        done += 1;
+        // A wall that can't take the new style keeps its old one rather than stop the rest.
+        match d.regenerate_wall(h, &w) {
+            Ok(()) => done += 1,
+            Err(_) => kept += 1,
+        }
     }
     Ok((done, kept))
 }
@@ -346,8 +356,15 @@ fn run_wallstyleedit(s: &mut Session, p: &Value) -> Result<Value> {
         return rename_style(s, name, to);
     }
     let d = s.doc()?;
+    let changes = ["description", "components", "defaultHeight", "copyFrom"].iter().any(|k| p.get(*k).is_some_and(|v| !v.is_null()));
+    if !changes {
+        // Only a name: the style as it is, nothing changed.
+        let st = style_named(d, name)?;
+        return Ok(json!({ "style": style_value(&st, d.wall_style(name).is_none()), "regenerated": 0, "kept": 0 }));
+    }
     let mut st = match (d.wall_style_or_standard(name), str_param(p, "copyFrom")) {
-        (Some(st), _) => st,
+        (Some(_), Some(_)) => return Err(bad("wallstyleedit", format!("a wall style named \"{name}\" already exists: `copyFrom` makes a new one"))),
+        (Some(st), None) => st,
         (None, Some(from)) => WallStyle { name: name.to_string(), ..style_named(d, from)? },
         (None, None) if p.get("components").is_some() => {
             WallStyle { name: name.to_string(), description: String::new(), components: Vec::new(), default_height: 2500.0 }

@@ -16,7 +16,7 @@
 //! the wall without regenerating it.
 
 use cadcraft_color::Color;
-use cadcraft_geom::{PolyVertex, Vec2, Vec3};
+use cadcraft_geom::{PolyVertex, Vec2, Vec3, shoelace};
 use serde::{Deserialize, Serialize};
 
 use crate::{DocError, EntityKind, Hatch, HatchLoop, Line, LwPolyline, RawTag, Result};
@@ -25,8 +25,7 @@ use crate::{DocError, EntityKind, Hatch, HatchLoop, Line, LwPolyline, RawTag, Re
 pub const WALL_APP: &str = "CADCRAFT_WALL";
 /// Most components a wall style has.
 pub const MAX_WALL_COMPONENTS: usize = 16;
-/// Most vertices of one wall's path. Longer runs are drawn as several walls; this keeps a
-/// wall's extended data far below the 16 KB other programs allow per object.
+/// Most vertices of one wall's path; a longer run is drawn as several walls.
 pub const MAX_WALL_VERTICES: usize = 64;
 /// Thickest component and highest wall, in millimetres (100 m).
 pub const MAX_WALL_SIZE_MM: f64 = 100_000.0;
@@ -34,19 +33,21 @@ pub const MAX_WALL_SIZE_MM: f64 = 100_000.0;
 pub const MAX_WALL_NAME_CHARS: usize = 64;
 /// Longest wall style description, in characters.
 pub const MAX_WALL_DESCRIPTION_CHARS: usize = 255;
-/// Most bytes of a wall's parameters as JSON in its extended data.
+/// Most bytes of a wall's parameters in its extended data, each non-ASCII character counted as
+/// the 7-byte `\U+XXXX` escape an older DXF file writes it as: within the 16 KB other programs
+/// allow per object whatever the file version.
 pub const MAX_WALL_XDATA_BYTES: usize = 12_000;
 /// The layer of a wall's block reference and lines.
 pub const WALL_LAYER: &str = "A-WALL";
 /// The layer of a wall's hatches.
 pub const WALL_PATTERN_LAYER: &str = "A-WALL-PATT";
-/// A corner sharper than this ratio of miter length to offset (an angle under about 29°
-/// between two segments) can't be drawn as a clean miter: the path is refused.
-const MITER_LIMIT: f64 = 4.0;
+/// The smallest angle between two segments of a wall: a sharper corner has no clean miter (its
+/// point would run far past the wall's faces), so the path is refused.
+const MIN_CORNER_DEGREES: f64 = 30.0;
 /// The first string of a wall's extended data, naming the format of the JSON that follows.
 const XDATA_FORMAT: &str = "WALL1";
-/// Characters of JSON per xdata string, so a string stays under the 255-byte limit even when
-/// every character is written as a `\U+XXXX` escape (see `json_strings`).
+/// Bytes per xdata string, each non-ASCII character counted as its 7-byte `\U+XXXX` escape: a
+/// string stays under the 255-byte limit in any file version (see `json_strings`).
 const XDATA_CHUNK_COST: usize = 240;
 
 fn one() -> f64 {
@@ -74,7 +75,7 @@ pub enum ComponentFunction {
     Finish,
     /// A membrane (vapour control layer, breather membrane): drawn as a line, no thickness.
     Membrane,
-    /// An air gap or a service void: no hatch.
+    /// An air gap or a service void: never hatched.
     AirGap,
 }
 
@@ -96,13 +97,14 @@ pub struct WallComponent {
     pub pattern_angle: f64,
     #[serde(default)]
     pub color: Color,
-    /// Cleanup priority: where two walls meet, a component with a lower number cuts through
-    /// components with a higher one.
+    /// Cleanup priority, kept with the style for joining walls (not used yet): where two walls
+    /// meet, a component with a lower number will cut through components with a higher one.
     #[serde(default = "default_priority")]
     pub priority: u16,
     #[serde(default)]
     pub function: ComponentFunction,
-    /// Whether the component wraps into the reveal of an opening (a lining around a window).
+    /// Whether the component wraps into the reveal of an opening, as a lining around a window
+    /// does; kept with the style for openings (not used yet).
     #[serde(default)]
     pub returns_at_openings: bool,
 }
@@ -330,8 +332,10 @@ impl WallParams {
         if self.path.iter().any(|p| !p.is_finite() || p.x.abs() > 1e12 || p.y.abs() > 1e12) {
             return Err(invalid("A wall point is not a finite coordinate."));
         }
-        // Thickness and segment lengths are checked when the geometry is built.
-        self.generate().map(|_| ())
+        // Thickness and segment lengths are checked when the geometry is built, the data size
+        // when the extended data is.
+        self.generate()?;
+        self.to_xdata().map(|_| ())
     }
 
     /// The total thickness in drawing units.
@@ -381,13 +385,15 @@ impl WallParams {
     /// The hatch of component `c` between offsets `outer` and `inner`, when it has a pattern.
     fn hatch(&self, c: &WallComponent, joins: &[Join], outer: f64, inner: f64) -> Option<WallPiece> {
         let pattern = c.pattern.trim();
-        if pattern.is_empty() || c.thickness <= 0.0 || c.function == ComponentFunction::Membrane {
+        if pattern.is_empty() || c.thickness <= 0.0 || matches!(c.function, ComponentFunction::Membrane | ComponentFunction::AirGap) {
             return None;
         }
         let a = offset(joins, outer);
         let b = offset(joins, inner);
         let loops = if self.closed {
-            vec![hatch_loop(a, true), hatch_loop(b, false)]
+            // The larger ring is the outer boundary, whichever way the wall was drawn.
+            let a_outer = shoelace(&a).abs() >= shoelace(&b).abs();
+            vec![hatch_loop(a, a_outer), hatch_loop(b, !a_outer)]
         } else {
             let mut ring = a;
             ring.extend(b.into_iter().rev());
@@ -411,16 +417,16 @@ impl WallParams {
         Some(WallPiece { layer: WALL_PATTERN_LAYER, color: c.color, kind: EntityKind::Hatch(hatch) })
     }
 
-    /// Whether `kinds` are still the geometry these parameters generate: a wall whose block was
-    /// edited elsewhere (another program, BEDIT) no longer matches, and is not regenerated, so
-    /// those edits are never overwritten.
-    pub fn matches<'a>(&self, kinds: impl IntoIterator<Item = &'a EntityKind>) -> bool {
+    /// Whether `entities` are still the objects these parameters generate, with their layers and
+    /// colours: a wall whose block was edited elsewhere (another program, BEDIT) no longer
+    /// matches, and is not regenerated, so those edits are never overwritten.
+    pub fn matches<'a>(&self, entities: impl IntoIterator<Item = &'a crate::Entity>) -> bool {
         let Ok(pieces) = self.generate() else { return false };
         let tol = 1e-6 * self.path.iter().fold(1.0_f64, |m, p| m.max(p.x.abs()).max(p.y.abs())).max(self.thickness());
-        let mut it = kinds.into_iter();
+        let mut it = entities.into_iter();
         for p in &pieces {
-            let Some(k) = it.next() else { return false };
-            if !same_shape(&p.kind, k, tol) {
+            let Some(e) = it.next() else { return false };
+            if !e.common.layer.eq_ignore_ascii_case(p.layer) || e.common.color != p.color || !same_shape(&p.kind, &e.kind, tol) {
                 return false;
             }
         }
@@ -431,11 +437,12 @@ impl WallParams {
     /// in `1000` strings.
     pub fn to_xdata(&self) -> Result<Vec<RawTag>> {
         let json = serde_json::to_string(self).map_err(|e| invalid(format!("The wall can't be saved: {e}")))?;
-        if json.len() > MAX_WALL_XDATA_BYTES {
-            return Err(invalid("The wall has too much data to save; split it into shorter walls."));
+        let strings = json_strings(&json);
+        if strings.iter().map(|s| xdata_cost(s)).sum::<usize>() > MAX_WALL_XDATA_BYTES {
+            return Err(invalid("The wall has too much data to save: use fewer points, or shorter style and component names."));
         }
         let mut tags = vec![tag(1001, WALL_APP), tag(1000, XDATA_FORMAT)];
-        tags.extend(json_strings(&json).into_iter().map(|s| RawTag { code: 1000, value: s }));
+        tags.extend(strings.into_iter().map(|s| RawTag { code: 1000, value: s }));
         Ok(tags)
     }
 
@@ -449,8 +456,10 @@ impl WallParams {
             return None;
         }
         let mut json = String::new();
+        let mut cost = 0usize;
         for t in strings {
-            if json.len() + t.value.len() > MAX_WALL_XDATA_BYTES {
+            cost = cost.saturating_add(xdata_cost(&t.value));
+            if cost > MAX_WALL_XDATA_BYTES {
                 return None;
             }
             json.push_str(&t.value);
@@ -500,10 +509,12 @@ impl crate::Drawing {
         for v in &mut p.path {
             *v -= origin;
         }
+        // Everything that can fail comes before the drawing changes.
+        p.validate()?;
+        common.xdata = p.replace_xdata(&common.xdata)?;
+        common.layer = WALL_LAYER.into();
         let block = self.wall_block(&p)?;
         self.ensure_wall_layers();
-        common.layer = WALL_LAYER.into();
-        common.xdata = p.replace_xdata(&common.xdata)?;
         let insert = crate::Insert { block, insert: v3(origin), ..Default::default() };
         self.add(space, common, EntityKind::Insert(insert))
     }
@@ -514,8 +525,10 @@ impl crate::Drawing {
         let e = self.entity(h).ok_or(DocError::NoEntity(h))?;
         let EntityKind::Insert(old) = &e.kind else { return Err(invalid("The object is not a wall.")) };
         let old = old.block.clone();
+        p.validate()?;
         let xdata = p.replace_xdata(&e.common.xdata)?;
         let block = self.wall_block(p)?;
+        self.ensure_wall_layers();
         self.modify_entity(h, |e| {
             if let EntityKind::Insert(i) = &mut e.kind {
                 i.block = block;
@@ -533,7 +546,7 @@ impl crate::Drawing {
         let (EntityKind::Insert(i), Some(p)) = (&e.kind, wall_of(e)) else { return false };
         let unit = |s: f64| (s.abs() - 1.0).abs() <= 1e-9;
         let Some(b) = self.block(&i.block) else { return false };
-        unit(i.scale.x) && unit(i.scale.y) && i.cols <= 1 && i.rows <= 1 && p.matches(b.entities.iter().map(|e| &e.kind))
+        unit(i.scale.x) && unit(i.scale.y) && i.cols <= 1 && i.rows <= 1 && p.matches(b.entities.iter().map(AsRef::as_ref))
     }
 
     /// A new anonymous block holding wall `p`'s geometry; returns its name.
@@ -580,9 +593,8 @@ pub fn wall_of(e: &crate::Entity) -> Option<WallParams> {
     }
 }
 
-/// `xdata` without a wall's application data (EXPLODE pieces and walls turned into plain blocks
-/// keep the rest).
-pub fn without_wall_xdata(xdata: &[RawTag]) -> Vec<RawTag> {
+/// `xdata` without a wall's application data.
+fn without_wall_xdata(xdata: &[RawTag]) -> Vec<RawTag> {
     let mut out = Vec::with_capacity(xdata.len());
     let mut ours = false;
     for t in xdata {
@@ -633,8 +645,11 @@ fn joins(path: &[Vec2], closed: bool, reach: f64) -> Result<Vec<Join>> {
             (Some(a), Some(b)) => {
                 let m = a.perp() + b.perp();
                 let half = m.len() / 2.0; // cos of half the turn
-                if half < 1.0 / MITER_LIMIT {
-                    return Err(invalid("A wall can't turn this sharply: keep corners above 30 degrees."));
+                // `half` is the sine of half the angle between the two segments.
+                if half < (MIN_CORNER_DEGREES / 2.0).to_radians().sin() {
+                    return Err(invalid(format!(
+                        "A wall can't turn this sharply: the angle between two segments must be at least {MIN_CORNER_DEGREES} degrees."
+                    )));
                 }
                 m.normalized() / half
             }
@@ -727,9 +742,10 @@ fn same_shape(a: &EntityKind, b: &EntityKind, tol: f64) -> bool {
     }
 }
 
-/// JSON text in strings short enough for a DXF xdata string. Backslashes are written as
-/// `\`, so no string contains a DXF `\U+` escape, and a string ends before 240 bytes even
-/// when its characters are written as `\U+XXXX` escapes for an older file version.
+/// JSON text in strings short enough for a DXF xdata string. A JSON escaped backslash (two
+/// characters) is written as the six characters `\u005c`, so no string contains a DXF `\U+`
+/// escape; a string costs at most [`XDATA_CHUNK_COST`] bytes ([`xdata_cost`]) and never begins
+/// or ends with a space.
 fn json_strings(json: &str) -> Vec<String> {
     let mut safe = String::with_capacity(json.len());
     let mut it = json.chars();
@@ -748,7 +764,7 @@ fn json_strings(json: &str) -> Vec<String> {
         }
     }
     let chars: Vec<char> = safe.chars().collect();
-    let cost = |c: &char| if c.is_ascii() { 1 } else { 7 * c.len_utf16() };
+    let cost = |c: &char| char_cost(*c);
     let mut out = Vec::new();
     let mut start = 0;
     while start < chars.len() {
@@ -774,6 +790,17 @@ fn json_strings(json: &str) -> Vec<String> {
         start = end;
     }
     out
+}
+
+/// The bytes `c` takes in an xdata string in any file version: an older DXF writes a non-ASCII
+/// character as a 7-byte `\U+XXXX` escape (two of them outside the Basic Multilingual Plane).
+fn char_cost(c: char) -> usize {
+    if c.is_ascii() { 1 } else { 7 * c.len_utf16() }
+}
+
+/// The bytes `s` takes in an xdata string in any file version ([`char_cost`]).
+fn xdata_cost(s: &str) -> usize {
+    s.chars().map(char_cost).sum()
 }
 
 #[cfg(test)]

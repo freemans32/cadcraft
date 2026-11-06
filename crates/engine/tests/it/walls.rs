@@ -82,8 +82,8 @@ fn walladd_at_the_command_line_takes_style_justification_and_points() {
     assert_eq!(all.len(), 1);
     let w = &all[0].1;
     assert_eq!((w.style.name.as_str(), w.justification), (PARTITION, WallJustification::Center));
-    // The next wall takes the same settings, through the French alias.
-    for t in ["mur", "0,5000", "2000,5000", ""] {
+    // The next wall takes the same settings.
+    for t in ["walladd", "0,5000", "2000,5000", ""] {
         s.cmdline(t).unwrap();
     }
     let all = walls(&s);
@@ -236,4 +236,63 @@ fn extreme_wall_values_are_refused_without_drawing_anything() {
     }
     assert!(walls(&s).is_empty());
     assert!(s.doc().unwrap().wall_styles.is_empty());
+}
+
+#[test]
+fn walladd_options_undo_and_style_list() {
+    let mut s = metric();
+    for t in ["walladd", "st", "?"] {
+        s.cmdline(t).unwrap();
+    }
+    assert!(s.log.iter().any(|l| l.contains("Wall styles:") && l.contains(PARTITION)), "{:?}", s.log);
+    // `?` lists and asks again; then the style, a height in millimetres, points, an undo.
+    for t in [BRICK, "h", "2700", "0,0", "3000,0", "3000,3000", "u", "3000,-3000", ""] {
+        s.cmdline(t).unwrap();
+    }
+    assert!(s.running.is_none());
+    let all = walls(&s);
+    assert_eq!(all.len(), 1);
+    let w = &all[0].1;
+    assert_eq!((w.style.name.as_str(), w.height), (BRICK, 2700.0));
+    assert_eq!(path(w), [(0.0, 0.0), (3000.0, 0.0), (3000.0, -3000.0)]);
+    // A height is a plain number of millimetres.
+    for t in ["walladd", "h"] {
+        s.cmdline(t).unwrap();
+    }
+    assert!(s.cmdline("10'").is_err() || s.log.iter().any(|l| l.contains("millimetres")));
+}
+
+#[test]
+fn walladd_stops_taking_points_at_the_limit_and_draws_on_enter() {
+    let mut s = metric();
+    s.cmdline("walladd").unwrap();
+    for i in 0..70 {
+        s.cmdline(&format!("{},{}", i * 1000, (i % 2) * 1000)).unwrap();
+    }
+    assert!(s.log.iter().any(|l| l.contains("at most 64 points")), "{:?}", s.log.iter().rev().take(3).collect::<Vec<_>>());
+    s.cmdline("").unwrap();
+    assert!(s.running.is_none());
+    let all = walls(&s);
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].1.path.len(), 64);
+}
+
+#[test]
+fn walladd_json_closed_may_repeat_the_first_point() {
+    let mut s = metric();
+    let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [4000, 0], [4000, -3000], [0, -3000], [0, 0]], "closed": true})).unwrap());
+    let w = wall(&s, a);
+    assert!(w.closed);
+    assert_eq!(w.path.len(), 4);
+}
+
+#[test]
+fn wallstyleedit_with_only_a_name_changes_nothing() {
+    let mut s = metric();
+    let r = s.execute("wallstyleedit", &json!({"name": BRICK})).unwrap();
+    assert_eq!(r["style"]["name"], json!(BRICK));
+    assert_eq!(r["style"]["standard"], json!(true));
+    assert!(s.doc().unwrap().wall_styles.is_empty(), "nothing copied into the drawing");
+    assert!(s.execute("wallstyleedit", &json!({"name": "Nope"})).is_err());
+    assert!(s.execute("wallstyleedit", &json!({"name": BRICK, "copyFrom": "Concrete 200"})).is_err(), "copyFrom never overwrites");
 }
