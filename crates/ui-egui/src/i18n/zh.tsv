@@ -968,6 +968,8 @@
 	Viewport {id}	视口 {id}
 	Viewports	视口
 	W	W
+	Wall	墙体
+	Wall Styles	墙体样式
 	WCS	WCS
 	White	白色
 	Width factor	宽度因子
