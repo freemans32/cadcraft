@@ -3,6 +3,7 @@
 
 pub(crate) mod annoscale;
 mod annotate;
+mod arch;
 mod array;
 mod audit;
 pub(crate) mod blocks;
@@ -194,6 +195,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(modify::specs());
         v.extend(draworder::specs());
         v.extend(array::specs());
+        v.extend(arch::specs());
         v.extend(modify2::specs());
         v.extend(groups::specs());
         v.extend(gripcmds::specs());

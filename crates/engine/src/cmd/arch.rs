@@ -1,0 +1,415 @@
+//! Architectural walls (AutoCAD Architecture's names): WALLADD draws a wall of a wall style
+//! along picked points, WALLSTYLEEDIT lists, creates, changes, renames and deletes the
+//! drawing's wall styles and regenerates the walls that use a changed style.
+
+use cadcraft_doc::{
+    Common, Drawing, Entity, EntityKind, Handle, Line, MAX_WALL_VERTICES, WallComponent, WallJustification, WallParams, WallStyle, WallUnits, wall_of,
+};
+use cadcraft_geom::Vec2;
+use serde_json::{Value, json};
+
+use super::machines::number;
+use super::{CommandSpec, bad, bool_or, str_param};
+
+use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
+
+pub fn specs() -> Vec<CommandSpec> {
+    vec![
+        CommandSpec::new("walladd", "Wall", run_walladd)
+            .alias(&["mur"])
+            .params("{points, closed?, style?, justification?: left|center|right, height? (mm)} → {handle}")
+            .interactive(|s| Ok(Box::new(WallAddM::new(s)))),
+        CommandSpec::new("wallstyleedit", "Wall Styles", run_wallstyleedit).alias(&["stylemur"]).params(
+            "{} → {styles, current} | {name, description?, components?: [{name, thickness (mm), pattern?, patternScale?, \
+             patternAngle?, color?, priority?, function?: structure|insulation|finish|membrane|airGap, returnsAtOpenings?}], \
+             defaultHeight? (mm), copyFrom?} → {style, regenerated, kept} | {delete: name} | {name, rename: newName}",
+        ),
+    ]
+}
+
+fn other(m: impl Into<String>) -> EngineError {
+    EngineError::Other(m.into())
+}
+
+/// The style new walls use: the last one used this session, else the drawing's first, else the
+/// first standard style.
+fn current_style(s: &Session) -> Result<WallStyle> {
+    let d = s.doc()?;
+    let last = &s.last_used.wall_style;
+    let found = (!last.is_empty()).then(|| d.wall_style_or_standard(last)).flatten();
+    found.or_else(|| d.available_wall_styles().into_iter().next()).ok_or_else(|| other("No wall style is available."))
+}
+
+fn style_named(d: &Drawing, name: &str) -> Result<WallStyle> {
+    d.wall_style_or_standard(name).ok_or_else(|| other(format!("Cannot find wall style \"{}\".", name.trim())))
+}
+
+/// The parameters of a wall along `points` (drawing coordinates).
+fn params(d: &Drawing, style: WallStyle, points: Vec<Vec2>, closed: bool, justification: WallJustification, height: f64) -> WallParams {
+    WallParams { style, path: points, closed, justification, height, units: WallUnits::of(d) }
+}
+
+/// Adds wall `p` (drawing coordinates) to the current space; a standard style it uses is copied
+/// into the drawing first, so the drawing keeps it and it can be changed.
+fn add(s: &mut Session, p: WallParams) -> Result<Handle> {
+    p.validate().map_err(|e| other(e.to_string()))?;
+    let space = s.space();
+    let common = s.current_common();
+    let d = s.doc_mut()?;
+    if d.wall_style(&p.style.name).is_none() {
+        d.wall_styles.push(p.style.clone());
+    }
+    d.add_wall(&space, common, p).map_err(|e| other(e.to_string()))
+}
+
+fn justification_param(cmd: &str, p: &Value, default: WallJustification) -> Result<WallJustification> {
+    match str_param(p, "justification") {
+        Some(t) => WallJustification::parse(t).ok_or_else(|| bad(cmd, "justification must be left, center or right")),
+        None => Ok(default),
+    }
+}
+
+fn run_walladd(s: &mut Session, p: &Value) -> Result<Value> {
+    let raw = p.get("points").and_then(Value::as_array).ok_or_else(|| bad("walladd", "`points` (2 or more) is required"))?;
+    if raw.len() > MAX_WALL_VERTICES {
+        return Err(bad("walladd", format!("a wall has at most {MAX_WALL_VERTICES} points")));
+    }
+    let points: Vec<Vec2> = super::distinct_points(
+        &raw.iter().map(super::point_value).collect::<Option<Vec<_>>>().ok_or_else(|| bad("walladd", "`points` must be [x, y] points"))?,
+    );
+    let style = match str_param(p, "style") {
+        Some(n) => style_named(s.doc()?, n)?,
+        None => current_style(s)?,
+    };
+    let justification = justification_param("walladd", p, WallJustification::Left)?;
+    let height = match p.get("height") {
+        None | Some(Value::Null) => style.default_height,
+        Some(v) => v.as_f64().filter(|h| h.is_finite() && *h > 0.0).ok_or_else(|| bad("walladd", "`height` must be a positive number (mm)"))?,
+    };
+    let closed = bool_or(p, "closed", false);
+    let wall = params(s.doc()?, style, points, closed, justification, height);
+    Ok(json!({ "handle": add(s, wall)?.hex() }))
+}
+
+/// What WALLADD is asking for besides points.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Ask {
+    Point,
+    Style,
+    Justification,
+    Height,
+}
+
+struct WallAddM {
+    pts: Vec<Vec2>,
+    style: WallStyle,
+    justification: WallJustification,
+    /// Millimetres.
+    height: f64,
+    ask: Ask,
+}
+
+impl WallAddM {
+    fn new(s: &Session) -> Self {
+        let style = current_style(s).unwrap_or_else(|_| cadcraft_doc::standard_wall_styles().into_iter().next().unwrap_or_else(fallback_style));
+        let height = style.default_height;
+        WallAddM { pts: Vec::new(), style, justification: s.last_used.wall_justification, height, ask: Ask::Point }
+    }
+    fn settings(&self, s: &mut Session) {
+        s.echo(format!("Current settings: Style = {}, Justification = {}, Height = {}", self.style.name, self.justification.name(), self.height));
+    }
+    fn wall(&self, s: &Session, pts: Vec<Vec2>, closed: bool) -> Option<WallParams> {
+        let d = s.doc().ok()?;
+        Some(params(d, self.style.clone(), pts, closed, self.justification, self.height))
+    }
+    /// Adds the wall drawn so far and remembers its settings.
+    fn finish(&mut self, s: &mut Session, closed: bool) -> Result<()> {
+        let pts = std::mem::take(&mut self.pts);
+        if let Some(w) = self.wall(s, pts, closed) {
+            add(s, w)?;
+        }
+        s.last_used.wall_style = self.style.name.clone();
+        s.last_used.wall_justification = self.justification;
+        Ok(())
+    }
+    fn point(&mut self, s: &mut Session, p: Vec2) -> Result<Step> {
+        if self.pts.last().is_some_and(|l| l.near(p, 1e-9)) {
+            return Ok(Step::Continue);
+        }
+        let mut pts = self.pts.clone();
+        pts.push(p);
+        if pts.len() >= 2
+            && let Some(Err(e)) = self.wall(s, pts.clone(), false).map(|w| w.generate())
+        {
+            s.echo(e.to_string());
+            return Ok(Step::Continue);
+        }
+        self.pts = pts;
+        // A wall holds a bounded number of points: a longer run goes on as a new wall from the
+        // last point.
+        if self.pts.len() >= MAX_WALL_VERTICES {
+            let last = self.pts.last().copied();
+            self.finish(s, false)?;
+            self.pts.extend(last);
+        }
+        Ok(Step::Continue)
+    }
+    fn keyword(&mut self, s: &mut Session, k: &str) -> Result<Step> {
+        match k {
+            "STyle" => self.ask = Ask::Style,
+            "Justification" => self.ask = Ask::Justification,
+            "Height" => self.ask = Ask::Height,
+            "Undo" => {
+                self.pts.pop();
+            }
+            "Close" if self.pts.len() >= 3 => {
+                if let Some(Err(e)) = self.wall(s, self.pts.clone(), true).map(|w| w.generate()) {
+                    s.echo(e.to_string());
+                    return Ok(Step::Continue);
+                }
+                self.finish(s, true)?;
+                return Ok(Step::Done);
+            }
+            _ => {}
+        }
+        Ok(Step::Continue)
+    }
+    fn option(&mut self, s: &mut Session, i: &Input) -> Result<Step> {
+        let text = match i {
+            Input::Text(t) | Input::Keyword(t) => Some(t.trim().to_string()),
+            _ => None,
+        };
+        match (self.ask, text.as_deref()) {
+            (Ask::Style, Some("?")) => {
+                let names: Vec<String> = s.doc()?.available_wall_styles().into_iter().map(|st| st.name).collect();
+                s.echo(format!("Wall styles: {}", names.join(", ")));
+                return Ok(Step::Continue);
+            }
+            (Ask::Style, Some(t)) if !t.is_empty() => {
+                self.style = style_named(s.doc()?, t)?;
+                self.height = self.style.default_height;
+            }
+            (Ask::Justification, Some(t)) => {
+                self.justification = WallJustification::parse(t).ok_or_else(|| other("Enter Left, Center or Right."))?;
+            }
+            (Ask::Height, Some(t)) => {
+                self.height = number(t)
+                    .filter(|h| h.is_finite() && *h > 0.0 && *h <= cadcraft_doc::MAX_WALL_SIZE_MM)
+                    .ok_or_else(|| other("Requires a positive height in millimetres."))?;
+            }
+            _ => {}
+        }
+        self.ask = Ask::Point;
+        self.settings(s);
+        Ok(Step::Continue)
+    }
+}
+
+fn fallback_style() -> WallStyle {
+    WallStyle {
+        name: "Wall".into(),
+        description: String::new(),
+        components: vec![WallComponent::new("Wall", 200.0, Default::default())],
+        default_height: 2500.0,
+    }
+}
+
+impl Interactive for WallAddM {
+    fn name(&self) -> &'static str {
+        "WALLADD"
+    }
+    fn begin(&mut self, s: &mut Session) -> Result<Step> {
+        self.settings(s);
+        Ok(Step::Continue)
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        match self.ask {
+            Ask::Style => return Prompt::new("Enter wall style name or [?]", Accept::TEXT).default(self.style.name.clone()),
+            Ask::Justification => {
+                return Prompt::new("Enter justification", super::curves::KW)
+                    .kw(&["Left", "Center", "Right"])
+                    .default(self.justification.name().to_lowercase());
+            }
+            Ask::Height => return Prompt::new("Enter wall height (mm)", Accept::NUMBER).default(format!("{}", self.height)),
+            Ask::Point => {}
+        }
+        let last = self.pts.last().copied();
+        match self.pts.len() {
+            0 => Prompt::new("Specify start point of wall", Accept::POINT).kw(&["STyle", "Justification", "Height"]),
+            1 | 2 => Prompt::new("Specify next point", Accept::POINT).kw(&["Undo"]).base_opt(last),
+            _ => Prompt::new("Specify next point", Accept::POINT).kw(&["Close", "Undo"]).base_opt(last),
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if self.ask != Ask::Point {
+            return self.option(s, &i);
+        }
+        match i {
+            Input::Keyword(k) => self.keyword(s, &k),
+            Input::Point(p) => self.point(s, p),
+            Input::Enter => {
+                if self.pts.len() >= 2 {
+                    self.finish(s, false)?;
+                    Ok(Step::Done)
+                } else {
+                    Ok(Step::Cancel)
+                }
+            }
+            _ => Ok(Step::Continue),
+        }
+    }
+    fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
+        // The path, in case the wall itself can't be drawn there (a corner too sharp).
+        let mut pts = self.pts.clone();
+        pts.push(c);
+        pts.windows(2).filter_map(|w| Some(EntityKind::Line(Line { a: w.first()?.to3(0.0), b: w.get(1)?.to3(0.0) }))).collect()
+    }
+    fn preview_objects(&self, s: &Session, c: Vec2) -> Vec<Entity> {
+        if self.ask != Ask::Point || self.pts.is_empty() {
+            return Vec::new();
+        }
+        let mut pts = self.pts.clone();
+        if pts.last().is_some_and(|l| !l.near(c, 1e-9)) {
+            pts.push(c);
+        }
+        let Some(Ok(pieces)) = self.wall(s, pts, false).map(|w| w.generate()) else { return Vec::new() };
+        pieces
+            .into_iter()
+            .map(|p| Entity { handle: Handle(0), common: Common { layer: p.layer.into(), color: p.color, ..Common::default() }, kind: p.kind })
+            .collect()
+    }
+}
+
+// =====================================================================================
+// WALLSTYLEEDIT
+// =====================================================================================
+
+fn style_value(st: &WallStyle, standard: bool) -> Value {
+    let mut v = serde_json::to_value(st).unwrap_or(Value::Null);
+    if let Some(o) = v.as_object_mut() {
+        o.insert("standard".into(), json!(standard));
+        o.insert("thickness".into(), json!(st.thickness()));
+    }
+    v
+}
+
+fn styles_value(s: &Session) -> Result<Value> {
+    let d = s.doc()?;
+    let styles: Vec<Value> = d.available_wall_styles().iter().map(|st| style_value(st, d.wall_style(&st.name).is_none())).collect();
+    Ok(json!({ "styles": styles, "current": current_style(s).map(|st| st.name).unwrap_or_default() }))
+}
+
+/// Every wall of the drawing (model and layouts) whose style is `name`.
+fn walls_of_style(d: &Drawing, name: &str) -> Vec<(Handle, WallParams)> {
+    let spaces = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities));
+    spaces.flat_map(|st| st.iter()).filter_map(|e| wall_of(e).filter(|w| w.style.name.eq_ignore_ascii_case(name)).map(|w| (e.handle, w))).collect()
+}
+
+/// Gives the walls of style `name` the style `new`: regenerated when intact, else left as they
+/// are (edited elsewhere, or scaled). Returns how many were regenerated and kept.
+fn update_walls(d: &mut Drawing, name: &str, new: &WallStyle) -> Result<(usize, usize)> {
+    let (mut done, mut kept) = (0, 0);
+    for (h, mut w) in walls_of_style(d, name) {
+        if !d.wall_is_intact(h) {
+            kept += 1;
+            continue;
+        }
+        w.style = new.clone();
+        if w.validate().is_err() {
+            kept += 1;
+            continue;
+        }
+        d.regenerate_wall(h, &w).map_err(|e| other(e.to_string()))?;
+        done += 1;
+    }
+    Ok((done, kept))
+}
+
+fn components_param(p: &Value) -> Result<Option<Vec<WallComponent>>> {
+    match p.get("components") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => {
+            if v.as_array().is_some_and(|a| a.len() > cadcraft_doc::MAX_WALL_COMPONENTS) {
+                return Err(bad("wallstyleedit", format!("a wall style has 1 to {} components", cadcraft_doc::MAX_WALL_COMPONENTS)));
+            }
+            serde_json::from_value(v.clone()).map(Some).map_err(|e| bad("wallstyleedit", format!("`components`: {e}")))
+        }
+    }
+}
+
+fn run_wallstyleedit(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(name) = str_param(p, "delete") {
+        return delete_style(s, name);
+    }
+    let Some(name) = str_param(p, "name").map(str::trim).filter(|n| !n.is_empty()) else { return styles_value(s) };
+    if let Some(to) = str_param(p, "rename") {
+        return rename_style(s, name, to);
+    }
+    let d = s.doc()?;
+    let mut st = match (d.wall_style_or_standard(name), str_param(p, "copyFrom")) {
+        (Some(st), _) => st,
+        (None, Some(from)) => WallStyle { name: name.to_string(), ..style_named(d, from)? },
+        (None, None) if p.get("components").is_some() => {
+            WallStyle { name: name.to_string(), description: String::new(), components: Vec::new(), default_height: 2500.0 }
+        }
+        (None, None) => return Err(other(format!("Cannot find wall style \"{name}\"; give `components` or `copyFrom` to create it."))),
+    };
+    if let Some(t) = str_param(p, "description") {
+        st.description = t.to_string();
+    }
+    if let Some(c) = components_param(p)? {
+        st.components = c;
+    }
+    if let Some(h) = p.get("defaultHeight").filter(|v| !v.is_null()) {
+        st.default_height = h.as_f64().ok_or_else(|| bad("wallstyleedit", "`defaultHeight` must be a number (mm)"))?;
+    }
+    st.validate().map_err(|e| bad("wallstyleedit", e.to_string()))?;
+    let d = s.doc_mut()?;
+    let old_name = d.wall_style(name).map(|o| o.name.clone()).unwrap_or_else(|| st.name.clone());
+    match d.wall_styles.iter_mut().find(|o| o.name.eq_ignore_ascii_case(name)) {
+        Some(o) => *o = st.clone(),
+        None => d.wall_styles.push(st.clone()),
+    }
+    let (regenerated, kept) = update_walls(d, &old_name, &st)?;
+    Ok(json!({ "style": style_value(&st, false), "regenerated": regenerated, "kept": kept }))
+}
+
+fn delete_style(s: &mut Session, name: &str) -> Result<Value> {
+    let d = s.doc_mut()?;
+    let n = name.trim();
+    if d.wall_style(n).is_none() {
+        return Err(other(format!("The drawing has no wall style \"{n}\" (standard styles can't be deleted).")));
+    }
+    // Walls keep their own copy of the style; only the drawing's entry goes.
+    d.wall_styles.retain(|o| !o.name.eq_ignore_ascii_case(n));
+    if s.last_used.wall_style.eq_ignore_ascii_case(n) {
+        s.last_used.wall_style.clear();
+    }
+    styles_value(s)
+}
+
+fn rename_style(s: &mut Session, name: &str, to: &str) -> Result<Value> {
+    let to = to.trim();
+    let d = s.doc_mut()?;
+    let Some(mut st) = d.wall_style(name).cloned() else { return Err(other(format!("The drawing has no wall style \"{}\".", name.trim()))) };
+    if d.wall_style(to).is_some_and(|o| !o.name.eq_ignore_ascii_case(&st.name)) {
+        return Err(other(format!("A wall style named \"{to}\" already exists.")));
+    }
+    let old = std::mem::replace(&mut st.name, to.to_string());
+    st.validate().map_err(|e| bad("wallstyleedit", e.to_string()))?;
+    if let Some(o) = d.wall_styles.iter_mut().find(|o| o.name.eq_ignore_ascii_case(&old)) {
+        *o = st.clone();
+    }
+    // The walls' copies take the new name: their geometry doesn't change.
+    for (h, mut w) in walls_of_style(d, &old) {
+        w.style.name = st.name.clone();
+        let x = d.entity(h).map(|e| w.replace_xdata(&e.common.xdata)).transpose().map_err(|e| other(e.to_string()))?;
+        if let Some(x) = x {
+            d.modify_entity(h, |e| e.common.xdata = x).map_err(|e| other(e.to_string()))?;
+        }
+    }
+    if s.last_used.wall_style.eq_ignore_ascii_case(&old) {
+        s.last_used.wall_style = st.name.clone();
+    }
+    styles_value(s)
+}
