@@ -245,3 +245,87 @@ fn a_drawing_style_takes_the_place_of_a_standard_one_of_the_same_name() {
     assert!(d.wall_style_or_standard("Partition 72/48").is_some());
     assert!(d.wall_style_or_standard("nope").is_none());
 }
+
+fn insert_of(d: &Drawing, h: crate::Handle) -> crate::Insert {
+    match &d.entity(h).expect("wall").kind {
+        EntityKind::Insert(i) => i.clone(),
+        k => panic!("not a block reference: {k:?}"),
+    }
+}
+
+#[test]
+fn a_wall_is_a_block_reference_at_its_first_point_carrying_its_data() {
+    let mut d = Drawing::new_metric();
+    let p = wall(brick(), &[(1000.0, 2000.0), (4000.0, 2000.0), (4000.0, -1000.0)], false, WallJustification::Left);
+    let h = d.add_wall(&crate::Space::Model, crate::Common::default(), p).expect("add");
+    let e = d.entity(h).expect("wall").clone();
+    assert_eq!(e.common.layer, WALL_LAYER);
+    let i = insert_of(&d, h);
+    assert_eq!(i.insert, Vec3::new(1000.0, 2000.0, 0.0));
+    let kept = wall_of(&e).expect("wall data");
+    assert_eq!(kept.path, [Vec2::ZERO, Vec2::new(3000.0, 0.0), Vec2::new(3000.0, -3000.0)], "path in block coordinates");
+    let b = d.block(&i.block).expect("block");
+    assert!(b.anonymous);
+    assert!(b.entities.iter().all(|e| e.common.layer == WALL_LAYER || e.common.layer == WALL_PATTERN_LAYER));
+    assert_eq!(d.layer(WALL_PATTERN_LAYER).map(|l| l.color), Some(Color::Index(8)));
+    assert!(d.wall_is_intact(h));
+}
+
+#[test]
+fn regenerating_a_wall_replaces_its_block_and_keeps_a_copy_s_block() {
+    let mut d = Drawing::new_metric();
+    let h = d
+        .add_wall(&crate::Space::Model, crate::Common::default(), wall(brick(), &[(0.0, 0.0), (3000.0, 0.0)], false, WallJustification::Left))
+        .expect("add");
+    let first = insert_of(&d, h).block;
+    // A copy of the reference shares the block until one of them changes.
+    let copy = d.entity(h).expect("wall").as_ref().clone();
+    let c = d.add(&crate::Space::Model, copy.common, copy.kind).expect("copy");
+    let mut p = wall_of(d.entity(h).expect("wall")).expect("data");
+    p.style = style("Concrete 200");
+    d.regenerate_wall(h, &p).expect("regenerate");
+    let second = insert_of(&d, h).block;
+    assert_ne!(first, second);
+    assert!(d.block(&first).is_some(), "the copy still uses the first block");
+    assert_eq!(wall_of(d.entity(h).expect("wall")).map(|w| w.style.name), Some("Concrete 200".to_string()));
+    assert!(d.wall_is_intact(h) && d.wall_is_intact(c));
+    // Once nothing refers to a wall block, regenerating drops it.
+    d.regenerate_wall(c, &p).expect("regenerate copy");
+    assert!(d.block(&first).is_none());
+}
+
+#[test]
+fn an_edited_or_scaled_wall_is_no_longer_intact() {
+    let mut d = Drawing::new_metric();
+    let h = d
+        .add_wall(&crate::Space::Model, crate::Common::default(), wall(brick(), &[(0.0, 0.0), (3000.0, 0.0)], false, WallJustification::Left))
+        .expect("add");
+    let name = insert_of(&d, h).block;
+    let mut scaled = d.clone();
+    scaled
+        .modify_entity(h, |e| {
+            if let EntityKind::Insert(i) = &mut e.kind {
+                i.scale = Vec3::new(2.0, 1.0, 1.0)
+            }
+        })
+        .expect("scale");
+    assert!(!scaled.wall_is_intact(h));
+    let mut mirrored = d.clone();
+    mirrored
+        .modify_entity(h, |e| {
+            if let EntityKind::Insert(i) = &mut e.kind {
+                i.scale = Vec3::new(-1.0, 1.0, 1.0)
+            }
+        })
+        .expect("mirror");
+    assert!(mirrored.wall_is_intact(h), "a mirrored wall is still the same wall");
+    let mut b = d.block(&name).expect("block").as_ref().clone();
+    let extra = d.new_handle();
+    b.entities.push(crate::Entity {
+        handle: extra,
+        common: crate::Common::default(),
+        kind: EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 1.0, 0.0) }),
+    });
+    d.blocks.insert(name, std::sync::Arc::new(b));
+    assert!(!d.wall_is_intact(h));
+}
