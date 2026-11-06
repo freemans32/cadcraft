@@ -1,0 +1,247 @@
+use super::*;
+use crate::{Drawing, standard_wall_styles};
+
+fn style(name: &str) -> WallStyle {
+    standard_wall_styles().into_iter().find(|s| s.name == name).expect("standard style")
+}
+
+fn brick() -> WallStyle {
+    style("Brick 200 + mineral wool 120 + plasterboard")
+}
+
+fn wall(style: WallStyle, path: &[(f64, f64)], closed: bool, justification: WallJustification) -> WallParams {
+    WallParams {
+        style,
+        path: path.iter().map(|&(x, y)| Vec2::new(x, y)).collect(),
+        closed,
+        justification,
+        height: 2500.0,
+        units: WallUnits::default(),
+    }
+}
+
+fn points(k: &EntityKind) -> Vec<(f64, f64)> {
+    let round = |v: f64| (v * 1e6).round() / 1e6;
+    match k {
+        EntityKind::LwPolyline(p) => p.vertices.iter().map(|v| (round(v.p.x), round(v.p.y))).collect(),
+        EntityKind::Line(l) => vec![(round(l.a.x), round(l.a.y)), (round(l.b.x), round(l.b.y))],
+        _ => Vec::new(),
+    }
+}
+
+fn lines(p: &[WallPiece]) -> Vec<Vec<(f64, f64)>> {
+    p.iter().filter(|x| x.layer == WALL_LAYER).map(|x| points(&x.kind)).collect()
+}
+
+fn hatches(p: &[WallPiece]) -> Vec<&Hatch> {
+    p.iter()
+        .filter_map(|x| match &x.kind {
+            EntityKind::Hatch(h) => Some(h),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_standard_styles_are_valid_and_measure_what_their_names_say() {
+    let all = standard_wall_styles();
+    assert_eq!(all.len(), 6);
+    for s in &all {
+        s.validate().unwrap_or_else(|e| panic!("{}: {e}", s.name));
+    }
+    let thickness: Vec<f64> = all.iter().map(WallStyle::thickness).collect();
+    assert_eq!(thickness, [200.0, 332.5, 327.5, 256.5, 73.0, 98.0]);
+}
+
+#[test]
+fn a_straight_wall_has_a_line_per_boundary_two_end_lines_and_a_hatch_per_hatched_component() {
+    let p = wall(brick(), &[(0.0, 0.0), (1000.0, 0.0)], false, WallJustification::Left).generate().expect("geometry");
+    assert_eq!(
+        lines(&p),
+        [
+            vec![(0.0, 0.0), (1000.0, 0.0)],
+            vec![(0.0, -200.0), (1000.0, -200.0)],
+            vec![(0.0, -320.0), (1000.0, -320.0)],
+            vec![(0.0, -332.5), (1000.0, -332.5)],
+            vec![(0.0, 0.0), (0.0, -332.5)],
+            vec![(1000.0, 0.0), (1000.0, -332.5)],
+        ]
+    );
+    // Brick and mineral wool are hatched, the plasterboard is not.
+    let h = hatches(&p);
+    assert_eq!(h.iter().map(|h| h.pattern.as_str()).collect::<Vec<_>>(), ["ANSI31", "ZIGZAG"]);
+    assert_eq!(h.first().map(|h| h.loops.len()), Some(1));
+    assert!(p.iter().all(|x| matches!(x.kind, EntityKind::Hatch(_)) == (x.layer == WALL_PATTERN_LAYER)));
+}
+
+#[test]
+fn justification_puts_the_path_on_the_exterior_face_the_middle_or_the_interior_face() {
+    let faces = |j| {
+        let p = wall(style("Concrete 200"), &[(0.0, 0.0), (1000.0, 0.0)], false, j).generate().expect("geometry");
+        let l = lines(&p);
+        (l.first().and_then(|v| v.first().copied()), l.get(1).and_then(|v| v.first().copied()))
+    };
+    assert_eq!(faces(WallJustification::Left), (Some((0.0, 0.0)), Some((0.0, -200.0))));
+    assert_eq!(faces(WallJustification::Center), (Some((0.0, 100.0)), Some((0.0, -100.0))));
+    assert_eq!(faces(WallJustification::Right), (Some((0.0, 200.0)), Some((0.0, 0.0))));
+}
+
+#[test]
+fn a_corner_is_mitered_on_every_boundary() {
+    // Drawn clockwise: the exterior is outside the corner.
+    let p =
+        wall(style("Concrete 200"), &[(0.0, 0.0), (1000.0, 0.0), (1000.0, -1000.0)], false, WallJustification::Left).generate().expect("geometry");
+    let l = lines(&p);
+    assert_eq!(l.first(), Some(&vec![(0.0, 0.0), (1000.0, 0.0), (1000.0, -1000.0)]));
+    assert_eq!(l.get(1), Some(&vec![(0.0, -200.0), (800.0, -200.0), (800.0, -1000.0)]));
+}
+
+#[test]
+fn a_closed_wall_is_a_ring_without_end_lines() {
+    let path = [(0.0, 0.0), (5000.0, 0.0), (5000.0, -4000.0), (0.0, -4000.0)];
+    let p = wall(brick(), &path, true, WallJustification::Left).generate().expect("geometry");
+    let l: Vec<&WallPiece> = p.iter().filter(|x| x.layer == WALL_LAYER).collect();
+    assert_eq!(l.len(), 4, "one closed line per boundary, no end lines");
+    assert!(l.iter().all(|x| matches!(&x.kind, EntityKind::LwPolyline(pl) if pl.closed && pl.vertices.len() == 4)));
+    assert_eq!(points(&l[3].kind), [(332.5, -332.5), (4667.5, -332.5), (4667.5, -3667.5), (332.5, -3667.5)]);
+    let h = hatches(&p);
+    assert!(h.iter().all(|h| h.loops.len() == 2 && h.loops[0].outer && !h.loops[1].outer));
+}
+
+#[test]
+fn membranes_are_lines_and_air_gaps_are_not_hatched() {
+    let p = wall(style("Timber frame 145"), &[(0.0, 0.0), (1000.0, 0.0)], false, WallJustification::Left).generate().expect("geometry");
+    // Eight components with two membranes: 9 boundaries, the membranes sharing a position with
+    // the boundary before them, so 7 distinct lines, plus 2 end lines.
+    assert_eq!(lines(&p).len(), 9);
+    let patterns: Vec<&str> = hatches(&p).iter().map(|h| h.pattern.as_str()).collect();
+    assert_eq!(patterns, ["ANSI32", "ANSI33", "ZIGZAG"]);
+}
+
+#[test]
+fn paths_that_cannot_be_drawn_cleanly_are_refused() {
+    let c = || style("Concrete 200");
+    let refused = |path: &[(f64, f64)], closed| wall(c(), path, closed, WallJustification::Center).generate().is_err();
+    assert!(refused(&[(0.0, 0.0), (0.0, 0.0)], false), "two points in the same place");
+    assert!(refused(&[(0.0, 0.0), (1000.0, 0.0), (500.0, 0.0)], false), "folds back");
+    assert!(refused(&[(0.0, 0.0), (1000.0, 0.0), (0.0, 100.0)], false), "corner sharper than the miter limit");
+    assert!(refused(&[(0.0, 0.0), (1000.0, 0.0), (1000.0, 50.0), (2000.0, 50.0)], false), "segment shorter than the corners need");
+    assert!(refused(&[(0.0, 0.0), (1000.0, 0.0)], true), "a closed wall needs three points");
+    assert!(!refused(&[(0.0, 0.0), (1000.0, 0.0), (1000.0, 1000.0)], false));
+}
+
+#[test]
+fn hostile_parameters_are_refused() {
+    let ok = wall(brick(), &[(0.0, 0.0), (1000.0, 0.0)], false, WallJustification::Left);
+    assert!(ok.validate().is_ok());
+    let with = |f: &dyn Fn(&mut WallParams)| {
+        let mut p = ok.clone();
+        f(&mut p);
+        p.validate().is_err()
+    };
+    assert!(with(&|p| p.style.components[0].thickness = f64::NAN));
+    assert!(with(&|p| p.style.components[0].thickness = -1.0));
+    assert!(with(&|p| p.style.components[0].thickness = f64::INFINITY));
+    assert!(with(&|p| p.style.components[0].thickness = 0.0), "only membranes have no thickness");
+    assert!(with(&|p| p.style.components[0].function = ComponentFunction::Membrane), "a membrane has no thickness");
+    assert!(with(&|p| p.style.components[0].pattern_scale = 0.0));
+    assert!(with(&|p| p.style.components[0].name = " ".into()));
+    assert!(with(&|p| p.style.name = "x".repeat(MAX_WALL_NAME_CHARS + 1)));
+    assert!(with(&|p| p.style.components = vec![p.style.components[0].clone(); MAX_WALL_COMPONENTS + 1]));
+    assert!(with(&|p| p.style.components.clear()));
+    assert!(with(&|p| p.height = 0.0));
+    assert!(with(&|p| p.height = f64::NAN));
+    assert!(with(&|p| p.units.mm_per_unit = 0.0));
+    assert!(with(&|p| p.path[1] = Vec2::new(f64::NAN, 0.0)));
+    assert!(with(&|p| p.path = (0..=MAX_WALL_VERTICES).map(|i| Vec2::new(i as f64 * 1000.0, 0.0)).collect()));
+}
+
+#[test]
+fn a_wall_survives_its_extended_data() {
+    let mut s = brick();
+    s.name = "Brique \"pleine\" 20 cm \\ façade".into();
+    s.components[1].name = "Laine de verre  —  é".into();
+    let p = wall(s, &[(0.0, 0.0), (1234.5, 0.0), (1234.5, -3000.0)], false, WallJustification::Center);
+    let x = p.to_xdata().expect("xdata");
+    assert_eq!(x.first().map(|t| (t.code, t.value.as_str())), Some((1001, WALL_APP)));
+    for t in x.iter().skip(1) {
+        assert_eq!(t.code, 1000);
+        assert!(!t.value.starts_with(' ') && !t.value.ends_with(' '), "{:?}", t.value);
+        let cost: usize = t.value.chars().map(|c| if c.is_ascii() { 1 } else { 7 * c.len_utf16() }).sum();
+        assert!(cost <= 240, "{cost}");
+        assert!(!t.value.contains("\\U+"), "{:?}", t.value);
+    }
+    assert_eq!(WallParams::from_xdata(&x), Some(p.clone()));
+    // Other applications' data stays around ours.
+    let other = vec![tag(1001, "OTHER"), tag(1000, "keep")];
+    let mixed = p.replace_xdata(&[other.clone(), x.clone()].concat()).expect("replace");
+    assert_eq!(without_wall_xdata(&mixed), other);
+    assert_eq!(WallParams::from_xdata(&mixed), Some(p));
+}
+
+#[test]
+fn damaged_extended_data_is_not_a_wall() {
+    let p = wall(brick(), &[(0.0, 0.0), (1000.0, 0.0)], false, WallJustification::Left);
+    let x = p.to_xdata().expect("xdata");
+    assert_eq!(WallParams::from_xdata(&x[..x.len() - 1]), None, "truncated JSON");
+    assert_eq!(WallParams::from_xdata(&[tag(1001, "OTHER"), tag(1000, "WALL1")]), None);
+    assert_eq!(WallParams::from_xdata(&[tag(1001, WALL_APP), tag(1000, "WALL9"), tag(1000, "{}")]), None);
+    let huge: Vec<RawTag> =
+        [tag(1001, WALL_APP), tag(1000, "WALL1")].into_iter().chain(std::iter::repeat_n(tag(1000, &"x".repeat(240)), 100)).collect();
+    assert_eq!(WallParams::from_xdata(&huge), None);
+    // Valid JSON with parameters that can't be drawn.
+    let mut bad = p.clone();
+    bad.path = vec![Vec2::ZERO, Vec2::ZERO];
+    let json = serde_json::to_string(&bad).expect("json");
+    assert_eq!(WallParams::from_xdata(&[tag(1001, WALL_APP), tag(1000, "WALL1"), tag(1000, &json)]), None);
+}
+
+#[test]
+fn a_wall_matches_its_own_geometry_and_not_an_edited_one() {
+    let p = wall(brick(), &[(0.0, 0.0), (1000.0, 0.0), (1000.0, -2000.0)], false, WallJustification::Left);
+    let kinds: Vec<EntityKind> = p.generate().expect("geometry").into_iter().map(|x| x.kind).collect();
+    assert!(p.matches(&kinds));
+    let mut edited = kinds.clone();
+    if let Some(EntityKind::LwPolyline(l)) = edited.first_mut() {
+        l.vertices[1].p.x += 1.0;
+    }
+    assert!(!p.matches(&edited));
+    assert!(!p.matches(&kinds[..kinds.len() - 1]));
+    let mut more = kinds;
+    more.push(EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 0.0, 0.0) }));
+    assert!(!p.matches(&more));
+}
+
+#[test]
+fn units_turn_millimetres_into_drawing_units() {
+    let mut d = Drawing::new_metric();
+    assert_eq!(WallUnits::of(&d), WallUnits { mm_per_unit: 1.0, metric_patterns: true });
+    d.header.set_i64("INSUNITS", 6);
+    let metres = WallUnits::of(&d);
+    assert_eq!(metres.mm_per_unit, 1000.0);
+    let mut p = wall(style("Concrete 200"), &[(0.0, 0.0), (10.0, 0.0)], false, WallJustification::Left);
+    p.units = metres;
+    let g = p.generate().expect("geometry");
+    assert_eq!(lines(&g).get(1), Some(&vec![(0.0, -0.2), (10.0, -0.2)]));
+    // An imperial drawing in inches draws the same pattern density as a metric one in mm.
+    let imperial = WallUnits::of(&Drawing::new_imperial());
+    assert_eq!(imperial, WallUnits { mm_per_unit: 25.4, metric_patterns: false });
+    assert!((imperial.pattern_scale(6.0) - 6.0).abs() < 1e-12);
+    assert!((metres.pattern_scale(6.0) - 0.006).abs() < 1e-12);
+}
+
+#[test]
+fn a_drawing_style_takes_the_place_of_a_standard_one_of_the_same_name() {
+    let mut d = Drawing::new_metric();
+    assert_eq!(d.available_wall_styles().len(), 6);
+    let mut mine = style("Concrete 200");
+    mine.name = "concrete 200".into();
+    mine.components[0].thickness = 180.0;
+    d.wall_styles.push(mine.clone());
+    let all = d.available_wall_styles();
+    assert_eq!(all.len(), 6);
+    assert_eq!(all.first(), Some(&mine));
+    assert_eq!(d.wall_style_or_standard("CONCRETE 200"), Some(mine));
+    assert!(d.wall_style_or_standard("Partition 72/48").is_some());
+    assert!(d.wall_style_or_standard("nope").is_none());
+}
