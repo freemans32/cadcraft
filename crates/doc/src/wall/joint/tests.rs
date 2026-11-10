@@ -96,6 +96,47 @@ fn an_l_corner_of_one_style_is_one_outline_with_the_corner_hatched_once() {
     assert!(d.wall_is_intact(a) && d.wall_is_intact(b));
 }
 
+fn pattern_area(d: &Drawing, hs: &[Handle], pattern: &str) -> f64 {
+    hs.iter()
+        .flat_map(|h| pieces(d, *h))
+        .filter_map(|k| match k {
+            EntityKind::Hatch(h) if h.pattern == pattern => {
+                Some(h.loops.iter().map(|l| shoelace(&l.vertices.iter().map(|v| v.p).collect::<Vec<_>>()).abs()).sum::<f64>())
+            }
+            _ => None,
+        })
+        .sum()
+}
+
+/// Brick 200, then mineral wool 120 and plasterboard 12.5 on the other side of the path.
+fn brick_l_layers(d: &Drawing, hs: &[Handle]) -> (f64, f64) {
+    (pattern_area(d, hs, "ANSI31"), pattern_area(d, hs, "ZIGZAG"))
+}
+
+#[test]
+fn an_l_corner_wraps_each_layer_around_the_corner_whichever_side_the_brick_is_on() {
+    // Drawn going round the corner clockwise: the brick is on the outside of the L.
+    let mut d = Drawing::new_metric();
+    let a = add(&mut d, BRICK, &[(0.0, -3000.0), (0.0, 0.0)], WallJustification::Left);
+    let b = add(&mut d, BRICK, &[(0.0, 0.0), (4000.0, 0.0)], WallJustification::Left);
+    assert_eq!(d.cleanup_walls(&Space::Model).unwrap(), 2);
+    let (brick, wool) = brick_l_layers(&d, &[a, b]);
+    // Brick along x = 0..200 and y = -200..0, wool inside it, each corner square counted once.
+    assert!(close(brick, 200.0 * 3000.0 + 4000.0 * 200.0 - 200.0 * 200.0), "{brick}");
+    assert!(close(wool, 120.0 * 2800.0 + 3800.0 * 120.0 - 120.0 * 120.0), "{wool}");
+
+    // Drawn the other way round: the brick is on the inside, and the wool and plasterboard
+    // wrap round the outside of it rather than the brick cutting through them.
+    let mut d = Drawing::new_metric();
+    let a = add(&mut d, BRICK, &[(4000.0, 0.0), (0.0, 0.0)], WallJustification::Left);
+    let b = add(&mut d, BRICK, &[(0.0, 0.0), (0.0, -3000.0)], WallJustification::Left);
+    assert_eq!(d.cleanup_walls(&Space::Model).unwrap(), 2);
+    let (brick, wool) = brick_l_layers(&d, &[a, b]);
+    // Brick along y = 0..200 and x = -200..0, wool outside it out to (-320, 320).
+    assert!(close(brick, 4200.0 * 200.0 + 200.0 * 3200.0 - 200.0 * 200.0), "{brick}");
+    assert!(close(wool, 4320.0 * 120.0 + 120.0 * 3320.0 - 120.0 * 120.0), "{wool}");
+}
+
 #[test]
 fn a_partition_stops_on_the_face_of_the_wall_it_meets() {
     let mut d = Drawing::new_metric();
