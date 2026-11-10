@@ -1543,22 +1543,6 @@
 	Deletes every layer that has no objects on it	Elimina cada capa que no contiene objetos
 	LISP Commands	Comandos LISP
 	LISP command	Comando LISP
-	Could not check for updates.	No se pudo comprobar si hay actualizaciones.
-	Find All	Buscar todo
-	Find what:	Buscar:
-	Match case	Coincidir mayúsculas y minúsculas
-	Replace	Reemplazar
-	Replace All	Reemplazar todo
-	Replace with:	Reemplazar por:
-	Replacement text	Texto de reemplazo
-	Results	Resultados
-	Searches the current space.	Busca en el espacio actual.
-	Text to find	Texto que buscar
-	Whole words	Palabras completas
-	Nothing found	No se encontró nada
-	Ctrl+Enter to apply	Ctrl+Intro para aplicar
-	Edit Text	Editar texto
-	The drawing changed. Close the window and open it again.	El dibujo ha cambiado. Cierra la ventana y vuelve a abrirla.
 
 # ArtCraft feature naming
 	Additional Tools	Herramientas adicionales
