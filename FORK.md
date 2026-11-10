@@ -53,7 +53,7 @@ Remotes : `origin` = ce fork, `upstream` = `storytold/cadcraft`. Ne pousse jamai
 
 Cette section sert à reprendre le travail dans une nouvelle conversation, avec n'importe quelle IA. Elle est mise à jour en continu (règle n° 2) : date, ce qui est fait, ce qui reste.
 
-*Dernière mise à jour : 10 novembre 2026 (analyse des PR sur a3d9348).*
+*Dernière mise à jour : 10 novembre 2026 (raccords de murs L, T, X).*
 
 ### Fait
 
@@ -95,7 +95,13 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
 
 1. **PR 2 des murs** : onglet Architecture dans les Jeux d'outils, dialogue Styles de murs, section Mur dans Propriétés. Dans `perso`, elle peut s'appuyer sur la PR #2855 (Jeux d'outils utilisateur).
 2. **PR 3 des murs** : raccords L, T et X entre murs, selon les priorités des composants.
-   - **Demandé par Guillaume le 10 novembre ; plan présenté, en attente de validation** : raccords calculés d'après la géométrie et la priorité des couches (maquette « Nettoyage des jonctions »), mémorisés dans les données du mur (`joints`) pour que `matches()` reste déterministe ; recalcul après WALLADD / WALLEDIT / WALLSTYLEEDIT et commande `WALLCLEANUP` (JONCTION) pour le reste (après un MOVE, un ERASE…).
+   - **Fait le 10 novembre, validé par Guillaume** : commit `feat/murs` `76fa82f` « walls: join walls where they meet (L, T and X junctions) », fusionné dans `feat/gaines` puis `perso` (sur `perso`, `cargo test --workspace` : 4 545 tests, 0 échec).
+     - `crates/doc/src/wall/joint.rs` : chaque couche de chaque segment est un quadrilatère convexe ; on lui soustrait les couches des autres murs de priorité plus forte (numéro plus petit) ; à priorité égale, le mur le plus récent cède la zone commune (`ForeignBand.yields`, hachurée une seule fois) et aucun trait ne les sépare. Les traits sont tracés là où la matière change (rien, couche plus faible d'un autre mur, autre couche du même mur une seule fois). Une extrémité libre est amenée jusqu'au parement opposé du mur qu'elle touche (`EndCut`), qu'elle soit trop courte ou trop longue.
+     - `WallParams.joints` (absent si le mur est seul : ancien dessin inchangé, les murs existants restent reconnus) garde les coupes et les contours des voisins dans les coordonnées du bloc : le mur se redessine à partir de ses seules données.
+     - `Drawing::cleanup_walls(space)` ; recalcul automatique après WALLADD, WALLEDIT, WALLSTYLEEDIT ; commande `WALLCLEANUP` (bouton « Jonctions de murs » de l'onglet Architecture) après MOVE, COPY, ERASE.
+     - Cœur des cloisons standard passé en priorité 810 (au-dessus des parements à 800) pour qu'une cloison s'arrête sur le parement du mur rencontré.
+     - Vérifié : tests unitaires (L, T cloison, T brique, X, mur tourné, mur déplacé, données étendues), tests d'intégration (WALLADD, WALLCLEANUP après MOVE, WALLEDIT, annulation), aller-retour DXF/DWG de murs raccordés, captures d'écran (rendu `ui.render`). Le rendu `ui.render` coupe le motif ZIGZAG aux bords d'une fenêtre : défaut d'affichage existant, sans rapport.
+     - Pas fait : recalcul automatique après MOVE/STRETCH (utiliser WALLCLEANUP), murs en arc, désactiver le raccord d'une extrémité.
 3. **Ouvertures** : portes, fenêtres et baies.
 4. **Gaines CVC** : étapes 1 et 2 faites (10 novembre). Réponses de Guillaume :
    - **Tertiaire (CTA)** en premier, la VMC logement plus tard.
