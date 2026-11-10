@@ -95,6 +95,7 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
 
 1. **PR 2 des murs** : onglet Architecture dans les Jeux d'outils, dialogue Styles de murs, section Mur dans Propriétés. Dans `perso`, elle peut s'appuyer sur la PR #2855 (Jeux d'outils utilisateur).
 2. **PR 3 des murs** : raccords L, T et X entre murs, selon les priorités des composants.
+   - **Demandé par Guillaume le 10 novembre ; plan présenté, en attente de validation** : raccords calculés d'après la géométrie et la priorité des couches (maquette « Nettoyage des jonctions »), mémorisés dans les données du mur (`joints`) pour que `matches()` reste déterministe ; recalcul après WALLADD / WALLEDIT / WALLSTYLEEDIT et commande `WALLCLEANUP` (JONCTION) pour le reste (après un MOVE, un ERASE…).
 3. **Ouvertures** : portes, fenêtres et baies.
 4. **Gaines CVC** : étapes 1 et 2 faites (10 novembre). Réponses de Guillaume :
    - **Tertiaire (CTA)** en premier, la VMC logement plus tard.
