@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 craft-ui = { workspace = true }
 cadcraft-geom = { workspace = true }
+cadcraft-hvac = { workspace = true }
 cadcraft-color = { workspace = true }
 cadcraft-doc = { workspace = true }
 cadcraft-render = { workspace = true }

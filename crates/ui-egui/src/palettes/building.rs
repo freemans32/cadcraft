@@ -1,0 +1,232 @@
+//! The Tool Sets tabs for building objects: Architecture (wall styles to draw with, wall
+//! editing) and HVAC (spaces, air terminals). Their content comes from the drawing (its wall styles), so they are drawn here
+//! rather than from a fixed list of tools.
+
+use cadcraft_color::Color;
+use cadcraft_doc::{ComponentFunction, TerminalKind};
+use egui::{Rect, Sense, Stroke, pos2, vec2};
+
+use crate::CadApp;
+use crate::theme::Tokens;
+
+/// The building tabs, after Drafting and Modeling.
+pub(super) const TABS: &[&str] = &["Architecture", "HVAC"];
+
+fn header(ui: &mut egui::Ui, title: &str) {
+    let t = Tokens::get();
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
+    ui.painter().text(
+        pos2(r.left() + 10.0, r.center().y),
+        egui::Align2::LEFT_CENTER,
+        crate::i18n::t(title),
+        egui::FontId::proportional(12.5),
+        t.text,
+    );
+}
+
+fn separator(ui: &mut egui::Ui) {
+    let t = Tokens::get();
+    let (sr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+    ui.painter().hline(sr.x_range().shrink(6.0), sr.center().y, Stroke::new(1.0, t.border));
+}
+
+/// A full-width button with a small picture drawn by `paint` on its left; true when clicked.
+fn row_button(ui: &mut egui::Ui, label: &str, selected: bool, paint: impl FnOnce(&egui::Painter, Rect)) -> bool {
+    let t = Tokens::get();
+    let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
+    let r = r.shrink2(vec2(6.0, 2.0));
+    let p = ui.painter();
+    if selected || resp.hovered() {
+        p.rect_filled(r, 4.0, if selected { t.tab_active } else { t.chrome_dark });
+    }
+    paint(p, Rect::from_min_size(pos2(r.left() + 6.0, r.center().y - 8.0), vec2(30.0, 16.0)));
+    p.text(pos2(r.left() + 44.0, r.center().y), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(12.0), t.text);
+    crate::icons::describe_control(ui, &resp, label, Some(selected), false);
+    resp.clicked()
+}
+
+/// A wall style's components side by side, as wide as they are thick.
+fn paint_style(p: &egui::Painter, r: Rect, st: &cadcraft_doc::WallStyle) {
+    let total = st.thickness().max(1e-9);
+    let mut x = r.left();
+    for c in &st.components {
+        let w = (c.thickness / total) as f32 * r.width();
+        // A component with its own colour shows it; one on the layer's colour a shade for what
+        // it does, so a wall's make-up reads at a glance.
+        let fill = match c.color {
+            Color::ByLayer | Color::ByBlock => match c.function {
+                ComponentFunction::Structure => egui::Color32::from_rgb(176, 122, 98),
+                ComponentFunction::Insulation => egui::Color32::from_rgb(233, 198, 74),
+                ComponentFunction::Finish => egui::Color32::from_gray(225),
+                ComponentFunction::Membrane => egui::Color32::from_rgb(91, 156, 255),
+                ComponentFunction::AirGap => egui::Color32::from_gray(45),
+            },
+            other => {
+                let rgb = other.resolve(Color::Index(8), Color::Index(8));
+                egui::Color32::from_rgb(rgb.0, rgb.1, rgb.2)
+            }
+        };
+        p.rect_filled(Rect::from_min_size(pos2(x, r.top()), vec2(w.max(1.0), r.height())), 0.0, fill);
+        x += w;
+    }
+    p.rect_stroke(r, 0.0, Stroke::new(1.0, egui::Color32::from_gray(40)), egui::StrokeKind::Inside);
+}
+
+/// The body of building tab `tab`.
+pub(super) fn body(app: &mut CadApp, ui: &mut egui::Ui, tab: &str) {
+    match tab {
+        "Architecture" => architecture(app, ui),
+        "HVAC" => hvac(app, ui),
+        _ => {}
+    }
+}
+
+/// A small picture of air terminal `kind` in `r`, as it is drawn in plan.
+fn paint_terminal(p: &egui::Painter, r: Rect, kind: TerminalKind) {
+    let t = Tokens::get();
+    let s = Stroke::new(1.2, t.text);
+    let c = r.center();
+    let h = r.height() / 2.0;
+    match kind {
+        TerminalKind::SquareCeiling => {
+            let q = Rect::from_center_size(c, vec2(2.0 * h, 2.0 * h));
+            p.rect_stroke(q, 0.0, s, egui::StrokeKind::Inside);
+            p.circle_stroke(c, h * 0.35, s);
+            for corner in [q.left_top(), q.right_top(), q.left_bottom(), q.right_bottom()] {
+                p.line_segment([c + (corner - c) * 0.4, corner], s);
+            }
+        }
+        TerminalKind::Round => {
+            p.circle_stroke(c, h, s);
+            p.circle_stroke(c, h * 0.45, s);
+        }
+        TerminalKind::Rectangular => {
+            let q = Rect::from_center_size(c, vec2(r.width(), h));
+            p.rect_stroke(q, 0.0, s, egui::StrokeKind::Inside);
+            for k in [-0.25f32, 0.0, 0.25] {
+                p.line_segment([pos2(q.left() + 2.0, c.y + k * h), pos2(q.right() - 2.0, c.y + k * h)], s);
+            }
+        }
+        TerminalKind::Linear => {
+            let q = Rect::from_center_size(c, vec2(r.width(), h * 0.6));
+            p.rect_stroke(q, 0.0, s, egui::StrokeKind::Inside);
+            p.line_segment([pos2(q.left(), c.y), pos2(q.right(), c.y)], s);
+        }
+        TerminalKind::Extract => {
+            p.circle_stroke(c, h, s);
+            let d = h * 0.7;
+            p.line_segment([c + vec2(-d, -d), c + vec2(d, d)], s);
+            p.line_segment([c + vec2(-d, d), c + vec2(d, -d)], s);
+        }
+    }
+}
+
+/// A space outline with lines for its label.
+fn paint_space(p: &egui::Painter, r: Rect) {
+    let t = Tokens::get();
+    let s = Stroke::new(1.2, t.text);
+    p.rect_stroke(r, 0.0, s, egui::StrokeKind::Inside);
+    p.line_segment([pos2(r.left() + 6.0, r.center().y - 2.0), pos2(r.right() - 6.0, r.center().y - 2.0)], Stroke::new(1.0, t.text_dim));
+    p.line_segment([pos2(r.left() + 9.0, r.center().y + 3.0), pos2(r.right() - 9.0, r.center().y + 3.0)], Stroke::new(1.0, t.text_dim));
+}
+
+fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
+    let current = app.session.last_used.air_terminal.kind;
+    let mut start: Option<&'static str> = None;
+    let mut terminal: Option<TerminalKind> = None;
+    let mut distribute = false;
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        header(ui, "Spaces");
+        if row_button(ui, crate::i18n::t("Space"), false, paint_space) {
+            start = Some("spaceadd");
+        }
+        if row_button(ui, crate::i18n::t("Edit Space"), false, |_, _| {}) {
+            start = Some("spaceedit");
+        }
+        ui.add_space(6.0);
+        separator(ui);
+        header(ui, "Air Terminals");
+        for (kind, label) in [
+            (TerminalKind::SquareCeiling, "Square ceiling diffuser"),
+            (TerminalKind::Round, "Round diffuser"),
+            (TerminalKind::Rectangular, "Rectangular grille"),
+            (TerminalKind::Linear, "Slot diffuser"),
+            (TerminalKind::Extract, "Extract valve"),
+        ] {
+            if row_button(ui, crate::i18n::t(label), kind == current, |p, r| paint_terminal(p, r, kind)) {
+                terminal = Some(kind);
+            }
+        }
+        if row_button(ui, crate::i18n::t("Distribute in a Space"), false, |_, _| {}) {
+            distribute = true;
+        }
+        if row_button(ui, crate::i18n::t("Edit Air Terminal"), false, |_, _| {}) {
+            start = Some("airterminaledit");
+        }
+        ui.add_space(6.0);
+        separator(ui);
+        header(ui, "Ducts");
+        let t = Tokens::get();
+        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
+        ui.painter().text(
+            pos2(r.left() + 12.0, r.center().y),
+            egui::Align2::LEFT_CENTER,
+            crate::i18n::t("Coming next: drawing and sizing"),
+            egui::FontId::proportional(11.5),
+            t.text_faint,
+        );
+    });
+    if let Some(kind) = terminal {
+        // The type clicked becomes AIRTERMINALADD's, at the smallest size for the flow.
+        let last = &mut app.session.last_used.air_terminal;
+        last.kind = kind;
+        last.model.clear();
+        if kind == TerminalKind::Extract {
+            last.air = cadcraft_doc::AirDirection::Extract;
+        } else if last.air == cadcraft_doc::AirDirection::Extract {
+            last.air = cadcraft_doc::AirDirection::Supply;
+        }
+        app.cmd.buffer.clear();
+        app.start("airterminaladd");
+    } else if distribute {
+        app.cmd.buffer.clear();
+        app.start("airterminaladd");
+        app.cmdline("Distribute");
+    } else if let Some(cmd) = start {
+        app.cmd.buffer.clear();
+        app.start(cmd);
+    }
+}
+
+fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
+    let styles = app.session.doc().map(|d| d.available_wall_styles()).unwrap_or_default();
+    let current = app.session.last_used.wall_style.clone();
+    let mut draw: Option<String> = None;
+    let mut start: Option<&'static str> = None;
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        header(ui, "Walls");
+        for (i, st) in styles.iter().enumerate() {
+            let selected = st.name.eq_ignore_ascii_case(&current) || (current.is_empty() && i == 0);
+            if row_button(ui, &st.name, selected, |p, r| paint_style(p, r, st)) {
+                draw = Some(st.name.clone());
+            }
+        }
+        ui.add_space(6.0);
+        separator(ui);
+        header(ui, "Tools");
+        if row_button(ui, crate::i18n::t("Edit Wall"), false, |_, _| {}) {
+            start = Some("walledit");
+        }
+    });
+    if let Some(name) = draw {
+        // The style clicked becomes WALLADD's style, then WALLADD starts with it.
+        app.session.last_used.wall_style = name;
+        app.cmd.buffer.clear();
+        app.start("walladd");
+    } else if let Some(cmd) = start {
+        app.cmd.buffer.clear();
+        app.start(cmd);
+    }
+}

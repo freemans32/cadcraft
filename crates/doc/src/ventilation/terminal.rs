@@ -301,6 +301,14 @@ impl crate::Drawing {
         v
     }
 
+    /// Gives air terminal `h` the parameters `p`, redrawing it in place.
+    pub fn regenerate_air_terminal(&mut self, h: crate::Handle, p: &TerminalParams) -> Result<()> {
+        let pieces = p.generate()?;
+        let old = self.entity(h).ok_or(crate::DocError::NoEntity(h))?.common.xdata.clone();
+        let tags = xdata::replace(AIR_TERMINAL_APP, &old, p.to_xdata()?);
+        self.regenerate_hvac(h, pieces, tags)
+    }
+
     /// Adds terminal `p` centred at `at`, its width turned `rotation` radians from the x axis.
     pub fn add_air_terminal(
         &mut self,

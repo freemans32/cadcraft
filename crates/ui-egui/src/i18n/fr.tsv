@@ -1091,3 +1091,56 @@
 	Enter air direction	Entrez le sens de l'air
 	Select space	Sélectionnez un local
 	Enter number of terminals or rows x columns	Entrez le nombre de bouches ou lignes x colonnes
+	Architecture	Architecture
+	Walls	Murs
+	Edit Wall	Modifier le mur
+	Style	Style
+	Justification	Justification
+	Height (mm)	Hauteur (mm)
+	Select walls	Sélectionnez des murs
+	Enter wall style name	Entrez le nom du style de mur
+	Enter wall height	Entrez la hauteur du mur
+	Spaces	Locaux
+	Edit Space	Modifier le local
+	Air Terminals	Bouches
+	Square ceiling diffuser	Diffuseur carré 4 voies
+	Round diffuser	Diffuseur circulaire
+	Rectangular grille	Grille rectangulaire
+	Slot diffuser	Fente linéaire
+	Extract valve	Bouche d'extraction
+	Distribute in a Space	Répartir dans un local
+	Edit Air Terminal	Modifier la bouche
+	Ducts	Gaines
+	Coming next: drawing and sizing	À venir : tracé et dimensionnement
+	Use	Usage
+	Occupants	Occupants
+	Fixtures	Appareils
+	Collective use	Usage collectif
+	Flow	Débit
+	Flow (m³/h)	Débit (m³/h)
+	Flow from	Origine du débit
+	Set by hand	Imposé
+	Labour code	Code du travail
+	Air terminals in the space	Bouches du local
+	Supply terminals	Bouches de soufflage
+	Supplied / needed	Soufflé / requis
+	Air	Sens de l'air
+	Supply	Soufflage
+	Extract	Extraction
+	Face	Face
+	Duct connection	Piquage
+	Largest flow	Débit max
+	Pressure drop	Perte de charge
+	Check	Contrôle
+	Flow above the model's largest	Débit supérieur au débit max du modèle
+	Office (25 m³/h per occupant)	Bureau (25 m³/h par occupant)
+	Meeting, sales, dining (30 m³/h per occupant)	Réunion, vente, restauration (30 m³/h par occupant)
+	Light workshop (45 m³/h per occupant)	Atelier léger (45 m³/h par occupant)
+	Other rooms (60 m³/h per occupant)	Autres locaux (60 m³/h par occupant)
+	Toilet	WC
+	Shower room	Salle de douche
+	Shower room with toilet	Salle de douche avec WC
+	Grouped sanitary room	Sanitaires groupés
+	Grouped washbasins	Lavabos groupés
+	Select spaces	Sélectionnez des locaux
+	Select air terminals	Sélectionnez des bouches

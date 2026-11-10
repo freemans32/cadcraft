@@ -37,7 +37,7 @@ use grips::{click_grip, grip_at, grip_menu, grip_options, grip_rect};
 use list::{OnlyList, PrimIndex, ensure_list, note_truncated, rebuilt_preview};
 #[cfg(test)]
 use list::{preview_options, prims_of};
-use pick::{edit_text_at, hatch_at, insert_at, wheel_zoom_points};
+use pick::{edit_text_at, hatch_at, insert_at, parametric_at, wheel_zoom_points};
 #[cfg(test)]
 use viewport::viewport_highlight_tolerance;
 use viewport::{VpContent, VpHighlight, draw_vp_content, ensure_vp_content};
@@ -703,6 +703,19 @@ struct DoubleClickContext<'a> {
 
 fn handle_double_click(app: &mut CadApp, ctx: DoubleClickContext<'_>) -> Option<bool> {
     let DoubleClickContext { inside, double, hover, xf, xf_paper, scale, active_viewport, active_clip } = ctx;
+    // Double-click a wall (or another parametric object) to change it in the Properties palette,
+    // as AutoCAD Architecture does; its labels and lines are generated, never edited one by one.
+    if inside
+        && double
+        && app.session.running.is_none()
+        && let Some(hp) = hover
+        && let Some(h) = parametric_at(app, xf.to_world(hp), scale)
+    {
+        app.session.set_selection(vec![h]);
+        app.ui.show_palettes = true;
+        app.canvas.hot_grips.clear();
+        return Some(false);
+    }
     // Double-click a block reference (no command running) to edit that reference in place with
     // REFEDIT, as AutoCAD's default DBLCLKEDIT does: its objects become ordinary objects with the
     // rest of the block faded and the drawing still visible. The Block Editor, which hides the

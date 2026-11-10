@@ -718,10 +718,8 @@ fn unknown_entities_in_model_paper_and_blocks_are_kept() {
 
 #[test]
 fn unknown_entity_keeps_an_applications_own_102_group() {
-    let entities = ENTITIES.replace(
-        "0 ACME_WIDGET\n5 30\n",
-        "0 ACME_WIDGET\n5 30\n102 {ACME_DATA\n300 payload\n102 }\n102 {ACAD_REACTORS\n330 42\n102 }\n",
-    );
+    let entities =
+        ENTITIES.replace("0 ACME_WIDGET\n5 30\n", "0 ACME_WIDGET\n5 30\n102 {ACME_DATA\n300 payload\n102 }\n102 {ACAD_REACTORS\n330 42\n102 }\n");
     assert_ne!(entities, ENTITIES, "fixture edit");
     let (_, a, b) = saves(&dxf(&[HEADER, TABLES, BLOCKS, &entities, OBJECTS].concat()));
     for o in [&a, &b] {

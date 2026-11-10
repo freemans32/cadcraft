@@ -173,6 +173,15 @@ impl crate::Drawing {
         self.add(space, common, EntityKind::Insert(insert))
     }
 
+    /// Gives space `h` the parameters `p` (outline in the block's coordinates), redrawing it in
+    /// place.
+    pub fn regenerate_space(&mut self, h: crate::Handle, p: &SpaceParams) -> Result<()> {
+        let pieces = p.generate()?;
+        let old = self.entity(h).ok_or(crate::DocError::NoEntity(h))?.common.xdata.clone();
+        let tags = xdata::replace(SPACE_APP, &old, p.to_xdata()?);
+        self.regenerate_hvac(h, pieces, tags)
+    }
+
     /// The outline of space `h` in drawing coordinates, with its data: the reference's position,
     /// rotation and scale applied to the outline it keeps.
     pub fn space_outline(&self, h: crate::Handle) -> Option<(SpaceParams, Vec<Vec2>)> {

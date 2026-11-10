@@ -1,0 +1,434 @@
+//! Properties of the parametric objects drawn as block references (walls, spaces, air
+//! terminals): when the selection is only such objects of one kind, a group of their own parameters, each change running the object's edit
+//! command so the object is regenerated, as the command line would.
+
+use cadcraft_doc::{AirDirection, Drawing, Handle, SpaceParams, TerminalKind, TerminalParams, WallJustification, air_terminal_of, space_of, wall_of};
+use cadcraft_hvac::RoomUse;
+use egui::{Sense, pos2, vec2};
+use serde_json::{Value, json};
+
+use super::{edit_field, number, pick_menu, prop_row, read_only};
+use crate::theme::Tokens;
+
+/// The command a change runs, with its parameters.
+pub(super) type Action = Option<(&'static str, Value)>;
+
+fn group(ui: &mut egui::Ui, title: &str) {
+    let t = Tokens::get();
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 20.0), Sense::hover());
+    ui.painter().rect_filled(r.shrink2(vec2(6.0, 1.0)), 2.0, t.chrome_dark);
+    ui.painter().text(pos2(r.left() + 12.0, r.center().y), egui::Align2::LEFT_CENTER, crate::i18n::t(title), crate::theme::small(), t.text_dim);
+}
+
+/// `value` when every item gives the same, else "*VARIES*".
+fn shared<T: PartialEq + Clone>(items: &[T]) -> Option<T> {
+    let first = items.first()?;
+    items.iter().all(|x| x == first).then(|| first.clone())
+}
+
+const VARIES: &str = "*VARIES*";
+
+/// The parametric objects' group of the Properties palette, when every selected object is one
+/// of a single kind; returns the command a change asks for.
+pub(super) fn section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], len: &dyn Fn(f64) -> String, bad: &mut Option<String>) -> Action {
+    let walls: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| wall_of(e))).collect();
+    if !walls.is_empty() && walls.len() == sel.len() {
+        return wall_section(ui, d, sel, &walls, len, bad);
+    }
+    let spaces: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| space_of(e))).collect();
+    if !spaces.is_empty() && spaces.len() == sel.len() {
+        return space_section(ui, d, sel, &spaces, bad);
+    }
+    let terminals: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| air_terminal_of(e))).collect();
+    if !terminals.is_empty() && terminals.len() == sel.len() {
+        return terminal_section(ui, d, sel, &terminals, bad);
+    }
+    None
+}
+
+/// Whether object `h` is a parametric object with a Properties group of its own.
+pub(crate) fn is_parametric(d: &Drawing, h: Handle) -> bool {
+    d.entity(h).is_some_and(|e| wall_of(e).is_some() || space_of(e).is_some() || air_terminal_of(e).is_some())
+}
+
+fn handles(sel: &[Handle]) -> Vec<String> {
+    sel.iter().map(|h| h.hex()).collect()
+}
+
+fn wall_section(
+    ui: &mut egui::Ui,
+    d: &Drawing,
+    sel: &[Handle],
+    walls: &[cadcraft_doc::WallParams],
+    len: &dyn Fn(f64) -> String,
+    bad: &mut Option<String>,
+) -> Action {
+    let ids = handles(sel);
+    let mut action: Action = None;
+    group(ui, "Wall");
+    let style = shared(&walls.iter().map(|w| w.style.name.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    let styles: Vec<String> = d.available_wall_styles().into_iter().map(|s| s.name).collect();
+    prop_row(ui, "Style", |ui| {
+        if let Some(n) = pick_menu(ui, &style, styles) {
+            action = Some(("walledit", json!({ "handles": ids, "style": n })));
+        }
+    });
+    let just = shared(&walls.iter().map(|w| w.justification).collect::<Vec<_>>());
+    let shown = just.map_or(VARIES, WallJustification::name);
+    prop_row(ui, "Justification", |ui| {
+        let items = [WallJustification::Left, WallJustification::Center, WallJustification::Right];
+        let mut out = None;
+        ui.menu_button(crate::i18n::t(shown), |ui| {
+            for j in items {
+                if ui.button(crate::i18n::t(j.name())).clicked() {
+                    out = Some(j);
+                    ui.close();
+                }
+            }
+        });
+        if let Some(j) = out {
+            action = Some(("walledit", json!({ "handles": ids, "justification": j.name() })));
+        }
+    });
+    let height = shared(&walls.iter().map(|w| format!("{:.0}", w.height)).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Height (mm)", |ui| {
+        if let Some(h) = number(edit_field(ui, ui.scope_id().with(("wall_height", &ids)), height), bad) {
+            action = Some(("walledit", json!({ "handles": ids, "height": h })));
+        }
+    });
+    let thickness = shared(&walls.iter().map(|w| format!("{:.0} mm", w.style.thickness())).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Thickness", |ui| read_only(ui, &thickness));
+    if let [w] = walls {
+        let mut length = 0.0;
+        let n = w.path.len();
+        for i in 0..n {
+            let next = if i + 1 < n {
+                i + 1
+            } else if w.closed {
+                0
+            } else {
+                break;
+            };
+            if let (Some(a), Some(b)) = (w.path.get(i), w.path.get(next)) {
+                length += (*b - *a).len();
+            }
+        }
+        prop_row(ui, "Length", |ui| read_only(ui, &len(length)));
+    }
+    action
+}
+
+// =====================================================================================
+// Spaces
+// =====================================================================================
+
+/// The uses a space menu offers: the SPACEEDIT name, and the label shown.
+const USES: &[(&str, &str)] = &[
+    ("office", "Office (25 m³/h per occupant)"),
+    ("meeting", "Meeting, sales, dining (30 m³/h per occupant)"),
+    ("lightWorkshop", "Light workshop (45 m³/h per occupant)"),
+    ("workshop", "Other rooms (60 m³/h per occupant)"),
+    ("toilet", "Toilet"),
+    ("shower", "Shower room"),
+    ("showerToilet", "Shower room with toilet"),
+    ("sanitary", "Grouped sanitary room"),
+    ("washbasins", "Grouped washbasins"),
+];
+
+fn use_key(r: RoomUse) -> &'static str {
+    match r {
+        RoomUse::Office => "office",
+        RoomUse::DiningSalesMeeting => "meeting",
+        RoomUse::LightWorkshop => "lightWorkshop",
+        RoomUse::OtherWorkshop => "workshop",
+        RoomUse::Toilet => "toilet",
+        RoomUse::Shower => "shower",
+        RoomUse::ShowerWithToilet => "showerToilet",
+        RoomUse::GroupedSanitary { .. } => "sanitary",
+        RoomUse::GroupedWashbasins { .. } => "washbasins",
+    }
+}
+
+fn use_label(key: &str) -> &'static str {
+    USES.iter().find(|(k, _)| *k == key).map_or(VARIES, |(_, l)| l)
+}
+
+/// A menu of `items` (value, label) showing `current`; returns the value clicked.
+fn choice(ui: &mut egui::Ui, current: &str, items: &[(&'static str, &'static str)]) -> Option<&'static str> {
+    let mut out = None;
+    ui.menu_button(crate::i18n::t(current), |ui| {
+        for (value, label) in items {
+            if ui.button(crate::i18n::t(label)).clicked() {
+                out = Some(*value);
+                ui.close();
+            }
+        }
+    });
+    out
+}
+
+/// The supply flow of the terminals inside space `h`, and how many there are.
+fn terminals_in(d: &Drawing, h: Handle) -> Option<(usize, f64)> {
+    let (_, outline) = d.space_outline(h)?;
+    let mut n = 0;
+    let mut flow = 0.0;
+    for e in d.model.iter() {
+        let (Some(t), cadcraft_doc::EntityKind::Insert(i)) = (air_terminal_of(e), &e.kind) else { continue };
+        if t.air == AirDirection::Supply && cadcraft_geom::point_in_polygon(&outline, cadcraft_geom::Vec2::new(i.insert.x, i.insert.y)) {
+            n += 1;
+            flow += t.flow_m3h;
+        }
+    }
+    Some((n, flow))
+}
+
+fn space_section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], spaces: &[SpaceParams], bad: &mut Option<String>) -> Action {
+    let ids = handles(sel);
+    let mut action: Action = None;
+    let edit = |key: &str, value: Value| Some(("spaceedit", json!({ "handles": ids, key: value })));
+    group(ui, "Space");
+    let name = shared(&spaces.iter().map(|p| p.name.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Name", |ui| {
+        if let Some(n) = edit_field(ui, ui.scope_id().with(("space_name", &ids)), name).filter(|n| !n.trim().is_empty() && n != VARIES) {
+            action = edit("name", json!(n));
+        }
+    });
+    let key = shared(&spaces.iter().map(|p| use_key(p.room)).collect::<Vec<_>>());
+    prop_row(ui, "Use", |ui| {
+        if let Some(k) = choice(ui, key.map_or(VARIES, use_label), USES) {
+            action = edit("use", json!(k));
+        }
+    });
+    let per_occupant = spaces.iter().all(|p| p.room.per_occupant().is_some());
+    if per_occupant {
+        let occ = shared(&spaces.iter().map(|p| p.occupants.to_string()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+        prop_row(ui, "Occupants", |ui| {
+            if let Some(n) = number(edit_field(ui, ui.scope_id().with(("space_occ", &ids)), occ), bad) {
+                action = edit("occupants", json!(n.round().max(0.0)));
+            }
+        });
+    }
+    let fixtures = |p: &SpaceParams| match p.room {
+        RoomUse::GroupedSanitary { fixtures } | RoomUse::GroupedWashbasins { fixtures } => Some(fixtures),
+        _ => None,
+    };
+    if spaces.iter().all(|p| fixtures(p).is_some()) {
+        let f = shared(&spaces.iter().map(|p| fixtures(p).unwrap_or(0).to_string()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+        prop_row(ui, "Fixtures", |ui| {
+            if let Some(n) = number(edit_field(ui, ui.scope_id().with(("space_fix", &ids)), f), bad) {
+                action = edit("fixtures", json!(n.round().max(1.0)));
+            }
+        });
+    }
+    if spaces.iter().all(|p| matches!(p.room, RoomUse::Toilet | RoomUse::Shower | RoomUse::ShowerWithToilet)) {
+        let col = shared(&spaces.iter().map(|p| p.collective).collect::<Vec<_>>());
+        prop_row(ui, "Collective use", |ui| {
+            let shown = col.map_or(VARIES, |c| if c { "Yes" } else { "No" });
+            if let Some(v) = choice(ui, shown, &[("yes", "Yes"), ("no", "No")]) {
+                action = edit("collective", json!(v == "yes"));
+            }
+        });
+    }
+    group(ui, "Flow");
+    // The flow the space gets: typing one sets it by hand, 0 or nothing goes back to the
+    // labour code's.
+    let flow =
+        shared(&spaces.iter().map(|p| p.flow().map(|f| format!("{f:.0}")).unwrap_or_default()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Flow (m³/h)", |ui| {
+        if let Some(t) = edit_field(ui, ui.scope_id().with(("space_flow", &ids)), flow) {
+            if t.trim().is_empty() || t.trim() == "0" {
+                action = edit("flow", Value::Null);
+            } else if let Some(f) = number(Some(t), bad) {
+                action = edit("flow", json!(f));
+            }
+        }
+    });
+    let origin = shared(&spaces.iter().map(|p| p.flow_m3h.is_some()).collect::<Vec<_>>());
+    let origin = origin.map_or(VARIES, |set| if set { "Set by hand" } else { "Labour code" });
+    prop_row(ui, "Flow from", |ui| read_only(ui, origin));
+    if let ([p], [h]) = (spaces, sel) {
+        prop_row(ui, "Area", |ui| read_only(ui, &format!("{:.1} m²", p.area_m2())));
+        if let Some((n, supplied)) = terminals_in(d, *h) {
+            group(ui, "Air terminals in the space");
+            prop_row(ui, "Supply terminals", |ui| read_only(ui, &n.to_string()));
+            let need = p.flow().unwrap_or(0.0);
+            prop_row(ui, "Supplied / needed", |ui| read_only(ui, &format!("{supplied:.0} / {need:.0} m³/h")));
+        }
+    }
+    action
+}
+
+// =====================================================================================
+// Air terminals
+// =====================================================================================
+
+const KINDS: &[(&str, &str)] = &[
+    ("squareCeiling", "Square ceiling diffuser"),
+    ("round", "Round diffuser"),
+    ("rectangular", "Rectangular grille"),
+    ("linear", "Slot diffuser"),
+    ("extract", "Extract valve"),
+];
+
+fn kind_label(k: TerminalKind) -> &'static str {
+    KINDS.iter().find(|(n, _)| *n == k.name()).map_or(VARIES, |(_, l)| l)
+}
+
+fn terminal_section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], ts: &[TerminalParams], bad: &mut Option<String>) -> Action {
+    let ids = handles(sel);
+    let mut action: Action = None;
+    let edit = |key: &str, value: Value| Some(("airterminaledit", json!({ "handles": ids, key: value })));
+    group(ui, "Air Terminal");
+    let kind = shared(&ts.iter().map(|t| t.model.kind).collect::<Vec<_>>());
+    prop_row(ui, "Type", |ui| {
+        if let Some(k) = choice(ui, kind.map_or(VARIES, kind_label), KINDS) {
+            action = edit("type", json!(k));
+        }
+    });
+    let model = shared(&ts.iter().map(|t| t.model.name.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    let models: Vec<String> = std::iter::once("auto".to_string())
+        .chain(d.available_air_terminal_models().into_iter().filter(|m| kind.is_none_or(|k| m.kind == k)).map(|m| m.name))
+        .collect();
+    prop_row(ui, "Model", |ui| {
+        if let Some(m) = pick_menu(ui, &model, models) {
+            action = edit("model", json!(m));
+        }
+    });
+    let flow = shared(&ts.iter().map(|t| format!("{:.0}", t.flow_m3h)).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Flow (m³/h)", |ui| {
+        if let Some(f) = number(edit_field(ui, ui.scope_id().with(("term_flow", &ids)), flow), bad) {
+            action = edit("flow", json!(f));
+        }
+    });
+    let air = shared(&ts.iter().map(|t| t.air).collect::<Vec<_>>());
+    prop_row(ui, "Air", |ui| {
+        let shown = air.map_or(VARIES, |a| if a == AirDirection::Supply { "Supply" } else { "Extract" });
+        if let Some(a) = choice(ui, shown, &[("supply", "Supply"), ("extract", "Extract")]) {
+            action = edit("air", json!(a));
+        }
+    });
+    if let Some(m) = shared(&ts.iter().map(|t| t.model.clone()).collect::<Vec<_>>()) {
+        group(ui, "Model");
+        let face = if m.kind == TerminalKind::Round || m.kind == TerminalKind::Extract {
+            format!("Ø {:.0} mm", m.width_mm)
+        } else {
+            format!("{:.0} × {:.0} mm", m.width_mm, m.depth_mm)
+        };
+        prop_row(ui, "Face", |ui| read_only(ui, &face));
+        prop_row(ui, "Duct connection", |ui| read_only(ui, &format!("Ø {:.0}", m.neck_mm)));
+        prop_row(ui, "Largest flow", |ui| read_only(ui, &format!("{:.0} m³/h", m.max_flow_m3h)));
+        prop_row(ui, "Pressure drop", |ui| read_only(ui, &format!("{:.0} Pa", m.pressure_drop_pa)));
+        if ts.iter().any(|t| t.flow_m3h > m.max_flow_m3h) {
+            prop_row(ui, "Check", |ui| read_only(ui, "Flow above the model's largest"));
+        }
+    }
+    action
+}
+
+#[cfg(test)]
+mod tests {
+    use cadcraft_engine::Session;
+    use egui::vec2;
+    use egui_kittest::kittest::Queryable;
+    use serde_json::json;
+
+    use crate::{CadApp, Services};
+
+    fn palette(app: CadApp) -> egui_kittest::Harness<'static, CadApp> {
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(vec2(400.0, 1400.0))
+            .build_ui_state(|ui, app: &mut CadApp| super::super::properties_section(app, ui), app);
+        h.run_steps(3);
+        h
+    }
+
+    #[test]
+    fn a_selected_wall_shows_its_style_and_a_new_height_regenerates_it() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        let r = app.run("walladd", json!({ "points": [[0, 0], [4000, 0]], "height": 2500 })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+        app.session.set_selection(vec![h]);
+        let mut hn = palette(app);
+        let style = cadcraft_doc::wall_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap().style.name;
+        assert!(hn.query_by_label(&style).is_some(), "the style menu shows the wall's style");
+        // The wall's group comes before the block reference's Geometry group.
+        let field = hn.get_all_by_value("2500").next().unwrap();
+        field.focus();
+        hn.run_steps(2);
+        hn.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        hn.run_steps(2);
+        hn.get_all_by_value("2500").next().unwrap().type_text("2700");
+        hn.run_steps(2);
+        hn.key_press(egui::Key::Enter);
+        hn.run_steps(3);
+        let w = cadcraft_doc::wall_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!(w.height, 2700.0);
+    }
+}
+
+#[cfg(test)]
+mod hvac_tests {
+    use cadcraft_engine::Session;
+    use egui::vec2;
+    use egui_kittest::kittest::Queryable;
+    use serde_json::json;
+
+    use crate::{CadApp, Services};
+
+    fn palette(app: CadApp) -> egui_kittest::Harness<'static, CadApp> {
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(vec2(400.0, 1600.0))
+            .build_ui_state(|ui, app: &mut CadApp| super::super::properties_section(app, ui), app);
+        h.run_steps(3);
+        h
+    }
+
+    fn type_into(h: &mut egui_kittest::Harness<'static, CadApp>, value: &str, text: &str) {
+        h.get_all_by_value(value).next().unwrap().focus();
+        h.run_steps(2);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.run_steps(2);
+        h.get_all_by_value(value).next().unwrap().type_text(text);
+        h.run_steps(2);
+        h.key_press(egui::Key::Enter);
+        h.run_steps(3);
+    }
+
+    #[test]
+    fn a_space_set_to_1200_m3h_in_the_palette_is_redrawn_with_its_terminals_counted() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        let r = app.run("spaceadd", json!({ "points": [[0, 0], [10100, 0], [10100, 7000], [0, 7000]], "name": "Gym" })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+        app.run("airterminaladd", json!({ "space": r["handle"], "count": 4, "flow": 300 })).unwrap();
+        app.session.set_selection(vec![h]);
+        let mut hn = palette(app);
+        assert!(hn.get_all_by_value("Gym").next().is_some());
+        // The read-only rows are painted; what they show comes from here.
+        assert_eq!(super::terminals_in(hn.state().session.doc().unwrap(), h), Some((4, 1200.0)));
+        type_into(&mut hn, "25", "1200");
+        let p = cadcraft_doc::space_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!(p.flow_m3h, Some(1200.0));
+        assert!(hn.get_all_by_value("1200").next().is_some(), "the Flow field shows the new flow");
+    }
+
+    #[test]
+    fn selected_terminals_take_a_new_flow_together() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        let a = app.run("airterminaladd", json!({ "at": [0, 0], "flow": 200 })).unwrap();
+        let b = app.run("airterminaladd", json!({ "at": [2000, 0], "flow": 200 })).unwrap();
+        let hs: Vec<cadcraft_doc::Handle> =
+            [a, b].iter().map(|r| cadcraft_doc::Handle::parse_hex(r["handles"][0].as_str().unwrap()).unwrap()).collect();
+        app.session.set_selection(hs.clone());
+        let mut hn = palette(app);
+        assert!(hn.get_all_by_label("SQ600-160").next().is_some());
+        type_into(&mut hn, "200", "320");
+        let d = hn.state().session.doc().unwrap();
+        for h in hs {
+            let t = cadcraft_doc::air_terminal_of(d.entity(h).unwrap()).unwrap();
+            assert_eq!(t.flow_m3h, 320.0);
+        }
+    }
+}
