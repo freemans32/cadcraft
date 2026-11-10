@@ -79,7 +79,7 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
 
 1. **Intégrer les PR upstream dans `perso`.**
    - **Fait le 10 novembre, validé par Guillaume : les 162 PR sont fusionnées dans `perso` et poussées, avec `perso/pr-integrees.tsv`.**
-   - Script : Guillaume a déjà « CADCraft Murs » installé par `~/.local/bin/maj-cadcraft-murs`. À vérifier : quelle branche il compile. Idée : l'adapter pour qu'il compile `origin/perso`, plutôt que d'écrire un nouveau script. Le PC n'était pas joignable depuis la session, donc le script n'a pas pu être lu.
+   - Script lu sur le PC le 10 novembre : `maj-cadcraft-murs` compile seulement `origin/feat/murs`, rebasé sur `main` dans une branche locale `murs-local`, puis installe `~/.local/bin/cadcraft-murs`. Il ne contient donc pas les PR de `perso`. Proposé à Guillaume, en attente de son accord : un script `cadcraft-maj` sur le modèle de `gridcraft-maj` (worktree détaché `/mnt/Jeux/artcraft/cadcraft-perso` sur `origin/perso`, binaire `~/.local/bin/cadcraft-perso`, lanceur « CADCraft Perso »). « CADCraft Murs » reste installé tant qu'il ne décide pas de le retirer.
    - Analyse refaite le 10 novembre sur `a3d9348` :
      - Liste des PR ouvertes : par `git ls-remote upstream 'refs/pull/*'` (une PR ouverte a une référence `refs/pull/N/merge`) : 653 PR. L'API GitHub de `storytold/cadcraft` n'était pas accessible depuis la session, donc pas de titres ni de statut brouillon : le tableau donne le dernier commit de chaque PR.
      - 298 s'appliquent seules sur `main`, 355 sont en conflit. Écartées par catégorie : 17 plateforme/paquets/CI, 4 plateforme (titre), 5 langues, 4 docs, 4 refactorisation, #997. Restent 263 candidates.
