@@ -681,6 +681,7 @@ version = "0.17.0"
 dependencies = [
  "cadcraft-color",
  "cadcraft-geom",
+ "cadcraft-hvac",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -713,6 +714,7 @@ dependencies = [
  "cadcraft-dxf",
  "cadcraft-fonts",
  "cadcraft-geom",
+ "cadcraft-hvac",
  "cadcraft-io",
  "cadcraft-render",
  "craft-docpath",
@@ -763,6 +765,7 @@ dependencies = [
  "cadcraft-dxf",
  "cadcraft-fonts",
  "cadcraft-geom",
+ "cadcraft-hvac",
  "cadcraft-render",
  "craft-pdf",
  "image",

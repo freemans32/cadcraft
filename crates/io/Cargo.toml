@@ -26,6 +26,7 @@ image = { workspace = true }
 
 [dev-dependencies]
 tiny-skia = { workspace = true }
+cadcraft-hvac = { workspace = true }
 # Reads plotted PDFs back.
 craft-pdf = { workspace = true, features = ["read"] }
 

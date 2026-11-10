@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 
 use cadcraft_color::Color;
-use cadcraft_doc::{ArrayParams, AssocSnap, Constraint, DimAssoc, DimStyle, Handle, LayerState, Parametric, PlotStyleTable};
+use cadcraft_doc::{ArrayParams, AssocSnap, Constraint, DimAssoc, DimStyle, Handle, LayerState, Parametric, PlotStyleTable, TerminalModel};
 use cadcraft_dxf::{Tag, Version};
 use cadcraft_render::Arrowhead;
 use serde::{Deserialize, Serialize};
@@ -35,6 +35,10 @@ pub(crate) const PLOT_STYLE_NAMES_KEY: &str = "ACAD_PLOTSTYLENAME";
 pub(crate) const HANDSEED_KEY: &str = "CADCRAFT_HANDSEED";
 /// Named-object-dictionary key of the XRECORD holding the current multileader style.
 pub(crate) const MLEADER_STYLE_KEY: &str = "CADCRAFT_MLEADERSTYLE";
+/// Named-object-dictionary key of the drawing's air terminal models XRECORD.
+pub(crate) const AIR_TERMINAL_MODELS_KEY: &str = "CADCRAFT_AIRTERMINALMODELS";
+/// Most air terminal models read from a file.
+pub(crate) const MAX_AIR_TERMINAL_MODELS: usize = 10_000;
 /// Most plot style tables and plot style names read from a file.
 pub(crate) const MAX_PLOT_STYLE_TABLES: usize = 1000;
 pub(crate) const MAX_PLOT_STYLE_NAMES: usize = 100_000;
@@ -728,6 +732,44 @@ pub(crate) fn layer_state_chunks(states: &[LayerState]) -> Option<Vec<String>> {
     }
     let json = serde_json::to_string(&LayerStatesPayload { version: 1, states: states.to_vec() }).ok()?;
     Some(json_chunks(&json))
+}
+
+/// The drawing's air terminal models stored in the `CADCRAFT_AIRTERMINALMODELS` XRECORD.
+#[derive(Serialize, Deserialize)]
+struct AirTerminalModelsPayload {
+    version: u32,
+    #[serde(default)]
+    models: Vec<TerminalModel>,
+}
+
+/// JSON chunks for the air terminal models XRECORD, or `None` when the drawing defines none.
+pub(crate) fn air_terminal_model_chunks(models: &[TerminalModel]) -> Option<Vec<String>> {
+    if models.is_empty() {
+        return None;
+    }
+    let json = serde_json::to_string(&AirTerminalModelsPayload { version: 1, models: models.to_vec() }).ok()?;
+    Some(json_chunks(&json))
+}
+
+/// Parse the air terminal models XRECORD text: the valid models, names trimmed, the first of
+/// each name (case-insensitive); `None` when it is not a payload we understand.
+pub(crate) fn parse_air_terminal_models(text: &str) -> Option<Vec<TerminalModel>> {
+    if text.len() > MAX_PAYLOAD {
+        return None;
+    }
+    let p: AirTerminalModelsPayload = serde_json::from_str(text).ok()?;
+    if p.version != 1 || p.models.len() > MAX_AIR_TERMINAL_MODELS {
+        return None;
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<TerminalModel> = Vec::with_capacity(p.models.len());
+    for mut m in p.models {
+        m.name = m.name.trim().to_string();
+        if m.validate().is_ok() && seen.insert(m.name.to_lowercase()) {
+            out.push(m);
+        }
+    }
+    Some(out)
 }
 
 /// Parse the layer states XRECORD text; `None` when it is not a payload we understand.

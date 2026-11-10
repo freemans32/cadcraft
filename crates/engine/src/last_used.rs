@@ -29,6 +29,8 @@ pub struct LastUsed {
     pub classic_array_polar: bool,
     /// RECTANG's chamfer, fillet, width, elevation, thickness and rotation.
     pub rectang: RectangModes,
+    /// AIRTERMINALADD's type, model, flow and air direction.
+    pub air_terminal: cmd::TerminalLastUsed,
 }
 
 impl Default for LastUsed {
@@ -45,6 +47,7 @@ impl Default for LastUsed {
             breakline: cmd::BreaklineOptions::default(),
             classic_array_polar: false,
             rectang: RectangModes::default(),
+            air_terminal: cmd::TerminalLastUsed::default(),
         }
     }
 }

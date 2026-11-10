@@ -20,6 +20,7 @@ mod raster;
 mod refedit;
 mod store;
 mod tables;
+mod ventilation;
 mod xclip;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -42,6 +43,7 @@ pub use raster::{Raster, Rasters};
 pub use refedit::{RefEdit, WorkItem};
 pub use store::EntityStore;
 pub use tables::*;
+pub use ventilation::*;
 pub use xclip::{ClipBoundary, MAX_CLIP_VERTICES};
 
 /// File data CADCraft doesn't model, kept for saving (#528).
@@ -104,6 +106,9 @@ pub struct Drawing {
     pub table_styles: Vec<TableStyle>,
     /// Multiline styles (MLSTYLE); STANDARD is always there.
     pub mline_styles: Vec<MLineStyle>,
+    /// Air terminal models the drawing defines (new terminals can also use
+    /// [`standard_air_terminal_models`]).
+    pub air_terminal_models: Vec<TerminalModel>,
     pub blocks: BTreeMap<String, std::sync::Arc<Block>>,
     pub model: EntityStore,
     pub layouts: Vec<Layout>,
@@ -186,6 +191,7 @@ impl Drawing {
             mleader_styles: vec![MLeaderStyle::default()],
             table_styles: vec![TableStyle::default()],
             mline_styles: vec![MLineStyle::default()],
+            air_terminal_models: Vec::new(),
             blocks: BTreeMap::new(),
             model: EntityStore::new(),
             layouts: vec![Layout::new("Layout1", 1), Layout::new("Layout2", 2)],
