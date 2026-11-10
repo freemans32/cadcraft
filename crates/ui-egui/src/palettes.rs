@@ -9,9 +9,12 @@ use crate::CadApp;
 use crate::icons::{self, Icon};
 use crate::theme::Tokens;
 
+/// The hatch pattern picker.
+mod building;
 #[cfg(test)]
 mod layer_menu_tests;
-/// The hatch pattern picker.
+mod objects;
+pub(crate) use objects::is_parametric;
 pub mod patterns;
 /// The QuickCalc palette.
 pub mod quickcalc;
@@ -135,6 +138,11 @@ pub const DRAFTING: &[(&str, &[Tool], &[Tool])] = &[
     ),
 ];
 
+/// Every Tool Sets tab: Drafting, Modeling, then the building tabs.
+pub fn toolset_tabs() -> Vec<&'static str> {
+    ["Drafting", "Modeling"].into_iter().chain(building::TABS.iter().copied()).collect()
+}
+
 fn command_known(id: &str) -> bool {
     cadcraft_engine::find_command(id).is_some() || crate::menus::is_ui_command(id)
 }
@@ -147,26 +155,36 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         let p = ui.painter().clone();
         // Tabs.
         let tab_h = 28.0;
-        let mut x = r.left();
-        for name in ["Drafting", "Modeling"] {
-            let w = 92.0;
-            let tr = Rect::from_min_size(pos2(x, r.top()), vec2(w, tab_h));
-            let active = app.ui.toolset_tab == name;
-            let resp = ui.interact(tr, ui.scope_id().with(("ts", name)), Sense::click());
-            p.rect_filled(tr, 0.0, if active { t.tab_active } else { t.chrome });
-            p.text(
-                tr.center(),
-                egui::Align2::CENTER_CENTER,
-                crate::i18n::t(name),
-                egui::FontId::proportional(13.5),
-                if active { t.text } else { t.text_dim },
-            );
-            icons::describe_control(ui, &resp, crate::i18n::t(name), Some(active), true);
-            if resp.clicked() {
-                app.ui.toolset_tab = name.into();
+        // Drafting and Modeling on the first row, the building tabs on a second one: the panel
+        // is too narrow for all of them side by side.
+        let rows: Vec<Vec<&str>> =
+            std::iter::once(vec!["Drafting", "Modeling"]).chain((!building::TABS.is_empty()).then(|| building::TABS.to_vec())).collect();
+        for (row, tabs) in rows.iter().enumerate() {
+            let top = r.top() + tab_h * row as f32;
+            let room = if row == 0 { r.width() - 28.0 } else { r.width() };
+            let w = (room / tabs.len().max(1) as f32).min(if row == 0 { 92.0 } else { room });
+            let mut x = r.left();
+            for name in tabs.iter().copied() {
+                let tr = Rect::from_min_size(pos2(x, top), vec2(w, tab_h));
+                let active = app.ui.toolset_tab == name;
+                let resp = ui.interact(tr, ui.scope_id().with(("ts", name)), Sense::click());
+                p.rect_filled(tr, 0.0, if active { t.tab_active } else { t.chrome });
+                p.text(
+                    tr.center(),
+                    egui::Align2::CENTER_CENTER,
+                    crate::i18n::t(name),
+                    egui::FontId::proportional(13.5),
+                    if active { t.text } else { t.text_dim },
+                );
+                icons::describe_control(ui, &resp, crate::i18n::t(name), Some(active), true);
+                if resp.clicked() {
+                    app.ui.toolset_tab = name.into();
+                }
+                x += w;
             }
-            x += w;
         }
+        let x = r.left() + ((r.width() - 28.0) / 2.0).min(92.0) * 2.0;
+        let tabs_h = tab_h * rows.len() as f32;
         p.rect_filled(Rect::from_min_max(pos2(x, r.top()), pos2(r.right(), r.top() + tab_h)), 0.0, t.chrome);
         let cr = Rect::from_center_size(pos2(r.right() - 14.0, r.top() + tab_h / 2.0), vec2(14.0, 14.0));
         let cresp = ui.interact(cr, ui.scope_id().with("ts_collapse"), Sense::click());
@@ -175,7 +193,11 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         if cresp.on_hover_text(crate::tl!("Collapse Tool Sets")).clicked() {
             app.ui.show_toolsets = false;
         }
-        let body = Rect::from_min_max(pos2(r.left(), r.top() + tab_h), r.max);
+        let body = Rect::from_min_max(pos2(r.left(), r.top() + tabs_h), r.max);
+        if let Some(tab) = building::TABS.iter().find(|t| app.ui.toolset_tab == **t) {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| building::body(app, ui, tab));
+            return;
+        }
         let mut clicked: Option<&'static str> = None;
         let mut toggle_group = None;
         let mut tool_visible: Option<(String, bool)> = None;
@@ -1091,6 +1113,8 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
             }
         });
     };
+    // Walls (and the other parametric objects) show their own parameters first.
+    let object_action = objects::section(ui, d, &sel, &len, &mut bad);
     if sel.len() == 1 {
         group(ui, "Geometry");
         match &e.kind {
@@ -1492,6 +1516,9 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
             *r = json!(app.session.angle_settings().unshown(v.to_radians()).to_degrees());
         }
         let _ = app.run("properties.set", p);
+    }
+    if let Some((c, p)) = object_action {
+        let _ = app.run(c, p);
     }
     report_bad(app, bad);
     if let Some(p) = custom_set {

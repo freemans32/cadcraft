@@ -25,8 +25,8 @@ pub struct Workspace {
 
 fn snapshot(ui: &UiState) -> Result<Value, String> {
     cadcraft_ui_egui::docking::validate(&ui.docking)?;
-    if !matches!(ui.toolset_tab.as_str(), "Drafting" | "Modeling") {
-        return Err("toolsetTab must be Drafting or Modeling".into());
+    if !cadcraft_ui_egui::palettes::toolset_tabs().contains(&ui.toolset_tab.as_str()) {
+        return Err(format!("toolsetTab must be one of {}", cadcraft_ui_egui::palettes::toolset_tabs().join(", ")));
     }
     if ui.collapsed_groups.len() > 64 || ui.collapsed_groups.iter().any(|name| name.len() > 256) {
         return Err("collapsedGroups exceeds the workspace size limit".into());

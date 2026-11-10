@@ -12,7 +12,9 @@
 use std::collections::HashMap;
 
 use cadcraft_color::Color;
-use cadcraft_doc::{ArrayParams, AssocSnap, Constraint, DimAssoc, DimStyle, Handle, LayerState, Parametric, PlotStyleTable, TerminalModel};
+use cadcraft_doc::{
+    ArrayParams, AssocSnap, Constraint, DimAssoc, DimStyle, Handle, LayerState, Parametric, PlotStyleTable, TerminalModel, WallStyle,
+};
 use cadcraft_dxf::{Tag, Version};
 use cadcraft_render::Arrowhead;
 use serde::{Deserialize, Serialize};
@@ -35,6 +37,10 @@ pub(crate) const PLOT_STYLE_NAMES_KEY: &str = "ACAD_PLOTSTYLENAME";
 pub(crate) const HANDSEED_KEY: &str = "CADCRAFT_HANDSEED";
 /// Named-object-dictionary key of the XRECORD holding the current multileader style.
 pub(crate) const MLEADER_STYLE_KEY: &str = "CADCRAFT_MLEADERSTYLE";
+/// Named-object-dictionary key of the drawing's wall styles XRECORD.
+pub(crate) const WALL_STYLES_KEY: &str = "CADCRAFT_WALLSTYLES";
+/// Most wall styles read from a file.
+pub(crate) const MAX_WALL_STYLES: usize = 10_000;
 /// Named-object-dictionary key of the drawing's air terminal models XRECORD.
 pub(crate) const AIR_TERMINAL_MODELS_KEY: &str = "CADCRAFT_AIRTERMINALMODELS";
 /// Most air terminal models read from a file.
@@ -732,6 +738,44 @@ pub(crate) fn layer_state_chunks(states: &[LayerState]) -> Option<Vec<String>> {
     }
     let json = serde_json::to_string(&LayerStatesPayload { version: 1, states: states.to_vec() }).ok()?;
     Some(json_chunks(&json))
+}
+
+/// The drawing's wall styles stored in the `CADCRAFT_WALLSTYLES` XRECORD.
+#[derive(Serialize, Deserialize)]
+struct WallStylesPayload {
+    version: u32,
+    #[serde(default)]
+    styles: Vec<WallStyle>,
+}
+
+/// JSON chunks for the wall styles XRECORD, or `None` when the drawing defines no wall style.
+pub(crate) fn wall_style_chunks(styles: &[WallStyle]) -> Option<Vec<String>> {
+    if styles.is_empty() {
+        return None;
+    }
+    let json = serde_json::to_string(&WallStylesPayload { version: 1, styles: styles.to_vec() }).ok()?;
+    Some(json_chunks(&json))
+}
+
+/// Parse the wall styles XRECORD text: the valid styles, names trimmed, the first of each name
+/// (case-insensitive); `None` when it is not a payload we understand.
+pub(crate) fn parse_wall_styles(text: &str) -> Option<Vec<WallStyle>> {
+    if text.len() > MAX_PAYLOAD {
+        return None;
+    }
+    let p: WallStylesPayload = serde_json::from_str(text).ok()?;
+    if p.version != 1 || p.styles.len() > MAX_WALL_STYLES {
+        return None;
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<WallStyle> = Vec::with_capacity(p.styles.len());
+    for mut s in p.styles {
+        s.name = s.name.trim().to_string();
+        if s.validate().is_ok() && seen.insert(s.name.to_lowercase()) {
+            out.push(s);
+        }
+    }
+    Some(out)
 }
 
 /// The drawing's air terminal models stored in the `CADCRAFT_AIRTERMINALMODELS` XRECORD.

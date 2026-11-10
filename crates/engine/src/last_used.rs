@@ -29,6 +29,9 @@ pub struct LastUsed {
     pub classic_array_polar: bool,
     /// RECTANG's chamfer, fillet, width, elevation, thickness and rotation.
     pub rectang: RectangModes,
+    /// WALLADD's style (empty: the drawing's first) and justification.
+    pub wall_style: String,
+    pub wall_justification: cadcraft_doc::WallJustification,
     /// AIRTERMINALADD's type, model, flow and air direction.
     pub air_terminal: cmd::TerminalLastUsed,
 }
@@ -47,6 +50,8 @@ impl Default for LastUsed {
             breakline: cmd::BreaklineOptions::default(),
             classic_array_polar: false,
             rectang: RectangModes::default(),
+            wall_style: String::new(),
+            wall_justification: cadcraft_doc::WallJustification::Left,
             air_terminal: cmd::TerminalLastUsed::default(),
         }
     }

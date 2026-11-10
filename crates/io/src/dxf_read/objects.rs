@@ -212,6 +212,10 @@ impl Objects {
         if let Some(states) = self.xrecord_text(crate::dxf_ext::LAYER_STATES_KEY).and_then(|t| crate::dxf_ext::parse_layer_states(&t)) {
             d.layer_states = states;
         }
+        // The drawing's wall styles.
+        if let Some(styles) = self.xrecord_text(crate::dxf_ext::WALL_STYLES_KEY).and_then(|t| crate::dxf_ext::parse_wall_styles(&t)) {
+            d.wall_styles = styles;
+        }
         // The drawing's air terminal models.
         if let Some(models) = self.xrecord_text(crate::dxf_ext::AIR_TERMINAL_MODELS_KEY).and_then(|t| crate::dxf_ext::parse_air_terminal_models(&t)) {
             d.air_terminal_models = models;

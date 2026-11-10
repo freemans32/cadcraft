@@ -34,7 +34,7 @@ use grips::{click_grip, grip_at, grip_menu, grip_options, grip_rect};
 use list::{OnlyList, PrimIndex, ensure_list, rebuilt_preview};
 #[cfg(test)]
 use list::{preview_options, prims_of};
-use pick::{edit_text_at, hatch_at, wheel_zoom_points};
+use pick::{edit_text_at, hatch_at, parametric_at, wheel_zoom_points};
 #[cfg(test)]
 use viewport::viewport_highlight_tolerance;
 use viewport::{VpContent, VpHighlight, draw_vp_content, ensure_vp_content};
@@ -613,6 +613,19 @@ fn handle_double_click(app: &mut CadApp, ctx: DoubleClickContext<'_>) -> Option<
             app.canvas.list = None;
             return None;
         }
+    }
+    // Double-click a wall (or another parametric object) to change it in the Properties palette,
+    // as AutoCAD Architecture does; its labels and lines are generated, never edited one by one.
+    if inside
+        && double
+        && app.session.running.is_none()
+        && let Some(hp) = hover
+        && let Some(h) = parametric_at(app, xf.to_world(hp), scale)
+    {
+        app.session.set_selection(vec![h]);
+        app.ui.show_palettes = true;
+        app.canvas.hot_grips.clear();
+        return Some(false);
     }
     // Double-click text to edit it, as in AutoCAD: TEXTEDIT with that object already picked.
     if inside

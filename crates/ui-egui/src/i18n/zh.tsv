@@ -968,6 +968,8 @@
 	Viewport {id}	视口 {id}
 	Viewports	视口
 	W	W
+	Wall	墙体
+	Wall Styles	墙体样式
 	WCS	WCS
 	White	白色
 	Width factor	宽度因子
@@ -1480,3 +1482,6 @@ menu	View	视图
 	Space	空间
 	Air Terminal	风口
 	Air Terminal Models	风口型号
+	Architecture	建筑
+	Walls	墙
+	Edit Wall	编辑墙

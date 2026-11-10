@@ -21,6 +21,8 @@ mod refedit;
 mod store;
 mod tables;
 mod ventilation;
+mod wall;
+mod wall_library;
 mod xclip;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -44,6 +46,8 @@ pub use refedit::{RefEdit, WorkItem};
 pub use store::EntityStore;
 pub use tables::*;
 pub use ventilation::*;
+pub use wall::*;
+pub use wall_library::standard_wall_styles;
 pub use xclip::{ClipBoundary, MAX_CLIP_VERTICES};
 
 /// File data CADCraft doesn't model, kept for saving (#528).
@@ -106,6 +110,8 @@ pub struct Drawing {
     pub table_styles: Vec<TableStyle>,
     /// Multiline styles (MLSTYLE); STANDARD is always there.
     pub mline_styles: Vec<MLineStyle>,
+    /// Wall styles the drawing defines (new walls can also use [`standard_wall_styles`]).
+    pub wall_styles: Vec<WallStyle>,
     /// Air terminal models the drawing defines (new terminals can also use
     /// [`standard_air_terminal_models`]).
     pub air_terminal_models: Vec<TerminalModel>,
@@ -191,6 +197,7 @@ impl Drawing {
             mleader_styles: vec![MLeaderStyle::default()],
             table_styles: vec![TableStyle::default()],
             mline_styles: vec![MLineStyle::default()],
+            wall_styles: Vec::new(),
             air_terminal_models: Vec::new(),
             blocks: BTreeMap::new(),
             model: EntityStore::new(),
