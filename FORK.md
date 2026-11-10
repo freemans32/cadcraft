@@ -57,24 +57,28 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
 
 ### Fait
 
-- **PR 1 des murs** sur `origin/feat/murs` (commit `4f4d5d5`, basé sur upstream `a655cee`). Pas encore proposée upstream.
+- **Mise à jour avec l'officiel** (10 novembre) : upstream `main` est passé de `a655cee` à `a3d9348` (8 novembre, 106 commits, beaucoup de PR fusionnées). Fait, validé par Guillaume :
+  - `main` du fork avancé en fast-forward sur `a3d9348`.
+  - `feat/murs` rebasé sur `a3d9348` (force-push validé), sans conflit : nouveau sommet `3d3153f`.
+  - `a3d9348` fusionné dans `perso` (commit de fusion, sans réécriture). Aucun conflit, `cargo check --workspace --all-targets` passe, tous les tests de `doc`, `engine` et `io` passent en debug (dont les 39 tests des murs). `cargo xtask ci` complet pas relancé.
+- **PR 1 des murs** sur `origin/feat/murs` (sommet `3d3153f`, basé sur upstream `a3d9348`). Pas encore proposée upstream.
   - Nouveaux fichiers : `crates/doc/src/wall.rs` (+ `wall/tests.rs`, 19 tests), `crates/doc/src/wall_library.rs` (6 styles), `crates/engine/src/cmd/arch.rs` (`walladd`, `wallstyleedit`), `crates/engine/tests/it/walls.rs` (16 tests), `crates/io/tests/it/wall_roundtrip.rs`.
   - Stockage : chaque mur est un bloc anonyme et un INSERT, avec des xdata d'application `CADCRAFT_WALL` (format `WALL1`). Les styles sont dans le XRECORD `CADCRAFT_WALLSTYLES` du dictionnaire nommé. Ça survit en DXF et en DWG. Calques `A-WALL` et `A-WALL-PATT`.
   - Traductions ajoutées dans `fr.tsv` et `zh.tsv`. Le test i18n exige le chinois pour chaque libellé de commande.
   - `cargo xtask ci` passe, sauf l'étape wasm, qui n'a pas pu tourner : la cible wasm n'a pas pu être téléchargée.
 - **Scripts sur le PC** : `~/.local/bin/maj-cadcraft-murs` (installe `cadcraft-murs`) et le lanceur `~/.local/share/applications/cadcraft-murs.desktop`. Le dépôt est dans `/mnt/Jeux/artcraft/cadcraft`, les polices dans `/mnt/Jeux/artcraft/craft-fonts`. Le modèle à suivre est `~/.local/bin/gridcraft-maj` (worktree détaché de `origin/perso`).
-- **Analyse des PR upstream** (6 novembre) :
+- **Analyse des PR upstream** (6 novembre, **périmée** depuis la mise à jour sur `a3d9348` : à refaire) :
   - 618 PR ouvertes ; 255 s'appliquent seules sur `main` ; 223 candidates une fois les PR plateforme, paquets, docs, langues, CI et refactorisations écartées (#755, impression CUPS, est gardée).
   - Fusionnées dans l'ordre croissant : 146 passent, 77 sont en conflit.
   - `feat/murs` ne fusionne ensuite qu'avec un conflit dans `fr.tsv`.
   - Première casse de compilation : **#997**. Elle redéfinit `GENERATION` et `generation()` dans `crates/fonts/src/ttf.rs`, qui existent déjà sur `main` (commit `2c979eb14`). Il faut l'écarter.
 - **Validé par Guillaume** : l'assemblage de `perso` selon la méthode ci-dessus, ce fichier et la règle n° 2.
-- **Branche `perso` créée et poussée** (10 novembre). Elle contient pour l'instant : upstream `main` `a655cee`, `feat/murs`, ce fichier, et une ligne de renvoi vers `FORK.md` en tête d'`AGENTS.md`, placée avant le marqueur `craft-house-rules:start` pour ne pas toucher au bloc des règles. Les PR upstream y seront **fusionnées par-dessus** : pas de réécriture d'historique.
+- **Branche `perso` créée et poussée** (10 novembre). Elle contient pour l'instant : upstream `main` `a3d9348`, `feat/murs`, ce fichier, et une ligne de renvoi vers `FORK.md` en tête d'`AGENTS.md`, placée avant le marqueur `craft-house-rules:start` pour ne pas toucher au bloc des règles. Les PR upstream y seront **fusionnées par-dessus** : pas de réécriture d'historique.
 
 ### En cours
 
 1. **Intégrer les PR upstream dans `perso`.**
-   - Refaire la simulation sans #997.
+   - Refaire l'analyse des PR ouvertes sur la base `a3d9348` (certaines sont fusionnées depuis), puis la simulation sans #997.
    - Boucle `cargo check --workspace --all-targets` : retirer chaque PR qui casse, puis lancer les tests en debug et retirer celles qui les font échouer.
    - `feat/murs` est déjà dedans : régler le conflit `fr.tsv` au moment des fusions.
    - Écrire `perso/pr-integrees.tsv` (numéro, titre, intégrée ou écartée, raison).
