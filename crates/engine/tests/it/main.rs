@@ -88,6 +88,7 @@ mod lisp_undo_in_routine;
 mod locked_unselectable;
 mod malformed_handles;
 mod matchprop;
+mod mbuttonpan;
 mod measure_distance_snapping;
 mod metric_linetypes;
 mod minsert;
