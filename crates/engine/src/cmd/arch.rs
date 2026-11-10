@@ -1,6 +1,7 @@
 //! Architectural walls (AutoCAD Architecture's names): WALLADD draws a wall of a wall style
 //! along picked points, WALLSTYLEEDIT lists, creates, changes, renames and deletes the
-//! drawing's wall styles and regenerates the walls that use a changed style.
+//! drawing's wall styles and regenerates the walls that use a changed style, WALLEDIT gives
+//! walls already drawn another style, justification or height.
 
 use cadcraft_doc::{
     Common, Drawing, Entity, EntityKind, Handle, Line, MAX_WALL_VERTICES, WallComponent, WallJustification, WallParams, WallStyle, WallUnits, wall_of,
@@ -22,6 +23,9 @@ pub fn specs() -> Vec<CommandSpec> {
              patternAngle?, color?, priority?, function?: structure|insulation|finish|membrane|airGap, returnsAtOpenings?}], \
              defaultHeight? (mm), copyFrom?} → {style, regenerated, kept} | {delete: name} | {name, rename: newName}",
         ),
+        CommandSpec::new("walledit", "Edit Wall", run_walledit)
+            .params("{handle | handles, style?, justification?: left|center|right, height? (mm)} → {regenerated}")
+            .interactive(|s| Ok(Box::new(WallEditM::new(s)))),
     ]
 }
 
@@ -429,4 +433,196 @@ fn rename_style(s: &mut Session, name: &str, to: &str) -> Result<Value> {
         s.last_used.wall_style = st.name.clone();
     }
     styles_value(s)
+}
+
+// =====================================================================================
+// WALLEDIT
+// =====================================================================================
+
+/// What WALLEDIT changes; `None` keeps the wall's own value.
+#[derive(Clone, Default)]
+struct WallChange {
+    style: Option<WallStyle>,
+    justification: Option<WallJustification>,
+    height: Option<f64>,
+}
+
+/// The walls among `handles`, refusing an object that is not a wall or that was edited by hand.
+fn editable_walls(d: &Drawing, handles: &[Handle]) -> Result<Vec<(Handle, WallParams)>> {
+    if handles.is_empty() || handles.len() > MAX_EDITED {
+        return Err(other(format!("Select 1 to {MAX_EDITED} walls.")));
+    }
+    let mut out = Vec::with_capacity(handles.len());
+    for &h in handles {
+        let w = d.entity(h).and_then(|e| wall_of(e)).ok_or_else(|| other("Select walls only."))?;
+        if !d.wall_is_intact(h) {
+            return Err(other("A selected wall was edited by hand or scaled: it can't be regenerated."));
+        }
+        out.push((h, w));
+    }
+    Ok(out)
+}
+
+/// Most objects one edit changes.
+const MAX_EDITED: usize = 10_000;
+
+/// Gives every wall of `handles` the change; nothing changes when one of them can't take it.
+fn edit_walls(s: &mut Session, handles: &[Handle], c: &WallChange) -> Result<usize> {
+    let walls = editable_walls(s.doc()?, handles)?;
+    let mut next = Vec::with_capacity(walls.len());
+    for (h, mut w) in walls {
+        if let Some(st) = &c.style {
+            w.style = st.clone();
+        }
+        if let Some(j) = c.justification {
+            w.justification = j;
+        }
+        if let Some(height) = c.height {
+            w.height = height;
+        }
+        w.validate().map_err(|e| other(e.to_string()))?;
+        next.push((h, w));
+    }
+    let d = s.doc_mut()?;
+    for (h, w) in &next {
+        d.regenerate_wall(*h, w).map_err(|e| other(e.to_string()))?;
+    }
+    if let Some(st) = &c.style
+        && d.wall_style(&st.name).is_none()
+    {
+        d.wall_styles.push(st.clone());
+    }
+    Ok(next.len())
+}
+
+/// `handle` or `handles` of a JSON form.
+pub(crate) fn handles_param(cmd: &str, p: &Value) -> Result<Vec<Handle>> {
+    if let Some(h) = super::curves::handle_param(p, "handle") {
+        return Ok(vec![h]);
+    }
+    let Some(Value::Array(a)) = p.get("handles") else { return Err(bad(cmd, "`handle` or `handles` is required")) };
+    if a.len() > MAX_EDITED {
+        return Err(bad(cmd, format!("at most {MAX_EDITED} objects")));
+    }
+    a.iter().map(|v| v.as_str().and_then(Handle::parse_hex).ok_or_else(|| bad(cmd, "`handles` must be handles"))).collect()
+}
+
+fn run_walledit(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "walledit";
+    let handles = handles_param(CMD, p)?;
+    let style = match str_param(p, "style") {
+        Some(n) => Some(style_named(s.doc()?, n)?),
+        None => None,
+    };
+    let justification = match str_param(p, "justification") {
+        Some(t) => Some(WallJustification::parse(t).ok_or_else(|| bad(CMD, "justification must be left, center or right"))?),
+        None => None,
+    };
+    let height = match p.get("height") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(v.as_f64().filter(|h| h.is_finite() && *h > 0.0).ok_or_else(|| bad(CMD, "`height` must be a positive number"))?),
+    };
+    let n = edit_walls(s, &handles, &WallChange { style, justification, height })?;
+    Ok(json!({ "regenerated": n }))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EditAsk {
+    Select,
+    Option,
+    Style,
+    Justification,
+    Height,
+}
+
+struct WallEditM {
+    walls: Vec<Handle>,
+    ask: EditAsk,
+}
+
+impl WallEditM {
+    fn new(s: &Session) -> Self {
+        let walls: Vec<Handle> =
+            s.doc().map(|d| s.selection().into_iter().filter(|h| d.entity(*h).and_then(|e| wall_of(e)).is_some()).collect()).unwrap_or_default();
+        let ask = if walls.is_empty() { EditAsk::Select } else { EditAsk::Option };
+        WallEditM { walls, ask }
+    }
+    fn apply(&mut self, s: &mut Session, c: WallChange) -> Result<Step> {
+        match edit_walls(s, &self.walls, &c) {
+            Ok(n) => s.echo(format!("{n} wall(s) changed.")),
+            Err(e) => s.echo(e.to_string()),
+        }
+        self.ask = EditAsk::Option;
+        Ok(Step::Continue)
+    }
+}
+
+impl Interactive for WallEditM {
+    fn name(&self) -> &'static str {
+        "WALLEDIT"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        match self.ask {
+            EditAsk::Select => Prompt::new("Select walls", Accept::SELECT),
+            EditAsk::Option => Prompt::new("Enter an option", super::curves::KW).kw(&["Style", "Justification", "Height"]),
+            EditAsk::Style => Prompt::new("Enter wall style name", Accept::TEXT),
+            EditAsk::Justification => Prompt::new("Enter justification", super::curves::KW).kw(&["Left", "Center", "Right"]),
+            EditAsk::Height => Prompt::new("Enter wall height", Accept::NUMBER),
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        let text = match &i {
+            Input::Text(t) | Input::Keyword(t) => Some(t.trim().to_string()),
+            _ => None,
+        };
+        match (self.ask, i, text) {
+            (EditAsk::Select, Input::Pick(hs), _) => {
+                let d = s.doc()?;
+                let new: Vec<Handle> =
+                    hs.into_iter().filter(|h| d.entity(*h).and_then(|e| wall_of(e)).is_some() && !self.walls.contains(h)).collect();
+                self.walls.extend(new);
+                Ok(Step::Continue)
+            }
+            (EditAsk::Select, Input::Enter, _) if !self.walls.is_empty() => {
+                self.ask = EditAsk::Option;
+                Ok(Step::Continue)
+            }
+            (_, Input::Enter | Input::Cancel, _) if matches!(self.ask, EditAsk::Select | EditAsk::Option) => Ok(Step::Done),
+            (EditAsk::Option, _, Some(k)) => {
+                self.ask = match k.as_str() {
+                    "Style" => EditAsk::Style,
+                    "Justification" => EditAsk::Justification,
+                    "Height" => EditAsk::Height,
+                    _ => EditAsk::Option,
+                };
+                Ok(Step::Continue)
+            }
+            (EditAsk::Style, _, Some(t)) if !t.is_empty() => match style_named(s.doc()?, &t) {
+                Ok(st) => self.apply(s, WallChange { style: Some(st), ..WallChange::default() }),
+                Err(e) => {
+                    s.echo(e.to_string());
+                    Ok(Step::Continue)
+                }
+            },
+            (EditAsk::Justification, _, Some(t)) => match WallJustification::parse(&t) {
+                Some(j) => self.apply(s, WallChange { justification: Some(j), ..WallChange::default() }),
+                None => Ok(Step::Continue),
+            },
+            (EditAsk::Height, _, Some(t)) => match t.parse::<f64>().ok().filter(|h| h.is_finite() && *h > 0.0) {
+                Some(h) => self.apply(s, WallChange { height: Some(h), ..WallChange::default() }),
+                None => {
+                    s.echo("Requires a positive height.");
+                    Ok(Step::Continue)
+                }
+            },
+            (_, Input::Enter | Input::Cancel, _) => {
+                self.ask = EditAsk::Option;
+                Ok(Step::Continue)
+            }
+            _ => Ok(Step::Continue),
+        }
+    }
+    fn preview(&self, _s: &Session, _c: Vec2) -> Vec<EntityKind> {
+        Vec::new()
+    }
 }

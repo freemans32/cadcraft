@@ -296,3 +296,46 @@ fn wallstyleedit_with_only_a_name_changes_nothing() {
     assert!(s.execute("wallstyleedit", &json!({"name": "Nope"})).is_err());
     assert!(s.execute("wallstyleedit", &json!({"name": BRICK, "copyFrom": "Concrete 200"})).is_err(), "copyFrom never overwrites");
 }
+
+#[test]
+fn walledit_gives_walls_another_style_justification_and_height() {
+    let mut s = metric();
+    let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [4000, 0]], "style": BRICK})).unwrap());
+    let b = h(&s.execute("walladd", &json!({"points": [[0, 3000], [4000, 3000]], "style": BRICK})).unwrap());
+    let r = s.execute("walledit", &json!({"handles": [a.hex(), b.hex()], "style": PARTITION, "justification": "center", "height": 2700})).unwrap();
+    assert_eq!(r["regenerated"], 2);
+    for hd in [a, b] {
+        let w = wall(&s, hd);
+        assert_eq!((w.style.name.as_str(), w.justification, w.height), (PARTITION, WallJustification::Center, 2700.0));
+    }
+    // The wall keeps its handle and path; undo brings the old one back.
+    assert_eq!(path(&wall(&s, a)), [(0.0, 0.0), (4000.0, 0.0)]);
+    s.execute("undo", &json!({})).unwrap();
+    assert_eq!(wall(&s, a).style.name, BRICK);
+}
+
+#[test]
+fn walledit_refuses_what_is_not_an_intact_wall() {
+    let mut s = metric();
+    let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [4000, 0]]})).unwrap());
+    s.execute("line", &json!({"points": [[0, 0], [1, 1]]})).unwrap();
+    let l = s.doc().unwrap().model.iter().last().unwrap().handle;
+    assert!(s.execute("walledit", &json!({"handles": [a.hex(), l.hex()], "style": PARTITION})).is_err());
+    assert!(s.execute("walledit", &json!({"handle": a.hex(), "style": "nope"})).is_err());
+    assert!(s.execute("walledit", &json!({"handle": a.hex(), "height": -1})).is_err());
+    assert!(s.execute("walledit", &json!({"style": PARTITION})).is_err());
+    assert_ne!(wall(&s, a).style.name, PARTITION, "nothing changed");
+}
+
+#[test]
+fn walledit_at_the_command_line() {
+    let mut s = metric();
+    let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [4000, 0]], "style": BRICK})).unwrap());
+    s.set_selection(vec![a]);
+    for t in ["walledit", "s", PARTITION, "j", "r", ""] {
+        s.cmdline(t).unwrap();
+    }
+    assert!(s.running.is_none());
+    let w = wall(&s, a);
+    assert_eq!((w.style.name.as_str(), w.justification), (PARTITION, WallJustification::Right));
+}
