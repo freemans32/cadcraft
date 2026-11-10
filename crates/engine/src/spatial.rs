@@ -68,7 +68,8 @@ impl ChunkIx {
                 if matches!(e.kind, EntityKind::XLine(_) | EntityKind::Ray(_)) {
                     infinite.push(u32::try_from(i).unwrap_or(u32::MAX));
                 }
-                entity_bounds_cached(d, e, 0, &mut cache)
+                let b = entity_bounds_cached(d, e, 0, &mut cache);
+                if b.is_empty() { crate::select::blank_mtext_box(d, e).unwrap_or(b) } else { b }
             })
             .collect::<Vec<_>>();
         let envelope = bounds.iter().filter_map(rect).reduce(|a, b| a.merged(&b));
