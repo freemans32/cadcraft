@@ -20,6 +20,7 @@ mod instant_modals;
 mod layer_manager_tools;
 mod lisp_files;
 mod measure_distance_snapping;
+mod measure_dropdown;
 mod menubar_hover;
 mod mspace_viewport_view;
 mod named_viewports_dialog;

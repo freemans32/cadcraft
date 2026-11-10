@@ -91,6 +91,7 @@ mod malformed_handles;
 mod matchprop;
 mod mbuttonpan;
 mod measure_distance_snapping;
+mod measure_quick;
 mod metric_linetypes;
 mod minsert;
 mod mirror_degenerate_line;
