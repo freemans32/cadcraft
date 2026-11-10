@@ -101,6 +101,7 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
    - Dimensionnement par **vitesse et perte de charge** (linéaire + singulières, circuit le plus défavorisé).
    - Débits : **valeur proposée selon le type de local** (Code du travail R4222-6 : 25 m³/h/occupant en bureau, 30 en restauration/vente/réunion, 45 en atelier léger, 60 sinon ; sanitaires en débit par local, à vérifier dans le texte), **modifiable à la main**.
    - **Gaines circulaires d'abord**, rectangulaires ensuite.
+   - **Outil Bouche** (validé le 10 novembre, à l'étape 2) : diffuseur plafond carré 600×600 4 voies, diffuseur circulaire, grille rectangulaire (mur ou plafond), grille ou fente linéaire, bouche d'extraction circulaire ; ces types suffisent pour l'instant. Dessinées à l'échelle. Taille tapée, ou proposée d'après le **débit max par taille** (pas la vitesse au col). Placement au clic avec orientation, accrochage aux dalles, répartition automatique dans un local (nombre ou grille, débit partagé). Étiquette type, taille, débit ; le piquage sert de départ à la gaine. Bibliothèque de modèles modifiable, sans catalogue de fabricant.
    - Découpage proposé, en attente de validation : (1) moteur de calcul seul, sans dessin, dans `crates/doc` ; (2) locaux et bouches ; (3) tracé du réseau et accessoires ; (4) note de calcul et métré par local ; (5) rectangulaires, puis autres réseaux (frigo, condensats, eau glacée).
 5. **Export IFC** (BIM).
 6. Publier en amont, plus tard : une issue de cadrage chez `storytold/cadcraft`, puis les PR des murs une par une.
