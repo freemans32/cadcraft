@@ -745,6 +745,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cadcraft-hvac"
+version = "0.17.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "cadcraft-io"
 version = "0.17.0"
 dependencies = [
