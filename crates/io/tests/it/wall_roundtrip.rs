@@ -16,6 +16,7 @@ fn drawing() -> (Drawing, WallParams) {
         justification: WallJustification::Left,
         height: 2500.0,
         units: WallUnits::of(&d),
+        joints: Default::default(),
     };
     d.add_wall(&Space::Model, Common::default(), p.clone()).expect("add wall");
     (d, p)
@@ -56,4 +57,26 @@ fn other_programs_see_an_ordinary_block_with_its_application_registered() {
     let kinds: Vec<&str> = b.entities.iter().map(|e| e.kind.type_name()).collect();
     assert!(kinds.iter().all(|k| matches!(*k, "Polyline" | "Line" | "Hatch")), "{kinds:?}");
     assert_eq!(kinds.iter().filter(|k| **k == "Hatch").count(), 2);
+}
+
+#[test]
+fn joined_walls_survive_dxf_and_dwg_still_joined() {
+    let (mut d, p) = drawing();
+    // A second wall in an L with the first one's start.
+    let mut q = p.clone();
+    q.path = vec![Vec2::new(500.0, 500.0), Vec2::new(500.0, -3500.0)];
+    q.justification = WallJustification::Right;
+    d.add_wall(&Space::Model, Common::default(), q).expect("add wall");
+    assert_eq!(d.cleanup_walls(&Space::Model).expect("cleanup"), 2);
+    let walls = |d: &Drawing| d.model.iter().filter_map(|e| wall_of(e).map(|w| (e.handle, w))).collect::<Vec<_>>();
+    let saved = walls(&d);
+    assert!(saved.iter().all(|(_, w)| !w.joints.is_empty()));
+    for name in ["joined.dxf", "joined.dwg"] {
+        let bytes = cadcraft_io::write(&d, name).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let mut back = cadcraft_io::read(&bytes, name).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let got = walls(&back);
+        assert_eq!(got.iter().map(|(_, w)| w).collect::<Vec<_>>(), saved.iter().map(|(_, w)| w).collect::<Vec<_>>(), "{name}");
+        assert!(got.iter().all(|(h, _)| back.wall_is_intact(*h)), "{name}: still recognised");
+        assert_eq!(back.cleanup_walls(&Space::Model).expect("cleanup"), 0, "{name}: nothing to redo");
+    }
 }

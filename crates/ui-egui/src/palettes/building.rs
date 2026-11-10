@@ -204,6 +204,7 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
     let current = app.session.last_used.wall_style.clone();
     let mut draw: Option<String> = None;
     let mut start: Option<&'static str> = None;
+    let mut cleanup = false;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         header(ui, "Walls");
@@ -219,6 +220,9 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
         if row_button(ui, crate::i18n::t("Edit Wall"), false, |_, _| {}) {
             start = Some("walledit");
         }
+        if row_button(ui, crate::i18n::t("Wall Junctions"), false, |_, _| {}) {
+            cleanup = true;
+        }
     });
     if let Some(name) = draw {
         // The style clicked becomes WALLADD's style, then WALLADD starts with it.
@@ -228,5 +232,14 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
     } else if let Some(cmd) = start {
         app.cmd.buffer.clear();
         app.start(cmd);
+    } else if cleanup {
+        // WALLCLEANUP asks nothing: it runs at once and says what it did.
+        match app.run("wallcleanup", serde_json::json!({})) {
+            Ok(r) => {
+                let n = r["regenerated"].as_u64().unwrap_or(0);
+                app.session.echo(crate::tf!("Walls joined: {n} redrawn", n = n));
+            }
+            Err(e) => app.session.echo(e.to_string()),
+        }
     }
 }
