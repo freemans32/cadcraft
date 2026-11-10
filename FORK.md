@@ -78,7 +78,9 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
 ### En cours
 
 1. **Intégrer les PR upstream dans `perso`.**
-   - **Analyse refaite le 10 novembre sur `a3d9348`, simulation terminée, en attente de l'accord de Guillaume pour fusionner et pousser.**
+   - **Fait le 10 novembre, validé par Guillaume : les 162 PR sont fusionnées dans `perso` et poussées, avec `perso/pr-integrees.tsv`.**
+   - Script : Guillaume a déjà « CADCraft Murs » installé par `~/.local/bin/maj-cadcraft-murs`. À vérifier : quelle branche il compile. Idée : l'adapter pour qu'il compile `origin/perso`, plutôt que d'écrire un nouveau script. Le PC n'était pas joignable depuis la session, donc le script n'a pas pu être lu.
+   - Analyse refaite le 10 novembre sur `a3d9348` :
      - Liste des PR ouvertes : par `git ls-remote upstream 'refs/pull/*'` (une PR ouverte a une référence `refs/pull/N/merge`) : 653 PR. L'API GitHub de `storytold/cadcraft` n'était pas accessible depuis la session, donc pas de titres ni de statut brouillon : le tableau donne le dernier commit de chaque PR.
      - 298 s'appliquent seules sur `main`, 355 sont en conflit. Écartées par catégorie : 17 plateforme/paquets/CI, 4 plateforme (titre), 5 langues, 4 docs, 4 refactorisation, #997. Restent 263 candidates.
      - Fusion cumulée par ordre croissant sur `perso` : 162 intégrées, 82 en conflit avec les PR fusionnées avant elles, 19 retirées parce qu'elles cassent la compilation ou les tests : #1084 #1099 #1229 #1263 #1335 #1445 #1452 #1619 #1632 #1692 #1720 #1816 #1873 #2111 #2301 #2451 #2790 #2808 #2826 (raisons dans le tableau).
