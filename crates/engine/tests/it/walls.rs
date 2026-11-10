@@ -339,3 +339,46 @@ fn walledit_at_the_command_line() {
     let w = wall(&s, a);
     assert_eq!((w.style.name.as_str(), w.justification), (PARTITION, WallJustification::Right));
 }
+
+fn joined(s: &Session, hd: Handle) -> bool {
+    !wall(s, hd).joints.is_empty()
+}
+
+#[test]
+fn walls_drawn_into_an_l_are_joined_at_once_and_undo_takes_both_back() {
+    let mut s = metric();
+    let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [4000, 0]], "style": BRICK})).unwrap());
+    assert!(!joined(&s, a), "alone, a wall has no junction");
+    let b = h(&s.execute("walladd", &json!({"points": [[0, 0], [0, 3000]], "style": BRICK, "justification": "right"})).unwrap());
+    assert!(joined(&s, a) && joined(&s, b));
+    s.execute("undo", &json!({})).unwrap();
+    assert!(!joined(&s, a), "undoing the second wall undoes the junction");
+}
+
+#[test]
+fn wallcleanup_joins_walls_moved_together_and_parts_walls_moved_apart() {
+    let mut s = metric();
+    let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [4000, 0]], "style": BRICK})).unwrap());
+    let b = h(&s.execute("walladd", &json!({"points": [[0, 2000], [0, 5000]], "style": PARTITION})).unwrap());
+    assert!(!joined(&s, b));
+    // The partition is moved down onto the wall: WALLCLEANUP joins them.
+    s.execute("move", &json!({"handles": [b.hex()], "delta": [2000, -2000]})).unwrap();
+    assert_eq!(s.execute("wallcleanup", &json!({})).unwrap()["regenerated"], 2);
+    assert!(joined(&s, a) && joined(&s, b));
+    assert_eq!(s.execute("wallcleanup", &json!({})).unwrap()["regenerated"], 0);
+    // Moved away again, both are drawn on their own.
+    s.execute("move", &json!({"handles": [b.hex()], "delta": [0, 10000]})).unwrap();
+    s.execute("wallcleanup", &json!({})).unwrap();
+    assert!(!joined(&s, a) && !joined(&s, b));
+}
+
+#[test]
+fn walledit_rejoins_the_walls_with_the_new_style() {
+    let mut s = metric();
+    let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [4000, 0]], "style": BRICK})).unwrap());
+    let b = h(&s.execute("walladd", &json!({"points": [[0, 0], [0, 3000]], "style": BRICK, "justification": "right"})).unwrap());
+    s.execute("walledit", &json!({"handle": b.hex(), "style": PARTITION})).unwrap();
+    assert!(joined(&s, a) && joined(&s, b));
+    assert_eq!(wall(&s, b).style.name, PARTITION);
+    assert_eq!(s.execute("wallcleanup", &json!({})).unwrap()["regenerated"], 0, "already joined with the new style");
+}

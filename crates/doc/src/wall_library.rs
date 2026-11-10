@@ -23,6 +23,12 @@ fn plasterboard() -> WallComponent {
 }
 
 /// The standard wall styles, in the order the style list shows them.
+/// The core of a partition: weaker than any finish, so a partition stops on the face of the
+/// wall it meets and only its plasterboard merges with that wall's.
+fn partition_core(c: WallComponent) -> WallComponent {
+    WallComponent { priority: 810, ..c }
+}
+
 pub fn standard_wall_styles() -> Vec<WallStyle> {
     vec![
         style("Concrete 200", "Cast in-place concrete wall", vec![c("Concrete", 200.0, Structure).hatched("AR-CONC", 1.0)]),
@@ -62,12 +68,12 @@ pub fn standard_wall_styles() -> Vec<WallStyle> {
         style(
             "Partition 72/48",
             "Plasterboard partition on 48 mm metal studs with mineral wool",
-            vec![plasterboard(), c("Studs 48 + mineral wool", 48.0, Insulation).hatched("ZIGZAG", 4.0), plasterboard()],
+            vec![plasterboard(), partition_core(c("Studs 48 + mineral wool", 48.0, Insulation).hatched("ZIGZAG", 4.0)), plasterboard()],
         ),
         style(
             "Partition 98/48",
             "Acoustic partition: two plasterboards each side of 48 mm metal studs",
-            vec![plasterboard(), plasterboard(), c("Studs 48", 48.0, AirGap), plasterboard(), plasterboard()],
+            vec![plasterboard(), plasterboard(), partition_core(c("Studs 48", 48.0, AirGap)), plasterboard(), plasterboard()],
         ),
     ]
 }

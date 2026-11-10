@@ -21,6 +21,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{DocError, EntityKind, Hatch, HatchLoop, Line, LwPolyline, RawTag, Result};
 
+mod joint;
+pub use joint::{EndCut, ForeignBand, MAX_FOREIGN_BANDS, WallJoints};
+
 /// The registered application name of a wall's extended data.
 pub const WALL_APP: &str = "CADCRAFT_WALL";
 /// Most components a wall style has.
@@ -304,6 +307,9 @@ pub struct WallParams {
     pub height: f64,
     #[serde(default)]
     pub units: WallUnits,
+    /// What the wall keeps about the walls it meets (none: drawn on its own).
+    #[serde(default, skip_serializing_if = "WallJoints::is_empty")]
+    pub joints: WallJoints,
 }
 
 /// One object of a wall's generated geometry: lines go on [`WALL_LAYER`], hatches on
@@ -332,6 +338,7 @@ impl WallParams {
         if self.path.iter().any(|p| !p.is_finite() || p.x.abs() > 1e12 || p.y.abs() > 1e12) {
             return Err(invalid("A wall point is not a finite coordinate."));
         }
+        self.joints.validate()?;
         // Thickness and segment lengths are checked when the geometry is built, the data size
         // when the extended data is.
         self.generate()?;
@@ -368,6 +375,10 @@ impl WallParams {
         let bounds = self.boundaries();
         let reach = bounds.iter().fold(0.0_f64, |m, b| m.max(b.abs()));
         let joins = joins(&self.path, self.closed, reach)?;
+        // A wall that meets others is drawn component by component, cut where they meet.
+        if !self.joints.is_empty() {
+            return self.generate_jointed(&joins);
+        }
         let mut pieces = boundary_lines(&joins, &bounds, self.closed, reach);
         if !self.closed {
             pieces.extend(end_lines(&joins, &bounds));
@@ -539,6 +550,51 @@ impl crate::Drawing {
         Ok(())
     }
 
+    /// Works out where the intact walls of `space` meet (L, T and X junctions) and redraws
+    /// those whose junctions changed; returns how many were redrawn. A wall edited by hand is
+    /// left alone and takes no part. A wall that can't take its junctions is drawn on its own.
+    pub fn cleanup_walls(&mut self, space: &crate::Space) -> Result<usize> {
+        let Some(store) = self.space(space) else { return Ok(0) };
+        let mut handles = Vec::new();
+        let mut placed = Vec::new();
+        for e in store.iter() {
+            let (EntityKind::Insert(i), Some(p)) = (&e.kind, wall_of(e)) else { continue };
+            if !self.wall_is_intact(e.handle) {
+                continue;
+            }
+            if placed.len() >= MAX_CLEANUP_WALLS {
+                return Err(invalid(format!("Walls are joined {MAX_CLEANUP_WALLS} at a time at most.")));
+            }
+            let at = joint::Placement {
+                insert: Vec2::new(i.insert.x, i.insert.y),
+                rotation: i.rotation,
+                scale: Vec2::new(i.scale.x.signum(), i.scale.y.signum()),
+            };
+            handles.push(e.handle);
+            placed.push(joint::Placed { params: p, at });
+        }
+        let joints = joint::work_out_joints(&placed);
+        let mut redrawn = 0;
+        for ((h, w), j) in handles.into_iter().zip(placed).zip(joints) {
+            if w.params.joints == j {
+                continue;
+            }
+            let mut p = w.params;
+            p.joints = j;
+            if p.validate().is_err() {
+                // Too much to keep, or a junction the wall can't draw: on its own.
+                p.joints = WallJoints::default();
+                if w_unchanged(&p, h, self) {
+                    continue;
+                }
+            }
+            if self.regenerate_wall(h, &p).is_ok() {
+                redrawn += 1;
+            }
+        }
+        Ok(redrawn)
+    }
+
     /// Whether wall `h`'s block still holds the geometry its parameters generate, and the
     /// reference keeps the wall's size (no scale but a mirror): only then may it be regenerated.
     pub fn wall_is_intact(&self, h: crate::Handle) -> bool {
@@ -583,6 +639,14 @@ impl crate::Drawing {
             self.blocks.retain(|k, _| !k.eq_ignore_ascii_case(name));
         }
     }
+}
+
+/// Most walls one cleanup joins.
+pub const MAX_CLEANUP_WALLS: usize = 2_000;
+
+/// Whether wall `h` already has parameters `p`.
+fn w_unchanged(p: &WallParams, h: crate::Handle, d: &crate::Drawing) -> bool {
+    d.entity(h).and_then(|e| wall_of(e)).is_some_and(|w| w == *p)
 }
 
 /// The wall an object is, when it is a block reference carrying usable wall data.
