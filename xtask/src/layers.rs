@@ -44,6 +44,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("render", Class::Layer(2)),
     ("io", Class::Layer(3)),
     ("engine", Class::Layer(4)),
+    ("collab-server", Class::Layer(5)),
+    ("collab-client", Class::Layer(4)),
     ("ui-egui", Class::Layer(5)),
     ("mcp", Class::Layer(5)),
     ("testkit", Class::Testkit),
