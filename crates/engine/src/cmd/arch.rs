@@ -1,7 +1,8 @@
 //! Architectural walls (AutoCAD Architecture's names): WALLADD draws a wall of a wall style
 //! along picked points, WALLSTYLEEDIT lists, creates, changes, renames and deletes the
 //! drawing's wall styles and regenerates the walls that use a changed style, WALLEDIT gives
-//! walls already drawn another style, justification or height.
+//! walls already drawn another style, justification or height, WALLCLEANUP joins the walls
+//! where they meet (the other wall commands do it after their change).
 
 use cadcraft_doc::{
     Common, Drawing, Entity, EntityKind, Handle, Line, MAX_WALL_VERTICES, WallComponent, WallJustification, WallParams, WallStyle, WallUnits, wall_of,
@@ -23,6 +24,8 @@ pub fn specs() -> Vec<CommandSpec> {
              patternAngle?, color?, priority?, function?: structure|insulation|finish|membrane|airGap, returnsAtOpenings?}], \
              defaultHeight? (mm), copyFrom?} → {style, regenerated, kept} | {delete: name} | {name, rename: newName}",
         ),
+        CommandSpec::new("wallcleanup", "Wall Junctions", run_wallcleanup)
+            .params("{} → {regenerated}: joins the walls where they meet (L, T, X), after walls were moved, copied or erased"),
         CommandSpec::new("walledit", "Edit Wall", run_walledit)
             .params("{handle | handles, style?, justification?: left|center|right, height? (mm)} → {regenerated}")
             .interactive(|s| Ok(Box::new(WallEditM::new(s)))),
@@ -48,7 +51,7 @@ fn style_named(d: &Drawing, name: &str) -> Result<WallStyle> {
 
 /// The parameters of a wall along `points` (drawing coordinates).
 fn params(d: &Drawing, style: WallStyle, points: Vec<Vec2>, closed: bool, justification: WallJustification, height: f64) -> WallParams {
-    WallParams { style, path: points, closed, justification, height, units: WallUnits::of(d) }
+    WallParams { style, path: points, closed, justification, height, units: WallUnits::of(d), joints: Default::default() }
 }
 
 /// Adds wall `p` (drawing coordinates) to the current space; a standard style it uses is then
@@ -63,7 +66,14 @@ fn add(s: &mut Session, p: WallParams) -> Result<Handle> {
     if d.wall_style(&style.name).is_none() {
         d.wall_styles.push(style);
     }
+    join_walls(d, &space);
     Ok(h)
+}
+
+/// Joins the walls of `space` where they meet; a drawing with too many walls to join at once
+/// keeps them as drawn.
+fn join_walls(d: &mut Drawing, space: &cadcraft_doc::Space) -> usize {
+    d.cleanup_walls(space).unwrap_or(0)
 }
 
 fn justification_param(cmd: &str, p: &Value, default: WallJustification) -> Result<WallJustification> {
@@ -326,6 +336,8 @@ fn update_walls(d: &mut Drawing, name: &str, new: &WallStyle) -> Result<(usize, 
             continue;
         }
         w.style = new.clone();
+        // Junctions are worked out again once every wall has its new style.
+        w.joints = Default::default();
         if w.validate().is_err() {
             kept += 1;
             continue;
@@ -392,6 +404,9 @@ fn run_wallstyleedit(s: &mut Session, p: &Value) -> Result<Value> {
         None => d.wall_styles.push(st.clone()),
     }
     let (regenerated, kept) = update_walls(d, &old_name, &st)?;
+    for space in wall_spaces(d) {
+        join_walls(d, &space);
+    }
     Ok(json!({ "style": style_value(&st, false), "regenerated": regenerated, "kept": kept }))
 }
 
@@ -480,6 +495,8 @@ fn edit_walls(s: &mut Session, handles: &[Handle], c: &WallChange) -> Result<usi
         if let Some(height) = c.height {
             w.height = height;
         }
+        // Junctions are worked out again after the change.
+        w.joints = Default::default();
         w.validate().map_err(|e| other(e.to_string()))?;
         next.push((h, w));
     }
@@ -492,7 +509,33 @@ fn edit_walls(s: &mut Session, handles: &[Handle], c: &WallChange) -> Result<usi
     {
         d.wall_styles.push(st.clone());
     }
+    for space in wall_spaces(d) {
+        join_walls(d, &space);
+    }
     Ok(next.len())
+}
+
+/// The spaces (model, layouts) holding walls.
+fn wall_spaces(d: &Drawing) -> Vec<cadcraft_doc::Space> {
+    let mut v = Vec::new();
+    if d.model.iter().any(|e| wall_of(e).is_some()) {
+        v.push(cadcraft_doc::Space::Model);
+    }
+    for l in &d.layouts {
+        if l.entities.iter().any(|e| wall_of(e).is_some()) {
+            v.push(cadcraft_doc::Space::Paper(l.name.clone()));
+        }
+    }
+    v
+}
+
+fn run_wallcleanup(s: &mut Session, _p: &Value) -> Result<Value> {
+    let d = s.doc_mut()?;
+    let mut n = 0;
+    for space in wall_spaces(d) {
+        n += d.cleanup_walls(&space).map_err(|e| other(e.to_string()))?;
+    }
+    Ok(json!({ "regenerated": n }))
 }
 
 /// `handle` or `handles` of a JSON form.
