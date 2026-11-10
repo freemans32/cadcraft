@@ -1376,3 +1376,6 @@ menu	View	Nézet
 	New layer name	Az új réteg neve
 	Delete Empty Layers	Üres rétegek törlése
 	Deletes every layer that has no objects on it	Törli az összes réteget, amelyen nincs objektum
+
+# ArtCraft feature naming
+	Additional Tools	További eszközök

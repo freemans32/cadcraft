@@ -1286,3 +1286,6 @@ menu	Modify	수정
 	New layer name	새 도면층 이름
 	Delete Empty Layers	빈 도면층 삭제
 	Deletes every layer that has no objects on it	객체가 없는 모든 도면층을 삭제합니다
+
+# ArtCraft feature naming
+	Additional Tools	추가 도구
