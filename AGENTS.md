@@ -1,3 +1,5 @@
+> **Fork freemans32/cadcraft :** lis aussi [`FORK.md`](FORK.md) (consignes du fork et état d'avancement), sur la branche `perso`.
+
 <!-- craft-house-rules:start core source=dde09ea31e2e457f5b4653a6e76f7cdf55944bdf sha256=540e6cea75d12d0710c3dca89658328e81e508ecef102446ca5bb95b7c0b92bb -->
 ## House rules
 
