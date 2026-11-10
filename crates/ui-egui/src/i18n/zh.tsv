@@ -1511,3 +1511,5 @@ menu	View	视图
 	New layer name	新图层名称
 	Delete Empty Layers	删除空图层
 	Deletes every layer that has no objects on it	删除所有没有对象的图层
+	LISP Commands	LISP 命令
+	LISP command	LISP 命令
