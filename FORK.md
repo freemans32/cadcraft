@@ -96,9 +96,12 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
 1. **PR 2 des murs** : onglet Architecture dans les Jeux d'outils, dialogue Styles de murs, section Mur dans Propriétés. Dans `perso`, elle peut s'appuyer sur la PR #2855 (Jeux d'outils utilisateur).
 2. **PR 3 des murs** : raccords L, T et X entre murs, selon les priorités des composants.
 3. **Ouvertures** : portes, fenêtres et baies.
-4. **Gaines CVC** : étude et maquettes d'abord. Questions posées à Guillaume, toujours sans réponse :
-   - VMC logement ou tertiaire (CTA) en premier ?
-   - Dimensionnement par vitesse maximale seulement, ou aussi par perte de charge linéaire ?
+4. **Gaines CVC** : étude en cours (10 novembre). Réponses de Guillaume :
+   - **Tertiaire (CTA)** en premier, la VMC logement plus tard.
+   - Dimensionnement par **vitesse et perte de charge** (linéaire + singulières, circuit le plus défavorisé).
+   - Débits : **valeur proposée selon le type de local** (Code du travail R4222-6 : 25 m³/h/occupant en bureau, 30 en restauration/vente/réunion, 45 en atelier léger, 60 sinon ; sanitaires en débit par local, à vérifier dans le texte), **modifiable à la main**.
+   - **Gaines circulaires d'abord**, rectangulaires ensuite.
+   - Découpage proposé, en attente de validation : (1) moteur de calcul seul, sans dessin, dans `crates/doc` ; (2) locaux et bouches ; (3) tracé du réseau et accessoires ; (4) note de calcul et métré par local ; (5) rectangulaires, puis autres réseaux (frigo, condensats, eau glacée).
 5. **Export IFC** (BIM).
 6. Publier en amont, plus tard : une issue de cadrage chez `storytold/cadcraft`, puis les PR des murs une par une.
 
