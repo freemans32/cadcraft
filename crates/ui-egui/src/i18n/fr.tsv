@@ -1074,3 +1074,20 @@
 
 # ArtCraft feature naming
 	Additional Tools	Outils supplémentaires
+	HVAC	CVC
+	Space	Local
+	Air Terminal	Bouche
+	Air Terminal Models	Modèles de bouches
+	Specify first point of space	Spécifiez le premier point du local
+	Enter space name	Entrez le nom du local
+	Enter space use	Entrez l'usage du local
+	Enter number of occupants	Entrez le nombre d'occupants
+	Enter number of fixtures	Entrez le nombre d'appareils
+	Enter flow (m³/h, 0 for the labour code)	Entrez le débit (m³/h, 0 pour le Code du travail)
+	Specify location of air terminal	Spécifiez la position de la bouche
+	Enter air terminal type	Entrez le type de bouche
+	Enter model name or [Auto/?]	Entrez le nom du modèle ou [Auto/?]
+	Enter flow per terminal (m³/h)	Entrez le débit par bouche (m³/h)
+	Enter air direction	Entrez le sens de l'air
+	Select space	Sélectionnez un local
+	Enter number of terminals or rows x columns	Entrez le nombre de bouches ou lignes x colonnes

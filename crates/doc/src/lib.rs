@@ -20,6 +20,7 @@ mod raster;
 mod refedit;
 mod store;
 mod tables;
+mod ventilation;
 mod wall;
 mod wall_library;
 mod xclip;
@@ -44,6 +45,7 @@ pub use raster::{Raster, Rasters};
 pub use refedit::{RefEdit, WorkItem};
 pub use store::EntityStore;
 pub use tables::*;
+pub use ventilation::*;
 pub use wall::*;
 pub use wall_library::standard_wall_styles;
 pub use xclip::{ClipBoundary, MAX_CLIP_VERTICES};
@@ -115,6 +117,9 @@ pub struct Drawing {
     pub mline_styles: Vec<MLineStyle>,
     /// Wall styles the drawing defines (new walls can also use [`standard_wall_styles`]).
     pub wall_styles: Vec<WallStyle>,
+    /// Air terminal models the drawing defines (new terminals can also use
+    /// [`standard_air_terminal_models`]).
+    pub air_terminal_models: Vec<TerminalModel>,
     pub blocks: BTreeMap<String, std::sync::Arc<Block>>,
     pub model: EntityStore,
     pub layouts: Vec<Layout>,
@@ -201,6 +206,7 @@ impl Drawing {
             table_styles: vec![TableStyle::default()],
             mline_styles: vec![MLineStyle::default()],
             wall_styles: Vec::new(),
+            air_terminal_models: Vec::new(),
             blocks: BTreeMap::new(),
             model: EntityStore::new(),
             layouts: vec![Layout::new("Layout1", 1), Layout::new("Layout2", 2)],

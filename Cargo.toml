@@ -16,6 +16,7 @@ cadcraft-geom = { path = "crates/geom" }
 cadcraft-dxf = { path = "crates/dxf" }
 cadcraft-dwg = { path = "crates/dwg" }
 cadcraft-color = { path = "crates/color" }
+cadcraft-hvac = { path = "crates/hvac" }
 cadcraft-doc = { path = "crates/doc" }
 cadcraft-collab = { path = "crates/collab" }
 cadcraft-collab-server = { path = "crates/collab-server" }

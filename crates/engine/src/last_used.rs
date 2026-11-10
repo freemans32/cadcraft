@@ -32,6 +32,8 @@ pub struct LastUsed {
     /// WALLADD's style (empty: the drawing's first) and justification.
     pub wall_style: String,
     pub wall_justification: cadcraft_doc::WallJustification,
+    /// AIRTERMINALADD's type, model, flow and air direction.
+    pub air_terminal: cmd::TerminalLastUsed,
 }
 
 impl Default for LastUsed {
@@ -50,6 +52,7 @@ impl Default for LastUsed {
             rectang: RectangModes::default(),
             wall_style: String::new(),
             wall_justification: cadcraft_doc::WallJustification::Left,
+            air_terminal: cmd::TerminalLastUsed::default(),
         }
     }
 }

@@ -990,6 +990,9 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, frozen_34
     if let Some(chunks) = dxf_ext::wall_style_chunks(&d.wall_styles) {
         xrecords.push((dxf_ext::WALL_STYLES_KEY, w.h(), chunks));
     }
+    if let Some(chunks) = dxf_ext::air_terminal_model_chunks(&d.air_terminal_models) {
+        xrecords.push((dxf_ext::AIR_TERMINAL_MODELS_KEY, w.h(), chunks));
+    }
     if let Some(chunks) = dxf_ext::plot_style_chunks(&d.plot_style_tables) {
         xrecords.push((dxf_ext::PLOT_STYLES_KEY, w.h(), chunks));
     }

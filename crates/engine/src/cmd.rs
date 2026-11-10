@@ -18,6 +18,8 @@ pub mod file;
 mod gripcmds;
 mod griphot;
 pub(crate) mod groups;
+mod hvac;
+pub use hvac::TerminalLastUsed;
 pub(crate) mod hatch;
 mod image;
 mod inquiry;
@@ -196,6 +198,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(draworder::specs());
         v.extend(array::specs());
         v.extend(arch::specs());
+        v.extend(hvac::specs());
         v.extend(modify2::specs());
         v.extend(groups::specs());
         v.extend(gripcmds::specs());

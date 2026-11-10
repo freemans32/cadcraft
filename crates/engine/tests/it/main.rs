@@ -71,6 +71,7 @@ mod hatch_generate_boundary;
 mod hatch_numeric_validation;
 mod hatch_options;
 mod helix;
+mod hvac;
 mod inquiry_keywords;
 mod inquiry_variables;
 mod inquiry_z;
