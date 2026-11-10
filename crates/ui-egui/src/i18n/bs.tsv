@@ -1462,3 +1462,5 @@ menu	Modify	Izmijeni
 	Layer state name	Naziv stanja slojeva
 	Switches layers on and off, frozen and locked	Uključuje i isključuje slojeve, zamrznute i zaključane
 	Rename	Preimenuj
+	Objects on locked layers can't be selected	Objekti na zaključanim slojevima ne mogu se odabrati
+	They are still shown and snapped to, like a blueprint.	I dalje se prikazuju i hvataju, kao podloga.

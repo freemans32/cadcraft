@@ -1058,3 +1058,5 @@
 	Layer state name	Nom de l'état des calques
 	Switches layers on and off, frozen and locked	Active et désactive les calques, les gèle et les verrouille
 	Rename	Renommer
+	Objects on locked layers can't be selected	Les objets sur des calques verrouillés ne peuvent pas être sélectionnés
+	They are still shown and snapped to, like a blueprint.	Ils restent affichés et accrochables, comme un plan de fond.

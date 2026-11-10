@@ -1481,3 +1481,5 @@ menu	View	Exibir
 	Layer state name	Nome do estado de camadas
 	Switches layers on and off, frozen and locked	Liga e desliga camadas, congela e bloqueia
 	Rename	Renomear
+	Objects on locked layers can't be selected	Objetos em camadas bloqueadas não podem ser selecionados
+	They are still shown and snapped to, like a blueprint.	Eles continuam visíveis e com snap, como uma planta de fundo.

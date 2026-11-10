@@ -1072,3 +1072,5 @@
 	Layer state name	Name des Layerstatus
 	Switches layers on and off, frozen and locked	Schaltet Layer ein und aus, gefroren und gesperrt
 	Rename	Umbenennen
+	Objects on locked layers can't be selected	Objekte auf gesperrten Layern können nicht ausgewählt werden
+	They are still shown and snapped to, like a blueprint.	Sie werden weiterhin angezeigt und gefangen, wie ein Blueprint.

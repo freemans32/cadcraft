@@ -1046,3 +1046,5 @@
 	Layer state name	Имя состояния слоев
 	Switches layers on and off, frozen and locked	Включает и выключает слои, замораживает и блокирует
 	Rename	Переименовать
+	Objects on locked layers can't be selected	Объекты на заблокированных слоях нельзя выбрать
+	They are still shown and snapped to, like a blueprint.	Они по-прежнему показываются и к ним работает привязка, как к подложке.

@@ -1499,3 +1499,5 @@ menu	Modify	Ändra
 	Layer state name	Namn på lagerstatus
 	Switches layers on and off, frozen and locked	Slår på och av lager, fryser och låser
 	Rename	Byt namn
+	Objects on locked layers can't be selected	Objekt på låsta lager kan inte markeras
+	They are still shown and snapped to, like a blueprint.	De visas och snappas fortfarande till, som ett underlägg.

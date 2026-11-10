@@ -1365,3 +1365,5 @@ menu	View	Nézet
 	Layer state name	Rétegállapot neve
 	Switches layers on and off, frozen and locked	Be- és kikapcsolja, fagyasztja és zárolja a rétegeket
 	Rename	Átnevezés
+	Objects on locked layers can't be selected	A zárolt rétegeken lévő objektumok nem jelölhetők ki
+	They are still shown and snapped to, like a blueprint.	Továbbra is megjelennek, és illeszthetők hozzájuk, mint egy háttérrajzhoz.

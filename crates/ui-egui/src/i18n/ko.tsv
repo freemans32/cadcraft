@@ -1275,3 +1275,5 @@ menu	Modify	수정
 	Layer state name	레이어 상태 이름
 	Switches layers on and off, frozen and locked	레이어를 켜고 끄며 동결하고 잠급니다
 	Rename	이름 바꾸기
+	Objects on locked layers can't be selected	잠긴 도면층의 객체는 선택할 수 없습니다
+	They are still shown and snapped to, like a blueprint.	밑그림처럼 계속 표시되며 스냅도 적용됩니다.

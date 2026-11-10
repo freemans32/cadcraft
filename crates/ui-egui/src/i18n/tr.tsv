@@ -1368,3 +1368,5 @@ menu	View	Görünüm
 	Layer state name	Katman durumu adı
 	Switches layers on and off, frozen and locked	Katmanları açar ve kapatır, dondurur ve kilitler
 	Rename	Yeniden adlandır
+	Objects on locked layers can't be selected	Kilitli katmanlardaki nesneler seçilemez
+	They are still shown and snapped to, like a blueprint.	Bir altlık gibi hâlâ gösterilir ve yakalanır.

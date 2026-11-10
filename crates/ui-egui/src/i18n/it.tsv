@@ -1414,3 +1414,5 @@ menu	Modify	Edita
 	Layer state name	Nome dello stato layer
 	Switches layers on and off, frozen and locked	Attiva e disattiva i layer, li congela e li blocca
 	Rename	Rinomina
+	Objects on locked layers can't be selected	Gli oggetti sui layer bloccati non possono essere selezionati
+	They are still shown and snapped to, like a blueprint.	Restano visibili e agganciabili, come una base di riferimento.

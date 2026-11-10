@@ -1361,3 +1361,5 @@ menu	View	Προβολή
 	Layer state name	Όνομα κατάστασης επιπέδων
 	Switches layers on and off, frozen and locked	Ενεργοποιεί και απενεργοποιεί επίπεδα, τα παγώνει και τα κλειδώνει
 	Rename	Μετονομασία
+	Objects on locked layers can't be selected	Τα αντικείμενα σε κλειδωμένα επίπεδα δεν μπορούν να επιλεγούν
+	They are still shown and snapped to, like a blueprint.	Εξακολουθούν να εμφανίζονται και να έχουν σύλληψη, όπως ένα υπόβαθρο.

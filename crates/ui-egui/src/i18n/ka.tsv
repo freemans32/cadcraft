@@ -1475,3 +1475,5 @@ menu	View	ხედი
 	Layer state name	შრეების მდგომარეობის სახელი
 	Switches layers on and off, frozen and locked	შრეების ჩართვა და გამორთვა, გაყინვა და ჩაკეტვა
 	Rename	სახელის შეცვლა
+	Objects on locked layers can't be selected	ჩაკეტილ შრეებზე ობიექტების არჩევა შეუძლებელია
+	They are still shown and snapped to, like a blueprint.	ისინი კვლავ ჩანს და მათზე მიბმა შესაძლებელია, როგორც ესკიზზე.

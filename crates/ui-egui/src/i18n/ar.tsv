@@ -1399,3 +1399,5 @@ menu	View	عرض
 	Layer state name	اسم حالة الطبقات
 	Switches layers on and off, frozen and locked	يشغّل الطبقات ويطفئها ويجمّدها ويقفلها
 	Rename	إعادة التسمية
+	Objects on locked layers can't be selected	لا يمكن تحديد الكائنات الموجودة على طبقات مقفلة
+	They are still shown and snapped to, like a blueprint.	لا تزال معروضة ويمكن الالتقاط إليها، مثل المخطط الخلفي.

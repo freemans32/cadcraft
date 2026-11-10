@@ -1448,3 +1448,5 @@
 	Layer state name	Назва стану шарів
 	Switches layers on and off, frozen and locked	Вмикає й вимикає шари, заморожує та блокує
 	Rename	Перейменувати
+	Objects on locked layers can't be selected	Об'єкти на заблокованих шарах не можна вибрати
+	They are still shown and snapped to, like a blueprint.	Вони й далі показуються, і до них працює прив'язка, як до підкладки.

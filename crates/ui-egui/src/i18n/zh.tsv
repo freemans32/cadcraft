@@ -1495,3 +1495,5 @@ menu	View	视图
 	Layer state name	图层状态名称
 	Switches layers on and off, frozen and locked	打开和关闭图层，冻结和锁定
 	Rename	重命名
+	Objects on locked layers can't be selected	无法选择已锁定图层上的对象
+	They are still shown and snapped to, like a blueprint.	它们仍会显示并可捕捉，就像底图一样。
