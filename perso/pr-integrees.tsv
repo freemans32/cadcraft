@@ -1,0 +1,655 @@
+# PR ouvertes de storytold/cadcraft, base upstream a3d9348 (10 nov. 2026)
+# numéro	dernier commit de la PR	statut	raison
+11	README: install on Gentoo from the ::snakebyte overlay	écartée	documentation
+42	Smoke sweep over every command, with time/token/model metrics per run	écartée	conflit avec main
+70	Fix OmaStore executable paths in Linux tarballs	écartée	plateforme/paquets/CI
+218	Complete Polish localization catalog and terminology fixes	intégrée	
+430	fix(packaging): add scalable Linux app icon	écartée	conflit avec main
+529	Merge latest upstream main into Traditional Chinese PR	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/i18n.rs
+551	Fields: format the field display test	intégrée	
+615	docs: use present tense in the ArtCraft brand verb list	écartée	documentation
+637	macOS: build the DMG with hdiutil create so the app passes codesign --strict	écartée	conflit avec main
+668	Merge remote-tracking branch 'origin/main' into fix/winit-consolidated	écartée	conflit avec main
+676	Rename Print to Plot across UI and command spec	intégrée	
+683	macOS: also claim AutoCAD's and LibreOffice's DWG and DXF types so Finder offers CADCraft (#158)	écartée	conflit avec main
+685	Drop the root AGENTS.md docs rule; keep the PR to docs/user/	écartée	documentation
+737	Plot dialog: warn when the Window plot area encloses no area	intégrée	
+755	Merge remote-tracking branch 'upstream/main' into pr/plot-cups	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/managers.rs
+768	UI fonts: look for an unfound script's font again when the font folders change, not every 30 s (review)	intégrée	
+794	Add a Nix flake (NixOS, GNOME and Hyprland)	écartée	plateforme/paquets/CI
+836	Drag selected objects through the interactive MOVE command	écartée	conflit avec main
+839	perf: improve large-drawing interaction and file opening	écartée	conflit avec main
+875	Embed craft-fonts by default via .cargo/config.toml [env]	écartée	plateforme/paquets/CI
+899	Reuse existing drawing tabs when reopening paths	écartée	conflit avec main
+909	Merge main into fix/mtext-2008-rt-contents	intégrée	
+910	Merge main into fix/attrib-vertical-justification	intégrée	
+948	Editing an imported table larger than TABLE creates keeps all its rows and columns (fixes #915)	intégrée	
+949	JOIN takes an open polyline whole, so a partly chained one no longer loses its other segments (fixes #914)	écartée	conflit avec main
+950	Merge main into fix/mtext-spaces-and-caret-tab	écartée	conflit avec main
+952	DXF/DWG: keep extrusion directions on save (lines, points, tilted 2D objects)	écartée	conflit avec main
+954	Dimensions: an explicit text rotation sizes the dimension line's gap	écartée	conflit avec main
+962	Docs: update the progress docs for this change	écartée	conflit avec main
+963	Test: a stretched multiline attribute survives a save	intégrée	
+964	Merge main into feat/visual-effect-options	intégrée	
+965	Merge origin/main into issue-945	intégrée	
+968	Say that handles in kept 102 groups of unknown entities are remapped (#940)	intégrée	
+971	Merge remote-tracking branch 'origin/main' into review-971	intégrée	
+972	Merge origin/main into issue-932 (#932)	intégrée	
+973	Lisp: CLOSE reports a failed file write in the split builtins/files.rs (#931)	écartée	conflit avec les PR intégrées avant : crates/engine/src/lisp/tests.rs
+974	Document the blocking step cap and its error message (#930)	intégrée	
+981	Merge origin/main into issue-916	intégrée	
+983	Add Alexander Alber to people.toml	écartée	conflit avec main
+984	fix: adapt upstream commands and tests to PointInput	écartée	conflit avec main
+986	perf: index entity storage and batch selected deletions	écartée	conflit avec main
+987	perf: reuse model geometry and GPU buffers across small edits	écartée	conflit avec main
+988	perf: borrow DXF section and record payloads while loading	écartée	conflit avec main
+990	Hit-test dash test: a block is picked on its line, not its bounding rectangle (this PR)	intégrée	
+992	Docs: update the progress docs for this change	écartée	conflit avec main
+993	Block reference grips: none on locked or invisible attributes; a moved multiline attribute moves its text	intégrée	
+994	Properties palette: the described rows' shared inputs in one struct, within #2239's limit	écartée	conflit avec main
+996	i18n: read Arabic labels right to left (the visual-order pass)	écartée	conflit avec main
+997	Merge upstream/main into perf/cjk-text	écartée	compilation : GENERATION redéfini (#997)
+999	Merge upstream/main into fix/stretch-pickfirst	intégrée	
+1000	DWG: only the CLASSES section's CLASS records name classes	écartée	conflit avec main
+1005	Merge main into autocad-3d	écartée	conflit avec main
+1007	fix(svg): read the T/t smooth-quadratic endpoint as an (x, y) pair (#944)	écartée	conflit avec les PR intégrées avant : crates/io/src/tests.rs
+1008	Dimension style shortcut commands: imports by name, as #2239 requires	écartée	conflit avec main
+1010	SETVAR test: ARRAYASSOCIATIVITY 0 really makes plain copies	écartée	conflit avec main
+1011	Hatch: keep a pattern line's dash shift in step with a negative line offset	intégrée	
+1012	Render: look layers up in a per-build index	écartée	conflit avec main
+1015	fix(engine): respect locked layers in property, table, block and array edits	écartée	conflit avec main
+1018	Merge upstream/main into feat/drawing-lock	intégrée	
+1020	Merge remote-tracking branch 'upstream/main' into pr/rename-keeps-extras	écartée	conflit avec main
+1021	HATCH pick points find boundaries in large drawings (fixes #1014)	écartée	conflit avec main
+1022	fix(select): measure text selection boxes with rendered layout	écartée	conflit avec main
+1023	Ribbon: no collapsed Tool Sets strip in the Windows layout	écartée	conflit avec main
+1024	fix(select): reject empty space in block crossing windows	écartée	conflit avec main
+1028	Fix cursor review findings and resolve manifest conflict	intégrée	
+1030	Docs: leave the parity docs to the maintainers (AGENTS.md: PRs don't edit them)	écartée	conflit avec main
+1038	DWG: an older DWG's dimension styles keep their jog angle	intégrée	
+1042	-DIMSTYLE: imports by name, as #2239 requires; the managers' modules in order	écartée	conflit avec main
+1044	Prevent REGION data loss during DWG saves (#1019)	écartée	conflit avec main
+1059	A moving click counts when no drag window was opened	intégrée	
+1063	feat: add flake for nixos	écartée	plateforme/paquets/CI
+1065	Credit dennisVercauteren as Kubuz	écartée	conflit avec main
+1066	Use reviewed SuitePalette API naming	écartée	conflit avec main
+1067	LEADER annotation text follows DIMSCALE	écartée	conflit avec main
+1082	Filter imported dimension polyline endpoints per segment	écartée	conflit avec main
+1083	-STYLE: imports by name, as #2239 requires	écartée	conflit avec main
+1084	Merge upstream/main into fix/dim-leader-text	écartée	compilation : tests de Dimension sans insertion_point
+1089	Review fixes: TEXT refuses an unknown justification; its params string	écartée	conflit avec main
+1092	TRIM/EXTEND: shift-select does the other one, as the prompt says (part of #1091)	écartée	conflit avec main
+1093	feat(render, ui-egui): canvas rendering, interactive grips, and cross-platform clipboard support	écartée	conflit avec main
+1097	Docs: leave the parity docs to the maintainers (AGENTS.md: PRs don't edit them)	écartée	conflit avec main
+1098	Docs: leave the parity docs to the maintainers (AGENTS.md: PRs don't edit them)	écartée	conflit avec main
+1099	Dynamic blocks: an attribute keeps its own hidden state when another property changes	écartée	compilation : champ hidden incompatible avec main
+1109	Extents cache: layer visibility and block redefinition regression tests (ReviewerA on #1109)	écartée	conflit avec main
+1114	Center snap: hovering a circle, arc or ellipse offers its center, however far (fixes #1112)	intégrée	
+1121	Review fix: the typed line previews with the properties it's placed with	écartée	conflit avec main
+1122	Reuse the current style name in run_leader	écartée	conflit avec main
+1123	OVERKILL deletes lines and arcs lying on a polyline segment (fixes #1120)	écartée	conflit avec main
+1126	TRIM highlights only the piece a click removes, EXTEND the extended object (fixes #1118)	écartée	conflit avec main
+1128	Review fixes: Quick Properties' Layer menu scrolls; the dimension rows listed	écartée	conflit avec main
+1130	Smooth GPU screen strokes and distinguish displayed lineweights	écartée	conflit avec main
+1132	Middle-button pan follows the frame's pointer events, so a drag isn't lost on slow frames (fixes #1131)	écartée	conflit avec main
+1136	Review fixes: multiline attributes' 71; justified text's DXF start by its own flags	écartée	conflit avec main
+1146	fix(engine): the three findings from the second review	écartée	conflit avec main
+1147	i18n: complete Korean translations and ensure Korean font fallback	écartée	conflit avec main
+1148	Windows: single instance file handoff, window state persistence, and Full Screen (F11) support	écartée	conflit avec main
+1152	Review fixes: a multiline attribute's mask takes its layer; the mask counts in the extents	écartée	conflit avec main
+1153	A copied group stays a group: COPY, MIRROR, ARRAY and paste make an unnamed group of the copies (fixes #1151)	écartée	conflit avec main
+1154	Layout SVG plots draw sub-resolution dash patterns as continuous lines too	écartée	conflit avec main
+1157	Credit halu0915 as N+Star in the About window	écartée	conflit avec main
+1159	Block references with a tilted extrusion are placed at their WCS point	écartée	conflit avec main
+1185	Merge main and compose EXPLODE elevations with independent Z scales	écartée	conflit avec main
+1187	Fix command-line clipboard text paste and macOS routing	écartée	conflit avec main
+1192	FILLET and CHAMFER keep each line's start and end (fixes #1178)	écartée	conflit avec main
+1196	Pick a wide polyline on the edges of its band, not only its centre line (fixes #1176)	intégrée	
+1200	cargo fmt	écartée	conflit avec main
+1201	MIRROR follow-up 2: attributes placed from a definition follow main again, an ATTDEF's multiline text stays with its text (#1169)	écartée	conflit avec main
+1202	Geometry parity: one BREAK row and one JOIN row	écartée	conflit avec main
+1203	Handle seed test: the arrow block drawing reopens with the same seed after every save	écartée	conflit avec main
+1204	Handle dense PDF content and incomplete CID glyph maps	écartée	conflit avec main
+1206	Tables: key the cell block cache by visibility state, bound what it measures	écartée	conflit avec main
+1207	Fix native macOS Quit to honor close flow	écartée	conflit avec main
+1213	Merge main into feat/block-attribute-editing	intégrée	
+1214	Add Thai UI fallback font support	écartée	conflit avec main
+1218	Geometry parity: the TRIM row names its two exceptions	écartée	conflit avec main
+1219	PLOT: PNG and SVG plots of a layout take the page setup's or the command's scale, as the PDF does (the Plot dialog's Preview)	écartée	conflit avec main
+1220	ACAD_TABLE tests: value blocks read from other programs save and reopen whole	écartée	conflit avec main
+1221	Merge storytold/main into fix-dwg-spline	écartée	conflit avec main
+1222	Copies between drawings follow a block renamed in another case	écartée	conflit avec main
+1223	Merge upstream/main into fix/fillet-pline-side	intégrée	
+1224	Contributors: add my real name	écartée	conflit avec main
+1228	Merge dxf-dimjogang-degrees into dxf-r2000-jog-xdata (an older DWG's jog angle)	écartée	conflit avec main
+1229	Plot: a scale given without fit plots model space at that scale (fixes #1226)	écartée	tests de tracé (plot_model_scale, plotter) échouent
+1231	docs(releasing): state what the bundled cadcraft-cli costs the AppImage	écartée	plateforme/paquets/CI
+1233	engine: keep a hatch's custom .pat definition when properties.set changes it	intégrée	
+1242	Only the pick box shows while a command asks for objects (fixes #1241)	écartée	conflit avec main
+1243	Rays and xlines: cut points measured from the base, not from 1e8 away	écartée	conflit avec main
+1244	Merge main into fix/block-record-annotative	écartée	conflit avec main
+1246	i18n(fi): Georgian joined the language list; translate 16 new labels	écartée	conflit avec main
+1247	packaging: name /usr/share's files one by one, so the RPM doesn't own /usr/share/mime	écartée	plateforme/paquets/CI
+1248	Add GEOMAP online basemap background	écartée	conflit avec main
+1252	Refuse unknown parameter names in rectang	intégrée	
+1254	Window ▸ Blocks scrolls when the block list is taller than the window (fixes #1249)	intégrée	
+1257	Run desktop DWG/DXF saves on a worker	écartée	conflit avec main
+1263	doc: a mirrored dimension reflects its direction about the mirror line	écartée	compilation : tests de Dimension sans insertion_point (upstream #2636)
+1265	doc: a rotated hatch turns its gradient's angle too	écartée	conflit avec les PR intégrées avant : crates/doc/src/tests.rs
+1266	fmt: keep plotters.rs rustfmt-clean	intégrée	
+1268	publish: a layout listed twice is refused too	écartée	conflit avec main
+1271	Merge upstream/main into fix/dxf-audit-leftovers	intégrée	
+1274	feat(android): add tested mobile keyboard, toolbar and autocomplete	écartée	conflit avec main
+1276	io: drop the renumbering plumbing the handle fix no longer needs	intégrée	
+1277	render: cap how many dashes a plot may expand into	intégrée	
+1279	ui: the options reset brings a hidden menu bar and tool bar back	intégrée	
+1280	io: group the ENTITIES handle rules into one HandlePolicy parameter	écartée	conflit avec main
+1281	Add Italian command localization	écartée	conflit avec main
+1282	EXTEND takes rays: the base moves back to the nearest edge (#1236)	écartée	conflit avec main
+1283	OPTIONS Reset to Defaults shows the menu bar, toolbar and panels again (#1240)	écartée	conflit avec main
+1286	Keep the polyline's elevation when EXPLODE splits it	intégrée	
+1287	add cadcraft-hub: the CraftHub client path (the v3 adapter)	écartée	conflit avec main
+1288	zh command history: the inline history translates too; gaps.md status line (CodeRabbit review of #1288)	écartée	conflit avec main
+1290	Packaging: pin and checksum appimagetool 1.9.1 and Trusted Signing client 1.0.95	écartée	conflit avec main
+1292	Format the Escape-drag test	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/canvas.rs
+1293	Merge remote-tracking branch 'upstream/main' into pr/block-previews	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/dialogs.rs
+1296	Add Craft AI: the family's built-in local assistant	écartée	conflit avec main
+1299	같은 프레임의 선택 클릭에서 누락되는 모서리 보존	écartée	conflit avec main
+1303	Merge current main into AREA preview branch	intégrée	
+1304	Fix SCRIPT file picker dispatch	écartée	conflit avec main
+1306	Publish: fix the code review's findings	écartée	conflit avec main
+1317	PDF: plot raster IMAGE entities as images instead of the crossed placeholder	écartée	conflit avec main
+1322	선택 그립 커서 정렬과 Ctrl+1 특성창 토글 추가	écartée	conflit avec main
+1324	Geometric Tolerance dialog for TOLERANCE (F8)	écartée	conflit avec main
+1332	Don't print a minus sign for distances that round to zero	intégrée	
+1333	Lasso and CP: test only the edges near each object; a crossing area inside text or a SOLID selects it	écartée	conflit avec main
+1335	AutoLISP: a lone CR is data again (only LF and CRLF end a line); newton stops when clamped, wraps on periodic curves; one LispFile helper for the unterminated last line	écartée	compilation : EntityCodec sans objects
+1339	Add Thai to Interface Language	écartée	conflit avec main
+1342	Stop fence and crossing window selecting a ray behind its base	intégrée	
+1347	Recognize AutoCAD DWG and LibreOffice DXF document types	écartée	conflit avec main
+1362	Annotative text contexts test: Dimension gains insertion_point on main	écartée	conflit avec main
+1367	fix(automation): show listening address in the MCP server options grid	écartée	conflit avec main
+1368	Merge latest upstream main and resolve GNOME Wayland control conflicts	écartée	plateforme/paquets/CI
+1370	Merge the stack below into an3	écartée	conflit avec main
+1371	Properties rotation test follows main's bearing rule (measured from ANGBASE, #2590)	écartée	conflit avec main
+1373	Merge the stack below into an4	écartée	conflit avec main
+1378	feat(dwg): enable DWG support in WebAssembly	écartée	conflit avec main
+1379	Merge the stack below into an5	écartée	conflit avec main
+1380	feat(web): persist imported drawings for Open Recent	écartée	conflit avec main
+1383	AutoComplete: Enter or Space on a partial command name runs the top suggestion (fixes #1374)	écartée	conflit avec main
+1384	feat: preserve extension entity appearance and fills	écartée	conflit avec main
+1385	Contributors: add my name for the About window	écartée	conflit avec main
+1395	feat(installer): unify Windows setup and completion screens (INSTALLER-UI)	écartée	conflit avec main
+1397	Double-click a layout tab to rename it in place (gaps.md U7)	écartée	conflit avec main
+1399	MATCHPROP Settings opens the Property Settings dialog (F19)	écartée	conflit avec main
+1400	Grips: Add Vertex on a polyline arc segment keeps two arcs, as in AutoCAD (gaps U5)	écartée	conflit avec main
+1401	The command bar's edges drag to resize it (#1327)	écartée	conflit avec main
+1402	A clipped viewport and its clip boundary move, rotate, scale, copy and erase together (gaps F15)	écartée	conflit avec main
+1404	Merge main into fix/grip-drag	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/canvas.rs
+1405	Tables: rows grow for blocks at their own scale; report sketch blocks shown as drawn	écartée	conflit avec main
+1406	Connectors: named points of a block where wires attach and follow	écartée	conflit avec main
+1408	Tab cycles through every object snap under the cursor, not one per mode (gaps U4)	écartée	conflit avec main
+1411	Grips: the grip menu opens when the cursor rests on a grip, as in AutoCAD (gaps U5)	écartée	conflit avec main
+1413	i18n: add Lao (lo) translation support	écartée	conflit avec main
+1425	Double-clicking an MTEXT opens the in-place text editor	écartée	conflit avec main
+1431	Docs: typed points keep their Z, and so do 3DPOLY's typed vertices (#1409, #1410)	écartée	conflit avec main
+1435	MENUBAR: a typeable way back when the in-window menu bar is hidden	écartée	conflit avec main
+1441	Cursor: the pickbox alone at Select objects prompts	écartée	conflit avec main
+1442	Command line: Backspace on a completion chooses the first row again; the list is worked out once	écartée	conflit avec main
+1443	Ribbon: contextual tabs from one list, shown together	écartée	conflit avec main
+1445	doc: text, attribute definitions and an insert's attributes move by the Z delta	écartée	compilation : Insert sans le champ clip
+1446	feat: add portable extension system	écartée	conflit avec main
+1450	fix(pointmod): flip TK axis from the axis used, guard non-finite cursor	écartée	conflit avec main
+1451	fix(hatch): a copy made with part of its boundary is detached; a handle named twice is edited once	intégrée	
+1452	Merge remote-tracking branch 'upstream/main' into feat/menubar-toolbar-cmds	écartée	libellé « Menu Bar » sans traduction chinoise (test i18n)
+1460	Merge remote-tracking branch 'upstream/main' into feat/dimstyle-manager	intégrée	
+1461	Fail to offset a polyline whose segments collapse or flip	intégrée	
+1462	MIRROR: an arc-length dimension attached to a line keeps its arc and its attachments	écartée	conflit avec main
+1469	Keep the web canvas cursor visible	écartée	conflit avec main
+1470	Merge remote-tracking branch 'upstream/main' into pr/plot-window-cull	écartée	conflit avec les PR intégrées avant : crates/doc/src/extents.rs crates/render/src/blocks.rs
+1474	Merge remote-tracking branch 'upstream/main' into fix/hatch-arcs	écartée	conflit avec main
+1481	feat: reference clipping (XCLIP/IMAGECLIP/CLIP), viewport sync (F15), and model plot margins	écartée	conflit avec main
+1483	Translate the wheelZoom preference into Ukrainian and Italian	écartée	conflit avec main
+1484	Merge origin/main into viewport-ucs	intégrée	
+1486	Delete index.html	écartée	langues
+1499	Read R12 and earlier binary DXF (1-byte group codes)	écartée	conflit avec main
+1500	feat(engine): unstub -ATTEDIT options (Position/Height/Angle/Style) and -RENAME (VPort/Plotstyle)	écartée	conflit avec main
+1502	feat(engine): cycle every candidate object snap in aperture on Tab (closes U4)	écartée	conflit avec main
+1503	feat(macos): open drawings from Finder, Dock, and open -a (fixes #158, closes U13)	écartée	conflit avec main
+1505	Merge remote-tracking branch 'upstream/main' into pr/locked-layer-fade	intégrée	
+1506	OFFSETGAPTYPE: leave docs/geometry-parity.md to the maintainers	intégrée	
+1510	feat(ui): support Paste to Command Line and Select All Layouts context menu options (gaps U7)	écartée	conflit avec main
+1511	Merge upstream/main into feat/snap-z	écartée	conflit avec main
+1515	feat(text): add MTEXT width and column-height grips	écartée	conflit avec main
+1517	feat(engine): cycle through every candidate snap with Tab (gaps U4)	écartée	conflit avec main
+1519	feat(engine,ui): complete TOLERANCE in-place editing, LEADER annotations, and dialog (F8)	écartée	conflit avec main
+1524	feat(engine,ui): complete MATCHPROP settings dialog, multi-space draworder, and polyline OVERKILL (F19)	écartée	conflit avec main
+1528	cadcraft-cli: a failed script line leaves no command running	écartée	conflit avec main
+1533	UCS View: normalise the view twist and say in the params doc that X follows it	écartée	conflit avec les PR intégrées avant : crates/io/src/dxf_ext.rs crates/io/src/dxf_read.rs crates/io/src/dxf_read/objects.rs crates/io/src/dxf_read/tables.rs crates/io/src/dxf_write.rs crates/io/src/dxf_write/common.rs crates/io/src/dxf_write/sections.rs
+1534	macOS: show file dialogs as sheets	écartée	plateforme
+1547	Merge remote-tracking branch 'origin/main' into ucs-drafting	écartée	conflit avec les PR intégrées avant : crates/io/src/dxf_ext.rs crates/io/src/dxf_read.rs crates/io/src/dxf_read/objects.rs crates/io/src/dxf_read/tables.rs crates/io/src/dxf_write.rs crates/io/src/dxf_write/common.rs crates/io/src/dxf_write/sections.rs
+1553	AI.1: add local AI 2D drafting with show/hide Studio panel	écartée	conflit avec main
+1555	docs: leave ui-parity.md to the maintainers	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/canvas.rs
+1557	Resolve typed command names in one place (cmd::typed_command)	écartée	conflit avec main
+1560	Keep table cell line breaks through DXF save and reopen	intégrée	
+1565	Merge remote-tracking branch 'origin/main' into feat/cadcraft-clip-f2	écartée	conflit avec main
+1572	Merge main and clarify AltGr keyboard validation	écartée	conflit avec main
+1573	fix: preserve FILLET arc endpoint arrival direction	écartée	conflit avec main
+1574	fix: apply saved plot styles in PREVIEW	écartée	conflit avec main
+1576	Keep format and spatial crates on the 0.36-compatible pins.	écartée	conflit avec main
+1579	i18n(cs): the 7 strings translation_gaps lists after merging main	écartée	conflit avec main
+1582	AutoSnap: the aperture box follows a one-off snap; APBOX takes 0 or 1	écartée	conflit avec main
+1587	PDF: test the page-by-page writer against the held one, and the font-cap fallback	écartée	conflit avec main
+1588	dxf: Section keeps its Default derive	écartée	conflit avec main
+1591	Review: the DWG half of the justification round trip only where the DWG bridge is built	écartée	conflit avec les PR intégrées avant : crates/io/src/dxf_read/text.rs
+1596	desktop: CADCRAFT_STENCIL=0 runs without a stencil buffer (black window on old Intel)	écartée	conflit avec main
+1599	render: a stale *D dimension block is regenerated from the defpoints	écartée	conflit avec main
+1605	Write RevcloudProps xdata on revision clouds	intégrée	
+1606	feat(viewer): add a lightweight read-only GPU drawing viewer	écartée	conflit avec main
+1615	Keep block records' extension dictionaries on import	intégrée	
+1619	WBLOCK: route the save dialog from route_ui_subsystems, so run_ui_command_inner gains no branch or return over main (#1607)	écartée	test WBLOCK exchange échoue
+1620	fix(view): restore and preserve saved model view	écartée	conflit avec main
+1621	fix(ui): expose Shift to Acquire drafting option	écartée	conflit avec main
+1627	web: tell the embedding page when a drawing could not be opened	écartée	conflit avec main
+1632	Draw the diameter sign with a mark the text style's own font has	écartée	test fonts du signe diamètre échoue
+1633	Docs: qualify the README DWG read claims	écartée	conflit avec main
+1673	Object snaps: a click across spaces picks as before; viewports stay apart in Tab's list	écartée	conflit avec les PR intégrées avant : crates/engine/src/snap.rs
+1675	Integrate UCS drafting, selection previews, and 3D navigation	écartée	conflit avec main
+1684	Measure an MTEXT's extents by the text it shows in every path, and keep \U+XXXX in the shared plain_mtext (#1668)	écartée	conflit avec main
+1686	Review: saving counts the memory the open drawing holds; only machine limits name CADCRAFT_MEMORY_GB	écartée	conflit avec main
+1687	DXF/DWG save: kept render settings take the declared version's class-version form	écartée	conflit avec main
+1688	Document the native menu check mark helpers and tests	écartée	conflit avec main
+1692	Merge remote-tracking branch 'origin/main' into revcloud-bulge	écartée	compilation : import RawTag en double avec #1605
+1699	Merge branch 'main' of https://github.com/storytold/cadcraft into HEAD	écartée	conflit avec les PR intégrées avant : crates/doc/src/dynblock/apply.rs
+1703	Storeys: style renames reach every storey, blueprint hatches and images, storey setup kept, review	écartée	conflit avec les PR intégrées avant : crates/engine/src/lib.rs crates/io/src/dxf_read/objects.rs crates/io/src/dxf_write/sections.rs
+1704	Layer states switcher: follow main (egui ids, new catalogs)	intégrée	
+1705	Locked layers unselectable: LAST checks the last object itself, groups bring no locked members, review	intégrée	
+1708	Read DXF sections and records as slices instead of copies	écartée	conflit avec main
+1709	fix: a Shift click keeps its release even when Shift is let go first	écartée	conflit avec main
+1710	CADCraft.app ships the licence files	écartée	plateforme/paquets/CI
+1720	Merge remote-tracking branch 'origin/main' into attdef-justify-style	écartée	compilation : AttribModes sans le champ hidden
+1723	Merge remote-tracking branch 'origin/feat/dynblock-array' into feat/dynblock-scale	écartée	conflit avec les PR intégrées avant : crates/doc/src/dynblock/apply.rs
+1728	Docs: leave the parity docs to the maintainers (AGENTS.md: PRs don't edit them)	écartée	conflit avec main
+1729	ATTDEF: the Attribute Definition dialog, Align and Fit, below the previous definition, and Properties rows for attribute definitions	écartée	conflit avec main
+1730	Review: a style set on several texts is one undo step and keeps each text's height	écartée	conflit avec main
+1731	Review: the field fits a narrow tiled viewport; the size test checks the letters, not the platform's line height	écartée	conflit avec main
+1740	Merge origin/main into issue-1713 (#1713)	intégrée	
+1741	REVCLOUD: test that Reverse direction Yes reverses the arcs (#1714)	écartée	conflit avec les PR intégrées avant : crates/engine/src/cmd/draw2/revcloud.rs crates/engine/src/cmd/draw2/tests.rs
+1743	Merge origin/main into issue-1716	intégrée	
+1748	Merge main into right-click-enter-between-commands	écartée	conflit avec main
+1752	Merge commit 'e28ebc6958feb5990178b0ea9d3b6230e3b4a25d' into HEAD	écartée	conflit avec les PR intégrées avant : crates/doc/src/dynblock/apply.rs
+1753	Let LISP entnext reach an INSERT's ATTRIBs and SEQEND	écartée	conflit avec main
+1754	geom: exact ellipse intersections and closest points (conic kernel)	intégrée	
+1759	Fix ACI grey entries 8, 9 and 250-254 RGB values	intégrée	
+1764	AutoLISP docs: drop the gaps.md FF7 pointer for object handles	intégrée	
+1767	ARRAYPATH: reject a closed-path spacing that overflows the item distance	écartée	conflit avec main
+1778	Merge origin/main into feature/wblock-dialog	écartée	conflit avec main
+1784	EXTRUDE: refuse locked profiles on erase, ignore unextrudable picks	écartée	conflit avec main
+1790	Review of #1790: field list without its marker, layout preview origin, LWDISPLAY out of the profile	écartée	conflit avec main
+1800	3DFACE: retry a refused fourth point; gaps cite PRs	écartée	conflit avec main
+1801	Merge extrude-holes-3dface; gaps cite the PRs	écartée	conflit avec main
+1802	Merge remote-tracking branch 'upstream/main' into lisp-nongraphic-objects	écartée	conflit avec les PR intégrées avant : crates/doc/src/tests.rs crates/engine/src/lisp/builtins.rs crates/engine/src/lisp/drawing.rs crates/engine/src/lisp/tests.rs crates/engine/tests/it/lisp_corpus.rs crates/io/src/dxf_raw.rs docs/autolisp.md
+1803	Merge remote-tracking branch 'origin/main' into pr/numpad-decimal	intégrée	
+1805	Layers: a layer state can be deleted from the list without restoring it, Delete Empty Layers keeps the selection, review	intégrée	
+1810	Merge remote-tracking branch 'origin/main' into jp/jis-paper-plot	intégrée	
+1814	Move nixpkgs to nixos-unstable of 2026-11-03 (cargo 1.99)	écartée	plateforme/paquets/CI
+1815	Merge remote-tracking branch 'origin/main' into xdg-font-dirs	intégrée	
+1816	Merge remote-tracking branch 'origin/main' into diameter-fallback	écartée	test fonts complex (signe diamètre) échoue
+1822	Merge remote-tracking branch 'origin/main' into jp/ja-interface	écartée	conflit avec main
+1827	Docs: leave the parity docs to the maintainers (AGENTS.md: PRs don't edit them)	écartée	conflit avec main
+1833	Merge remote-tracking branch 'origin/main' into dxf-read-allocs	écartée	conflit avec main
+1835	Test that a sink refusing the rendition fails it with the sink's error	écartée	conflit avec main
+1853	Linux: leave WAYLAND_SOCKET to winit; empty DISPLAY; TITLEBAR=app wins	écartée	plateforme/paquets/CI
+1855	Merge remote-tracking branch 'origin/main' into lisp-block-entities	écartée	conflit avec les PR intégrées avant : crates/engine/src/lisp/drawing.rs docs/autolisp.md
+1864	find: keep keywords out of the replacement prompt	écartée	conflit avec main
+1866	plot: model-space plots take their units from the paper (#1828)	écartée	conflit avec les PR intégrées avant : crates/render/src/paper.rs
+1867	docking: follow the shared surface's stock tab menu and non-exhaustive node	intégrée	
+1873	dim: note that DIMPOST wraps angles	écartée	compilation : tests de Dimension sans insertion_point
+1877	fix(fonts): use is_vietnamese_font in transcode_summary	écartée	conflit avec main
+1880	web: answer host opens through the shell's bridge on current main	écartée	conflit avec main
+1881	docs: leave the parity tables to the maintainers	écartée	conflit avec main
+1882	Merge branch 'main' into feat/xdata-xdlist-xdedit-nl	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/i18n.rs crates/ui-egui/src/i18n/tests.rs crates/ui-egui/src/palettes.rs
+1884	agents: cap a run at five issues and require review before publishing	écartée	plateforme/paquets/CI
+1888	tracking: prove POLARMODE bit 8 reaches the tracker and gates dwelling	écartée	conflit avec main
+1891	docs: document the functions touched by #1609	intégrée	
+1892	render: harden viewport block culling (#1719)	écartée	conflit avec main
+1896	docs: document the functions touched by #1181	écartée	conflit avec main
+1897	docs: leave the parity tables to the maintainers	écartée	conflit avec main
+1898	fix(engine): restore BlockBoundsCache in spatial index and drop empty-window deselect	écartée	conflit avec les PR intégrées avant : crates/engine/src/select.rs crates/engine/tests/it/pick_text.rs
+1904	mcp: port the automation roots onto the clap CLI	écartée	conflit avec main
+1909	contributors: add francescoBV (FraCiro)	écartée	conflit avec main
+1910	saving: Save As confirms the drawing it was opened for	écartée	conflit avec main
+1911	dxf: Johab and DOS 855/857/860-865/869 code pages; saving declares the drawing's code page (FF4)	écartée	conflit avec main
+1912	docs: leave the parity tables to the maintainers	écartée	conflit avec main
+1913	plot styles: explain the .ctb/.stb limit and the JSON migration path	écartée	conflit avec main
+1938	io: saving a drawing of thousands of blocks no longer takes quadratic time; scaling test (FF6)	écartée	conflit avec main
+1939	dxf: header variables CADCraft doesn't use and DIM header overrides survive a save (FF1)	écartée	conflit avec main
+1940	dxf: layouts keep their plot paper units; unnamed shape styles survive a save (FF1)	écartée	conflit avec main
+1941	io: records of other programs' DXF files keep their handles on save (FF7)	écartée	conflit avec main
+1942	dxf: mirrored entities keep extrusion -Z; unchanged dimension text survives a save (FF1)	écartée	conflit avec main
+1943	geom: exact ellipse and spline intersections, closest points, tangents and offsets	écartée	conflit avec main
+1946	fill_contours: keep the triangles when straightening collapses a contour	écartée	conflit avec main
+1954	feat(ui,engine,render): add 3dorbit, netload/vbaide studio, and bare lisp prefix eval	écartée	conflit avec les PR intégrées avant : apps/cadcraft/src/main.rs crates/engine/src/doc_state.rs crates/engine/src/session/picking.rs crates/render/src/draw.rs crates/ui-egui/src/canvas.rs crates/ui-egui/src/cmdline.rs crates/ui-egui/src/menus.rs
+1961	#618: move the OFFSET canvas test into the ui-egui test binary	écartée	conflit avec main
+1962	Merge remote-tracking branch 'upstream/main' into pr/touch-crosshair	intégrée	
+1965	i18n: add Norwegian Bokmal (nb) interface language	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/i18n.rs
+1968	ARRAYEDIT: delete items from an associative array (DELete items, JSON `delete`); RESet restores them	écartée	conflit avec main
+1969	BREAKLINE: the Block option takes a .dwg/.dxf file, as Express Tools' brkline.dwg	écartée	conflit avec main
+1973	MCP readonly: LISP in any token, and the other file writers (CodeRabbit review of #1973)	écartée	conflit avec main
+1977	AREA: report square inches and square feet in architectural and engineering units (#1956)	écartée	conflit avec main
+1979	Hatches copied with their boundary stay associative to the copies (#1964)	écartée	conflit avec main
+1981	LEADER: read, keep and draw per-leader dimension style overrides (DSTYLE xdata) (#1966)	écartée	conflit avec main
+1983	LISP: append checks the cell cap before building its result (#1930)	écartée	conflit avec main
+1984	LISP: a relative load name is looked up in the support folder, not the working folder (#1927)	écartée	conflit avec main
+1988	ERASE, MOVE, ROTATE and SCALE leave objects on locked layers out of a pickfirst selection too (part of #1966)	écartée	conflit avec main
+1994	Merge remote-tracking branch 'origin/main' into dimstyle-manager-font-fixes	écartée	conflit avec main
+1995	fix(ui): preserve keyboard access in scrollable dropdowns	écartée	conflit avec main
+2006	INSERT converts a block's units to the drawing's on every reference, not only the first (#1997)	intégrée	
+2009	Merge branch 'main' into feat/netload-dotnet-host	écartée	plateforme/paquets/CI
+2010	Merge origin/main into feat/unified-selection-windows	écartée	plateforme
+2020	Hatch: a crowded pattern swatch zooms in until it reads	intégrée	
+2030	Linux: no unwrap for TARGET in build.rs; say what to do when the W30 guard trips	intégrée	
+2032	Merge remote-tracking branch 'origin/main' into fix/1546-cross-select-motion	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/canvas.rs
+2034	Merge upstream main (module split #2220) into autocad-parity	écartée	conflit avec main
+2058	Merge main into attributes-panel	écartée	conflit avec main
+2063	docs: AI features remaining effort 20-40 h, matching gaps.md A2 and A3	écartée	conflit avec main
+2066	Ignore percentage and em/ex SVG root sizes	intégrée	
+2068	Add an Android app shell	écartée	conflit avec main
+2070	feat(ui): show pickbox-only cursor at object selection prompts	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/canvas.rs
+2072	Fix major axis of transformed ellipses on SVG import	intégrée	
+2080	i18n(zh): the New Layout from Area menu item	écartée	conflit avec main
+2083	fix(pagesetup): Shift-click shows the layout clicked last; test the partial-change rollback	écartée	conflit avec main
+2084	fix(plot): the target is always one of the ticked sheets; a deleted target keeps the others	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/managers.rs
+2086	fix(preview): serialize the tests that open Plot Preview; document plotStyleTable	écartée	conflit avec main
+2091	feat(viewcube): add interactive 3D ViewCube, 3DORBIT, and 3D workplane projection	écartée	conflit avec les PR intégrées avant : crates/engine/src/doc_state.rs crates/engine/src/session/picking.rs crates/render/src/draw.rs crates/ui-egui/src/canvas.rs
+2094	Address review: complete one sort table per block; docstrings	écartée	conflit avec main
+2095	Address review: find the OBJECTS section by its SECTION header	écartée	conflit avec main
+2096	Address review: doc comments on the touched functions and tests	écartée	conflit avec main
+2097	Merge remote-tracking branch 'upstream/main' into fix/ff1-dwg-preservation	écartée	conflit avec main
+2099	feat(engine): join every connected chain in JOIN	écartée	conflit avec main
+2102	Merge branch 'main' into fr-complete-catalog	écartée	conflit avec main
+2103	Merge remote-tracking branch 'origin/main' into circle-tan-radius	intégrée	
+2104	docs: leave geometry-parity.md unchanged in this PR (#1594)	intégrée	
+2111	Dimensions: draw the DIMGAP frame over a DIMTFILL background	écartée	compilation : tests de Dimension sans insertion_point
+2122	Blocks palette: put show()'s doc comment back on show()	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/canvas.rs crates/ui-egui/src/dialogs.rs crates/ui-egui/src/menus.rs
+2129	Keep repeated-knot spline corners when tessellating	écartée	conflit avec main
+2130	Merge remote-tracking branch 'origin/main' into dynamic-input-typed-command	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/canvas.rs
+2133	UI: find Fedora's Noto Sans CJK VF font and use its Simplified Chinese face	écartée	conflit avec main
+2136	docs: Drafting Settings tabs and the Dynamic Input tab in ui-parity	écartée	conflit avec main
+2137	Docs: back to the branch's starting point, so the PR leaves them untouched	écartée	conflit avec main
+2138	storage: address second review: renewed writer leases, no per-file hashing in list	écartée	conflit avec main
+2151	Drop collapsed segments when offsetting a polyline	écartée	conflit avec les PR intégrées avant : crates/engine/src/cmd/modify/offset.rs
+2152	feat(engine,ui): implement GROUPDISPLAYMODE, group copy replication, and all-space TEXTTOFRONT/HATCHTOBACK	écartée	conflit avec main
+2160	Merge main: craft-print at craft-libs a0916808, with every other craft-libs crate	écartée	conflit avec main
+2166	Merge branch 'main' into options-advanced	écartée	conflit avec main
+2169	Merge storytold/cadcraft main into feat/dynblock-author-vis	écartée	conflit avec les PR intégrées avant : crates/engine/src/cmd/blocks.rs
+2171	Merge branch 'main' into plot-advanced	écartée	conflit avec main
+2172	Save As: doc comments for three neighbouring helpers and tests	écartée	conflit avec main
+2183	Add experimental parametric 3D part modeling	écartée	conflit avec main
+2184	Docs: leave the parity docs to the maintainers (AGENTS.md: PRs don't edit them)	écartée	conflit avec main
+2191	Ribbon: a Block Editor contextual tab	écartée	conflit avec main
+2192	Merge origin/main into thai-interface (Georgian landed)	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/i18n.rs crates/ui-egui/src/theme.rs
+2194	WINDOW: keep review metadata mergeable with upstream	écartée	conflit avec main
+2202	Merge remote-tracking branch 'origin/main' into feat/svg-rounded-rect-corners	écartée	conflit avec les PR intégrées avant : crates/io/src/svg_read.rs
+2203	Declare the UI languages to AppKit so the open and save panels are translated	écartée	plateforme/paquets/CI
+2204	RECTANG: test corners at the limit where they still fit	intégrée	
+2205	PLINE test: check PLINEWID after Width before Halfwidth	intégrée	
+2209	STRETCH: a fit-point spline moves its fit points and is fitted again	écartée	conflit avec les PR intégrées avant : crates/engine/src/cmd/modify2/tests.rs
+2213	test(cli): avoid released-port race in failed MCP connection test	intégrée	
+2218	Merge upstream main and reconcile status-bar customization	écartée	conflit avec main
+2224	Merge upstream main to resolve attribute alignment PR conflicts	écartée	conflit avec main
+2226	docs(ui): distinguish native and browser layout persistence	écartée	conflit avec main
+2231	Merge upstream main and reconcile ribbon visibility routing	écartée	conflit avec main
+2235	i18n(fr): consistent French CAD terminology in existing rows	écartée	conflit avec main
+2259	Solid commands take each named solid once	écartée	conflit avec main
+2261	fonts: cover the cap-height fallback chain and document CADCRAFT_CAP_HEIGHT	intégrée	
+2262	Render window: RENDER typed or from a menu shows the solids shaded, orbits on drag	écartée	conflit avec main
+2263	PRINTCHECK leaves out floating faces too small to print	écartée	conflit avec main
+2264	Open and import STL files as 3D solids	écartée	conflit avec main
+2265	EXTRUDE text in a TrueType font into lettering, to emboss or engrave	écartée	conflit avec main
+2270	Check full-capacity PGP import responsiveness	intégrée	
+2271	Merge upstream main and reconcile ribbon layer command routing	écartée	conflit avec main
+2277	Merge upstream main and reconcile ribbon color command routing	écartée	conflit avec main
+2278	Merge upstream main and reconcile ribbon linetype command routing	écartée	conflit avec main
+2279	Open and import 3MF files as 3D solids	écartée	conflit avec main
+2280	FILLETEDGE and CHAMFEREDGE finish every solid before changing the drawing	écartée	conflit avec main
+2281	Merge upstream main and reconcile ribbon layout reset	écartée	conflit avec main
+2282	LOFT: merge stations of different sections that nearly coincide	écartée	conflit avec main
+2283	PYRAMID, POLYSOLID, 3DARRAY and 3DALIGN	écartée	conflit avec main
+2285	SOLIDEDIT Shell hollows every solid before changing the drawing	écartée	conflit avec main
+2288	Merge upstream main and reconcile collapsed ribbon menu routing	écartée	conflit avec main
+2290	docs: 3D modelling 8% to 20% after the solid modeling commands	écartée	conflit avec main
+2293	docs: booleans on meshes tessellated into thin strips can come out open	écartée	conflit avec main
+2296	i18n(ru): the Right-Click Customization dialog; the right-click hint follows its new English	écartée	langues
+2301	Deliver host-opened drawings on QSAVE under their opened name	écartée	compilation : SaveAs sans portable_fonts (déjà fusionné upstream, #2576)
+2306	fix(io): preserve implicit TEXT anchors in DWG output	écartée	conflit avec main
+2307	RENDER and the MCP render tool take the model's up	écartée	conflit avec main
+2308	COPY takes a 3D displacement	écartée	conflit avec main
+2311	The desktop app understands --metric and reports unknown options	écartée	conflit avec main
+2313	DXF: an attribute's justification is read from its text groups, not its multiline header (#2255)	écartée	conflit avec main
+2315	Booleans on meshes tessellated into thin strips	écartée	conflit avec main
+2317	Merge split/text-formulas into split/rtl-fields	écartée	conflit avec main
+2318	Merge upstream main into split/text-formulas	écartée	conflit avec main
+2320	Merge split/text-formulas into split/text-editor	écartée	conflit avec main
+2321	Merge split/text-editor into split/dim-arrows	écartée	conflit avec main
+2322	Merge split/rtl-fields into split/dimstyles	écartée	conflit avec main
+2323	Merge split/text-formulas into split/hatch	écartée	conflit avec main
+2324	Merge split/hatch into split/trim-extend	écartée	conflit avec main
+2325	Merge split/dim-arrows into split/canvas-grips	écartée	conflit avec main
+2326	Merge split/dimstyles into split/properties	écartée	conflit avec main
+2327	Merge split/text-editor into split/blocks	écartée	conflit avec main
+2328	Merge branch 'split/rtl-fields' into split/plotting	écartée	conflit avec main
+2329	Dimension style preview: hairlines, as the lineweight display now takes a scale	écartée	conflit avec main
+2330	Merge split/toolbars into split/translations	écartée	conflit avec main
+2347	Object snap: the center from the curve ranks behind snap points	écartée	conflit avec main
+2349	OSNAP with no running modes: plain command-line message; dialog follows the rule	écartée	conflit avec main
+2350	Tab cycles through every object snap under the aperture, not one per mode (gaps U4)	écartée	conflit avec main
+2356	groups: GROUPDISPLAYMODE box and centre grip, copied groups, Object Grouping dialog	écartée	conflit avec main
+2362	Hatch patterns and linetypes: 37 more original patterns, ISO 128 and text linetypes (F13)	écartée	conflit avec main
+2364	Hatch dialogs: Inherit Properties and Preview; HPLAYER and HPTRANSPARENCY (F13)	écartée	conflit avec main
+2365	Grips: an out-of-range Hatch Scale says what to type	écartée	conflit avec main
+2366	Grips: read the Ctrl tap before the menu shortcuts take their keys	écartée	conflit avec main
+2367	arrays: count and spacing grips on rectangular and polar arrays (F5)	écartée	conflit avec main
+2368	arrays: the Key point option of a base point (F5)	écartée	conflit avec main
+2369	Layout tabs: Move or Copy... on the right-click menu, with a layout.move command (gaps U7)	écartée	conflit avec main
+2370	Options: Drawing Window Colors for the crosshair, grid, AutoSnap marker, AutoTrack vector and layout background (F20)	écartée	conflit avec main
+2372	Options: named profiles on the Profiles tab, with export and import (options.profile) (F20)	écartée	conflit avec main
+2373	Options: Grip Colors (GRIPCOLOR, GRIPHOVER, GRIPHOT, GRIPCONTOUR) for the drawing area's grips (F20)	écartée	conflit avec main
+2374	Lineweight Settings: LWEIGHT and Options open it; current lineweight, LWUNITS, LWDISPLAY and LWDEFAULT (F20)	écartée	conflit avec main
+2375	Options: Show ToolTips, recent files count, full path in title and the Start tab at start-up (STARTMODE) (F20)	écartée	conflit avec main
+2376	INSERT: ATTDIA defaults to 0, the command line, as in AutoCAD	écartée	conflit avec main
+2377	BATTMAN: a field being edited is committed when another row is selected	écartée	conflit avec main
+2378	Multileaders keep several landings (leader roots) through DXF and DWG	écartée	conflit avec main
+2379	Multileaders: their own leader colour, linetype and lineweight, text colour and frame, block colour	écartée	conflit avec main
+2380	MLEADERSTYLE: content, leader type, landing, colours and block content in the style	écartée	conflit avec main
+2381	MLEADER: block content gets its block's attributes	écartée	conflit avec main
+2382	Layout viewports: an annotation scale apart from the viewport scale (F12)	écartée	conflit avec main
+2383	Annotative LEADERs: a leader of an annotative dimension style keeps its paper size (F12)	écartée	conflit avec main
+2384	SETVAR: PLINEWID, PLINEGEN, SPLINETYPE, USERI1-5 and USERR1-5, kept in DXF (U10)	écartée	conflit avec main
+2385	SETVAR: PEDITACCEPT, ARRAYTYPE, TSPACEFAC, TSPACETYPE and DELOBJ (U10)	écartée	conflit avec main
+2386	SETVAR: AREA, PERIMETER, DISTANCE, session variables and a settable TILEMODE (U10)	écartée	conflit avec main
+2387	ui-egui: no needless return in autosave_tick on wasm	écartée	conflit avec main
+2388	Selection: the CLass keyword at "Select objects" (gaps U6)	écartée	conflit avec main
+2389	Contributors: add francescoBV (FraCiro)	écartée	conflit avec main
+2390	Merge branch 'main' into fix/svg-smooth-after-close	intégrée	
+2391	Merge remote-tracking branch 'upstream/main' into feat/getvar-cdate-date	intégrée	
+2394	PDF underlays: their frames drawn in one call, under the complexity limit after main's additions	écartée	conflit avec les PR intégrées avant : crates/doc/src/entity.rs crates/render/src/draw.rs
+2395	PDF underlays: a line drawn while there is room is one match arm (clippy::collapsible_match on Rust 1.95)	écartée	conflit avec les PR intégrées avant : crates/doc/src/entity.rs crates/fonts/src/ttf.rs crates/render/src/draw.rs
+2396	Merge branch 'pdf-underlay-display' into pdf-underlay-attach	écartée	conflit avec les PR intégrées avant : crates/doc/src/entity.rs crates/fonts/src/ttf.rs crates/render/src/draw.rs
+2401	Keep MCP stdio server serving after a non-UTF-8 input line	intégrée	
+2404	perf(io): set CLASS instance counts in one pass	intégrée	
+2405	Fix autocomplete suggestion execution and add keyboard tests	écartée	conflit avec main
+2409	Honor declared code pages in legacy ASCII DXF	écartée	conflit avec main
+2415	Preserve plot transparency in DWG layouts	intégrée	
+2419	Merge branch 'pdf-underlay-attach' into pdf-clip-frame-osnap	écartée	conflit avec les PR intégrées avant : crates/doc/src/entity.rs crates/fonts/src/ttf.rs crates/render/src/draw.rs
+2420	Merge branch 'pdf-clip-frame-osnap' into pdf-plot	écartée	conflit avec les PR intégrées avant : crates/doc/src/entity.rs crates/fonts/src/ttf.rs crates/render/src/draw.rs
+2441	Merge remote-tracking branch 'upstream/main' into fix/dsettings-scroll	intégrée	
+2442	fix(dxf): measure an arc-length dimension after its kind is settled	écartée	conflit avec main
+2443	Merge remote-tracking branch 'upstream/main' into fix/refmanager-menu-closes	intégrée	
+2444	Merge branch 'main' into feat/dim-ext-line-properties	intégrée	
+2446	Merge remote-tracking branch 'upstream/main' into fix/history-multiline-echo	écartée	conflit avec les PR intégrées avant : crates/engine/src/lib.rs
+2447	Merge branch 'main' into fix/region-prompts-for-objects	intégrée	
+2451	Reject splines with mismatched weight counts	écartée	test constraints control_template_drops_unused_data échoue
+2459	Merge remote-tracking branch 'upstream/main' into feat/dxfin-dxfout	intégrée	
+2461	Merge remote-tracking branch 'upstream/main' into fix/open-failure-alert	intégrée	
+2462	fix(ui): key text style in-use cache on document uid and revision	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/managers.rs crates/ui-egui/tests/it/style_dialogs.rs
+2463	Library palette: a folder of DXF/DWG block files, one group per sub-folder, click to insert	écartée	conflit avec main
+2469	Merge upstream main (a3d9348f) into xdata-api	écartée	conflit avec les PR intégrées avant : crates/engine/src/cmd/props.rs crates/engine/src/lisp/drawing.rs docs/autolisp.md
+2478	Test that entmod and entupd keep the creation order	intégrée	
+2483	Merge upstream/main into fix/dim-nested-circle	intégrée	
+2487	Merge main into fix/linetype-dash-layout	écartée	conflit avec les PR intégrées avant : crates/render/src/linetype.rs crates/render/src/linetype_text.rs
+2503	Dimension Style Manager dialog (DIMSTYLE, DDIM, Format/Dimension > Dimension Style...)	écartée	conflit avec main
+2512	Contributors: credit withshalom by GitHub profile name	écartée	conflit avec main
+2514	LISP: entlast sees a routine's own edits; entmod keeps INSERT attributes; HANDSEED is live	écartée	conflit avec les PR intégrées avant : crates/engine/src/lisp.rs crates/engine/src/lisp/drawing.rs
+2528	i18n(zh): List Purgeable Items, so the Chinese menus stay fully translated	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/managers.rs
+2542	Merge main into add-dutch-translation	écartée	conflit avec main
+2543	Reject non-standard lineweights in the lweight command	écartée	conflit avec les PR intégrées avant : crates/engine/src/sysvars.rs
+2544	Merge upstream main into feat/3d-modeling-latest	écartée	conflit avec les PR intégrées avant : apps/cadcraft/src/main.rs crates/doc/src/lib.rs crates/engine/src/cmd/exchange.rs crates/geom/src/lib.rs crates/mcp/src/tests.rs crates/ui-egui/src/canvas.rs
+2548	TRIM: a cut by another edge at the pick is passed over	intégrée	
+2550	BREAK and BREAKATPOINT: test the measured ends, closing side and undo	intégrée	
+2559	Keep tiny arc sweeps instead of treating them as full circles	intégrée	
+2561	Merge remote-tracking branch 'origin/main' into pr/single-instance	écartée	conflit avec les PR intégrées avant : apps/cadcraft/src/main.rs
+2565	refactor(color): satisfy Clippy pedantic lints	écartée	refactorisation/maintenance
+2568	fix(fonts): preserve SHX suffix handling for path-prefixed names	écartée	conflit avec main
+2570	style(dwg): remove review churn	écartée	conflit avec main
+2571	style(dxf): remove review churn	écartée	conflit avec main
+2573	fix(geom): move NURBS lint expectations to velocity	écartée	conflit avec main
+2580	i18n(fr): the drafting terms in the older rows (demi-droite, droite, raccord, décaler, coupure, contour, masque, repérage)	écartée	conflit avec main
+2592	Add PDF vector import and improve macOS drawing interaction	écartée	conflit avec main
+2593	Merge upstream main and resolve web host manifest conflict	écartée	conflit avec main
+2614	fix(layout): check the viewport's fitted size before a window changes it	écartée	conflit avec main
+2616	Merge remote-tracking branch 'upstream/main' into fix/translatable-prompt-values	intégrée	
+2632	fix(io): bound the field copies for placed attributes; copy only plain variable fields	écartée	conflit avec main
+2648	TRIM: lines, arcs and circles pass over a cut at the pick	intégrée	
+2664	docs(io): document the functions this change touches	écartée	conflit avec main
+2684	ci(release): sign the Linux packages with LINUX_SIGNING_KEY	écartée	plateforme/paquets/CI
+2687	fix(engine): read local files for RECOVER, INSERT, IMPORT, COMPARE, NEW, DATALINK and STYLESMANAGER through the capped reader	intégrée	
+2688	fix(engine): MIRROR keeps the mirrored copy on screen at "Erase source objects?"	intégrée	
+2690	DWG: binary-DXF test compares the header variables only	intégrée	
+2691	Canvas MSAA: take only 1 or 4 samples	écartée	conflit avec les PR intégrées avant : apps/cadcraft/src/main.rs
+2692	Merge main into screen-build-culling	écartée	conflit avec les PR intégrées avant : crates/render/src/blocks.rs
+2693	Arc points a hair outside the sweep take the nearer end	écartée	conflit avec les PR intégrées avant : crates/engine/tests/it/main.rs
+2694	PARAMETERS: delete is blocked only by expressions that name it; a same-name rename writes nothing	intégrée	
+2697	Merge origin/main into fix/2646-proxy-graphics	écartée	conflit avec les PR intégrées avant : crates/doc/src/entity.rs crates/engine/src/cmd/modify/stretch.rs crates/engine/src/select.rs crates/engine/src/session/interactive.rs crates/io/src/dxf_read.rs crates/render/src/blocks.rs
+2699	SPLINE: two fit points with a fit tolerance make the same cubic	intégrée	
+2703	SPLINE: a small uniform scale keeps a spline's end tangents	intégrée	
+2704	Merge upstream/main into ribbon-home	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/options.rs
+2705	SPLINE: a closed spline keeps its seam and its tangent where it closes	écartée	conflit avec main
+2714	Merge branch 'main' into fix/sec-lisp-flush-linear	intégrée	
+2718	Merge branch 'main' into fix/sec-mcp-token-endpoint	écartée	conflit avec main
+2719	Merge upstream main into feat/disable-updates-env	intégrée	
+2722	Greek keyboard: match a Greek word in any case, accent or final sigma	écartée	conflit avec main
+2723	address review: correct tessellate_within doc	intégrée	
+2725	JOIN: whole objects by their ends, the circle question, the source's space	intégrée	
+2726	Merge main into feat/copy-autocad; NO_OR is 29 long	écartée	conflit avec les PR intégrées avant : crates/engine/src/cmd/modify/select_then.rs
+2727	test(ui): the MBUTTONPAN 0 snap menu opens at the middle press and stays there	intégrée	
+2728	address review: trim colour text before length limit	intégrée	
+2731	Improve layers palette interactions	écartée	conflit avec main
+2732	review: honour the name alias and Unicode case in exact xrefs, reserve Windows device basenames, charge line headers, skip non-directories in the module walk	écartée	plateforme
+2734	address review: index placeable array replacements, search past zero-length DIVIDE runs, per-part broken-table outlines	écartée	conflit avec main
+2735	fix(spacemouse): re-check per binding and report errors of started commands	écartée	conflit avec main
+2736	Leave docs/localization-parity.md to the maintainers	écartée	conflit avec main
+2738	review: select extraction columns before copying values, count live objects for MOCORO copies	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/managers.rs
+2739	fix(doc): a mirrored MTEXT fills the box of its mirror image	intégrée	
+2740	QLEADER: refuse a width that overflows; name an unreadable JSON point	intégrée	
+2741	fix(lisp): charge READ text, EQUAL string bytes, SETVAR and ENTMAKE copies, and nested callbacks against one budget	écartée	conflit avec les PR intégrées avant : crates/engine/src/lisp/eval.rs
+2742	fix(geom): report a spent containment budget instead of partial islands	écartée	conflit avec main
+2743	fix(engine): keep atomic writes of one path serialized, backup bits capped by the drawing's group	intégrée	
+2744	fix(render): charge boundary transforms and scanline sorts to the shared hatch budget	écartée	conflit avec main
+2745	fix: persist portable eframe state in app.ron	écartée	plateforme/paquets/CI
+2746	docs(ui): the fallback faces now include the embedded Georgian one	intégrée	
+2758	start_failure: an app start-up error doesn't blame the graphics	intégrée	
+2759	fix(engine): clarify JSON TRIM and EXTEND pick diagnostics (#2750)	écartée	conflit avec main
+2760	OPTIONS: a refused change puts the same drawing back	écartée	conflit avec les PR intégrées avant : crates/engine/src/cmd/options.rs
+2761	ARRAY: counts take a whole number as typed, as AutoCAD 2024 does	intégrée	
+2762	ARRAYPATH: the item count takes a whole number as AutoCAD 2024 does	intégrée	
+2763	Merge remote-tracking branch 'origin/main' into fix/tilted-2d-polyline	intégrée	
+2764	fix(engine): JOIN joins whole objects, never part of a polyline	écartée	conflit avec les PR intégrées avant : crates/engine/src/cmd/modify/break_join.rs crates/engine/tests/it/main.rs
+2765	Images: check the decoded size of data too	intégrée	
+2766	MINSERT: take a whole number as typed for the rows and columns	intégrée	
+2769	IMAGEATTACH: a scale too small to draw is asked again, not the end of the command	écartée	conflit avec les PR intégrées avant : crates/engine/src/cmd/image.rs
+2770	fix(render): key block plans by definition, and lend them to clipped copies	écartée	conflit avec les PR intégrées avant : crates/render/src/blocks.rs
+2772	SPLINEDIT: take a whole number as typed for the polyline precision	intégrée	
+2774	ARRAYPATH: refuse a JSON count or spacing it can't use	intégrée	
+2776	MEASUREGEOM Quick: measure the geometry around the cursor; a Measure drop-down on the tool bar	intégrée	
+2778	SPLINEDIT: take a whole number as typed for Elevate order	écartée	conflit avec les PR intégrées avant : crates/engine/tests/it/pedit_splinedit.rs
+2780	DIVIDE: take a whole number as typed for the number of segments	intégrée	
+2782	ARRAYPATH: no extra item where a closed path closes, by spacing	intégrée	
+2783	test(engine): a dragged window at STRETCH's Remove objects takes objects out	écartée	conflit avec les PR intégrées avant : crates/engine/src/prompt.rs
+2784	INSERT/MINSERT: take points at the scale, rotation and spacing prompts	écartée	conflit avec les PR intégrées avant : crates/engine/src/cmd/blocks.rs crates/engine/tests/it/minsert.rs
+2785	fix(ui): the block budget notice also covers the active viewport's contents	intégrée	
+2789	MINSERT: test that JSON null counts and distances are taken as missing	intégrée	
+2790	JOIN: a new polyline stays at the source's height	écartée	compilation : with_z introuvable
+2791	ar: complete the Arabic catalog (93 missing rows, Find and Replace dialog)	écartée	conflit avec main
+2794	Refuse a network path before the automation roots open it	écartée	conflit avec les PR intégrées avant : crates/engine/src/cmd/audit.rs crates/engine/src/cmd/blocks/insert_file.rs crates/engine/src/cmd/exchange.rs crates/engine/src/cmd/file/compare.rs crates/engine/src/cmd/file/template.rs crates/engine/src/cmd/image.rs crates/engine/src/cmd/layout/plotstyle.rs crates/engine/src/cmd/table/breaks.rs crates/engine/src/lib.rs
+2796	fix(viewcube,canvas): reject unconstrained edge-on XY clicks and sync ViewCube with view twist	écartée	conflit avec les PR intégrées avant : crates/geom/src/lib.rs
+2799	fix(ui): Ctrl+V pastes when the system clipboard holds an image	intégrée	
+2804	HATCHGENERATEBOUNDARY: compare the loop count with the room left, so it can't overflow (CodeRabbit on #2804)	intégrée	
+2808	EXTRIM: exactly one cutting edge, from the JSON form and at the prompt (CodeRabbit on #2808)	écartée	tests extrim + nom « Express Tools » interdit
+2820	SHX fonts: shape source with a name over 1,024 bytes is an error	intégrée	
+2821	LISP: a routine is charged the work its slices did	écartée	conflit avec main
+2822	Picking reads the index topmost first when the aperture holds more than 1024 candidates (#2701)	intégrée	
+2825	fix(snap): a circle offers both perpendicular points from the base (CodeRabbit on #2825)	écartée	conflit avec les PR intégrées avant : crates/engine/src/snap.rs
+2826	Open a Dimension Style dialog from Format > Dimension Style	écartée	compilation : dim_style défini deux fois
+2828	docs(script): the CLI notes pending input once, at the end of the run (CodeRabbit on #2828)	intégrée	
+2848	fix(fonts): MTEXT \T…x multiplies the current tracking, as \W…x and \H…x do (#2827)	intégrée	
+2851	DWG: save accented text through the bridge in its code page	écartée	conflit avec les PR intégrées avant : crates/io/src/lib.rs crates/io/src/tests.rs
+2853	Merge branch 'main' into fix/slow-click-selects	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/canvas.rs
+2855	Add files via upload	écartée	plateforme/paquets/CI
+2861	test: 檔案系統拒收非 UTF-8 檔名時略過對應測試	écartée	conflit avec main
+2862	fix(geom): preserve large contours and distant shallow arcs	intégrée	
+2870	Merge origin/main into fix/layer-palette-sort-2858	intégrée	
+2876	fix(dwg): index table style text style lookups, matching names as acadrust's tables do	intégrée	
+2877	fix(io): read entity groups written after the entity's own subclass marker (#2856)	intégrée	
+2878	fix(render): a %% before a typed diameter sign stays two percent signs	intégrée	
+2879	fix(ui): Layer Properties says why a layer was not deleted (#2860)	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/layers.rs
+2882	refactor(engine): name report_acis_dropped; put has_sat_text's doc back	écartée	refactorisation/maintenance
+2884	fix(dwg): register the ACAD_MLEADERVER APPID when styles already carry the xdata	écartée	conflit avec les PR intégrées avant : crates/dwg/src/lib.rs
+2886	fix(dwg): write AcDbVariableDictionary for AC1032 output too (#2885)	intégrée	
+2888	fix(engine): a custom size sent with `paper` keeps the layout's units	intégrée	
+2891	fix(engine): Esc brings back only objects in the current space (#2889)	intégrée	
+2895	fix(engine): AREA says Circumference for a circle and Length for an open polyline (#2894)	intégrée	
+2897	fix(engine): typed inches take a hyphenated fraction, 6-1/2 and 1'6-1/2" (#2896)	intégrée	
+2898	i18n(ar): test that Stretch, Trim and Point keep words of their own	écartée	langues
+2900	i18n(ka): Georgian for 20 new strings	écartée	langues
+2901	i18n(sv): translate 41 new strings	écartée	langues
+2903	Size a blank MTEXT's pick box at the current annotation scale	intégrée	
+2904	DXF: a solid or gradient hatch no longer makes AutoCAD refuse the file	intégrée	
+2905	DXF test: the same objects facing up keep their height and thickness	intégrée	
+2906	PEDIT Join: only objects in one plane with the polyline, as AutoCAD 2024	intégrée	
+2907	-RENAME VPort tests: *Invalid*, Enter, and the JSON form's refusals	écartée	conflit avec les PR intégrées avant : crates/engine/src/cmd/props/rename.rs
+2908	chore(deps): bump the cargo-dependencies group across 1 directory with 8 updates	écartée	refactorisation/maintenance
+2910	Layer states: entries in another case are one state, as in AutoCAD 2024	écartée	conflit avec main
+2911	LISP commands: offer only what starting them runs, scroll a long submenu	intégrée	
+2912	Properties: keep drawing names untranslated, repeated tags read-only	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/palettes.rs
+2914	Ribbon: test that only the Ribbon hides the collapsed Tool Sets strip	écartée	conflit avec les PR intégrées avant : crates/ui-egui/src/i18n/tests.rs crates/ui-egui/tests/it/docking_workflows.rs
+2915	Merge #2910's case-folded layer state entries; fix a test comment	écartée	conflit avec main
+2918	DXF/DWG: the registered applications test counts the records	écartée	conflit avec les PR intégrées avant : crates/doc/src/foreign.rs
+2921	DWG: the table style row test uses distinct per-edge and per-row values so swaps fail (#2921)	écartée	conflit avec les PR intégrées avant : crates/dwg/src/lib.rs
+2922	fix(io): use pure rotation boundary_xf for rotated 2-point clips to support non-uniform scale	intégrée	
+2930	perf(io): look up attribute definitions' visibility once per block	intégrée	
+2931	test(io): the sheet viewport swap through the DWG path, and its limits	intégrée	
+2932	test(io): a hatch loop not closed is skipped whole wherever it is	intégrée	
+2933	fix(io): text boxes past the work bound are kept, and the bound holds	écartée	conflit avec les PR intégrées avant : crates/io/src/dxf_read/hatch.rs crates/io/src/tests.rs
+2934	docs(collab): study, options and the RFC for realtime collaboration	écartée	documentation
+2935	collab: table records, renames and cascades as one change	intégrée	
+2936	collab-server: redo an undone step while the drawing is unchanged	intégrée	
+2937	collab-client: redo, and the participants the welcome names	intégrée	
+2938	ui: a viewer still reports presence	écartée	conflit avec les PR intégrées avant : apps/cadcraft-web/Cargo.toml
+2940	Refuse a negative or non-finite radius in JSON fillet	intégrée	
+2942	refactor(render): one place for the layer-0 rule (common_layer uses effective_layer)	écartée	refactorisation/maintenance
+2943	Save view test: use the shared TempDir guard, review	intégrée	
+2944	i18n(es): proofread the older Spanish rows	intégrée	
+2945	test(naming): guard neutral display labels	intégrée	
+2948	Web: document start()	écartée	conflit avec les PR intégrées avant : apps/cadcraft-web/src/main.rs
+2954	Fonts: the MTEXT strip test expects a short \U+ escape to keep its digits	intégrée	
+2956	Reject control characters in block names	intégrée	
+2962	Reject repeated minus signs after the feet mark in parse_distance	intégrée	
+2963	Merge release 0.19.0 into main	intégrée	
+2965	test(ui): cover dynamic block names for several references	intégrée	
+2969	PR2969: document mirror fill policy and regression coverage	écartée	conflit avec les PR intégrées avant : crates/engine/src/cmd/modify.rs crates/engine/src/cmd/modify/transform.rs
+2971	cadcraft-web: pin craft-web-host to the companion that accepts PDF pages as bytes	écartée	plateforme/paquets/CI
+2972	test: handle macOS rejection of non-Unicode filenames	écartée	plateforme
+2975	PR2975: document chain seed ownership and Undo regressions	intégrée	
+2977	PR2977: document dimension associativity policy and tests	intégrée	
+2979	PR2979: document DIMASSOC persistence contracts	intégrée	
