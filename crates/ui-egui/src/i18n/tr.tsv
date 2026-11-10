@@ -1370,3 +1370,9 @@ menu	View	Görünüm
 	Rename	Yeniden adlandır
 	Objects on locked layers can't be selected	Kilitli katmanlardaki nesneler seçilemez
 	They are still shown and snapped to, like a blueprint.	Bir altlık gibi hâlâ gösterilir ve yakalanır.
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Yeni Katmana Taşı
+	Move Selection to New Layer	Seçimi Yeni Katmana Taşı
+	New layer name	Yeni katman adı
+	Delete Empty Layers	Boş Katmanları Sil
+	Deletes every layer that has no objects on it	Üzerinde nesne olmayan her katmanı siler

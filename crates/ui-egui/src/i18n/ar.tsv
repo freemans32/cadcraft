@@ -1401,3 +1401,9 @@ menu	View	عرض
 	Rename	إعادة التسمية
 	Objects on locked layers can't be selected	لا يمكن تحديد الكائنات الموجودة على طبقات مقفلة
 	They are still shown and snapped to, like a blueprint.	لا تزال معروضة ويمكن الالتقاط إليها، مثل المخطط الخلفي.
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	نقل إلى طبقة جديدة
+	Move Selection to New Layer	نقل التحديد إلى طبقة جديدة
+	New layer name	اسم الطبقة الجديدة
+	Delete Empty Layers	حذف الطبقات الفارغة
+	Deletes every layer that has no objects on it	يحذف كل طبقة لا تحتوي على كائنات

@@ -1497,3 +1497,9 @@ menu	View	视图
 	Rename	重命名
 	Objects on locked layers can't be selected	无法选择已锁定图层上的对象
 	They are still shown and snapped to, like a blueprint.	它们仍会显示并可捕捉，就像底图一样。
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	移动到新图层
+	Move Selection to New Layer	将选择移动到新图层
+	New layer name	新图层名称
+	Delete Empty Layers	删除空图层
+	Deletes every layer that has no objects on it	删除所有没有对象的图层

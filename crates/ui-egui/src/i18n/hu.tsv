@@ -1367,3 +1367,9 @@ menu	View	Nézet
 	Rename	Átnevezés
 	Objects on locked layers can't be selected	A zárolt rétegeken lévő objektumok nem jelölhetők ki
 	They are still shown and snapped to, like a blueprint.	Továbbra is megjelennek, és illeszthetők hozzájuk, mint egy háttérrajzhoz.
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Áthelyezés új rétegre
+	Move Selection to New Layer	A kijelölés áthelyezése új rétegre
+	New layer name	Az új réteg neve
+	Delete Empty Layers	Üres rétegek törlése
+	Deletes every layer that has no objects on it	Törli az összes réteget, amelyen nincs objektum

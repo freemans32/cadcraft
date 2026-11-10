@@ -1257,3 +1257,9 @@ menu	Modify	Modifikace
 	Rename	Přejmenovat
 	Objects on locked layers can't be selected	Objekty na zamčených hladinách nelze vybrat
 	They are still shown and snapped to, like a blueprint.	Stále se zobrazují a lze k nim přichytávat, jako k podkladu.
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Přesunout do nové hladiny
+	Move Selection to New Layer	Přesunout výběr do nové hladiny
+	New layer name	Název nové hladiny
+	Delete Empty Layers	Odstranit prázdné hladiny
+	Deletes every layer that has no objects on it	Odstraní každou hladinu, ve které nejsou žádné objekty

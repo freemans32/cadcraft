@@ -1060,3 +1060,9 @@
 	Rename	Renommer
 	Objects on locked layers can't be selected	Les objets sur des calques verrouillés ne peuvent pas être sélectionnés
 	They are still shown and snapped to, like a blueprint.	Ils restent affichés et accrochables, comme un plan de fond.
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Déplacer vers un nouveau calque
+	Move Selection to New Layer	Déplacer la sélection vers un nouveau calque
+	New layer name	Nom du nouveau calque
+	Delete Empty Layers	Supprimer les calques vides
+	Deletes every layer that has no objects on it	Supprime chaque calque qui ne porte aucun objet

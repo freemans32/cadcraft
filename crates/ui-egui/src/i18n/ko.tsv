@@ -1277,3 +1277,9 @@ menu	Modify	수정
 	Rename	이름 바꾸기
 	Objects on locked layers can't be selected	잠긴 도면층의 객체는 선택할 수 없습니다
 	They are still shown and snapped to, like a blueprint.	밑그림처럼 계속 표시되며 스냅도 적용됩니다.
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	새 도면층으로 이동
+	Move Selection to New Layer	선택 항목을 새 도면층으로 이동
+	New layer name	새 도면층 이름
+	Delete Empty Layers	빈 도면층 삭제
+	Deletes every layer that has no objects on it	객체가 없는 모든 도면층을 삭제합니다

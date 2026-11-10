@@ -1363,3 +1363,9 @@ menu	View	Προβολή
 	Rename	Μετονομασία
 	Objects on locked layers can't be selected	Τα αντικείμενα σε κλειδωμένα επίπεδα δεν μπορούν να επιλεγούν
 	They are still shown and snapped to, like a blueprint.	Εξακολουθούν να εμφανίζονται και να έχουν σύλληψη, όπως ένα υπόβαθρο.
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Μετακίνηση σε νέο επίπεδο (Layer)
+	Move Selection to New Layer	Μετακίνηση της επιλογής σε νέο επίπεδο (Layer)
+	New layer name	Όνομα νέου επιπέδου
+	Delete Empty Layers	Διαγραφή κενών επιπέδων
+	Deletes every layer that has no objects on it	Διαγράφει κάθε επίπεδο που δεν έχει αντικείμενα

@@ -1289,3 +1289,9 @@
 	Rename	Cambiar nombre
 	Objects on locked layers can't be selected	Los objetos en capas bloqueadas no se pueden seleccionar
 	They are still shown and snapped to, like a blueprint.	Se siguen mostrando y se pueden referenciar, como un plano base.
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Desplazar a una capa nueva
+	Move Selection to New Layer	Desplazar la selección a una capa nueva
+	New layer name	Nombre de la capa nueva
+	Delete Empty Layers	Eliminar capas vacías
+	Deletes every layer that has no objects on it	Elimina cada capa que no contiene objetos

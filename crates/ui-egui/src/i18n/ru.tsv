@@ -1048,3 +1048,9 @@
 	Rename	Переименовать
 	Objects on locked layers can't be selected	Объекты на заблокированных слоях нельзя выбрать
 	They are still shown and snapped to, like a blueprint.	Они по-прежнему показываются и к ним работает привязка, как к подложке.
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Переместить на новый слой
+	Move Selection to New Layer	Переместить выбранное на новый слой
+	New layer name	Имя нового слоя
+	Delete Empty Layers	Удалить пустые слои
+	Deletes every layer that has no objects on it	Удаляет каждый слой, на котором нет объектов

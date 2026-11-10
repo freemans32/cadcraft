@@ -1483,3 +1483,9 @@ menu	View	Exibir
 	Rename	Renomear
 	Objects on locked layers can't be selected	Objetos em camadas bloqueadas não podem ser selecionados
 	They are still shown and snapped to, like a blueprint.	Eles continuam visíveis e com snap, como uma planta de fundo.
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Mover para nova camada
+	Move Selection to New Layer	Mover a seleção para nova camada
+	New layer name	Nome da nova camada
+	Delete Empty Layers	Excluir camadas vazias
+	Deletes every layer that has no objects on it	Exclui cada camada que não tem objetos
