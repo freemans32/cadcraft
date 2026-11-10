@@ -96,13 +96,17 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
 1. **PR 2 des murs** : onglet Architecture dans les Jeux d'outils, dialogue Styles de murs, section Mur dans Propriétés. Dans `perso`, elle peut s'appuyer sur la PR #2855 (Jeux d'outils utilisateur).
 2. **PR 3 des murs** : raccords L, T et X entre murs, selon les priorités des composants.
 3. **Ouvertures** : portes, fenêtres et baies.
-4. **Gaines CVC** : étude en cours (10 novembre). Réponses de Guillaume :
+4. **Gaines CVC** : étape 1 faite (10 novembre). Réponses de Guillaume :
    - **Tertiaire (CTA)** en premier, la VMC logement plus tard.
    - Dimensionnement par **vitesse et perte de charge** (linéaire + singulières, circuit le plus défavorisé).
    - Débits : **valeur proposée selon le type de local** (Code du travail R4222-6 : 25 m³/h/occupant en bureau, 30 en restauration/vente/réunion, 45 en atelier léger, 60 sinon ; sanitaires en débit par local, à vérifier dans le texte), **modifiable à la main**.
    - **Gaines circulaires d'abord**, rectangulaires ensuite.
    - **Outil Bouche** (validé le 10 novembre, à l'étape 2) : diffuseur plafond carré 600×600 4 voies, diffuseur circulaire, grille rectangulaire (mur ou plafond), grille ou fente linéaire, bouche d'extraction circulaire ; ces types suffisent pour l'instant. Dessinées à l'échelle. Taille tapée, ou proposée d'après le **débit max par taille** (pas la vitesse au col). Placement au clic avec orientation, accrochage aux dalles, répartition automatique dans un local (nombre ou grille, débit partagé). Étiquette type, taille, débit ; le piquage sert de départ à la gaine. Bibliothèque de modèles modifiable, sans catalogue de fabricant.
-   - Découpage proposé, en attente de validation : (1) moteur de calcul seul, sans dessin, dans `crates/doc` ; (2) locaux et bouches ; (3) tracé du réseau et accessoires ; (4) note de calcul et métré par local ; (5) rectangulaires, puis autres réseaux (frigo, condensats, eau glacée).
+   - Découpage validé : (1) moteur de calcul ; (2) locaux et bouches ; (3) tracé du réseau et accessoires ; (4) note de calcul et métré par local ; (5) rectangulaires, puis autres réseaux (frigo, condensats, eau glacée). Valeurs par défaut validées : 6 / 4 / 2,5 m/s (principal / antenne / raccordement), 1 Pa/m max, spiralé acier galvanisé (rugosité 0,15 mm).
+   - **Étape 1 faite le 10 novembre** : nouvelle bibliothèque `crates/hvac` (`cadcraft-hvac`, couche L0, déclarée dans `xtask/src/layers.rs`), sur la branche `feat/gaines` (commit `96532e3`, basé sur upstream `a3d9348`), fusionnée dans `perso`. Fichiers en anglais comme le reste du dépôt : `air.rs`, `rates.rs` (R4222-6 par occupant, R4212-6 sanitaires), `sizes.rs` (série Ø63 à Ø1250), `friction.rs` (Darcy-Weisbach + Colebrook), `fittings.rs` (ζ indicatifs : coude 90° 0,3, 45° 0,2, té passage 0,2, té dérivation 1,0, réduction 0,1), `network.rs` (arbre de tronçons, débits, diamètre = plus petit qui respecte vitesse ET Pa/m, critère qui a décidé, pertes, circuit défavorisé, pression CTA), `tests.rs` (13 tests ; valeurs de référence calculées à part en Python par dichotomie sur Colebrook ; exemple 3 bureaux de 250 m³/h → CTA 750 m³/h, 37,1 Pa).
+     - Vérifié : tests, `cargo fmt`, `clippy -D warnings`, `xtask layers`, `xtask assets`. Pas vérifié : la compilation wasm (la cible n'a pas pu être installée dans la session ; le code n'utilise que std et serde).
+     - Pas encore d'entrée dans `[workspace.dependencies]` du `Cargo.toml` racine : à ajouter à l'étape 2, quand `engine` en aura besoin.
+   - Prochaine étape (2), à présenter avant de coder : locaux (contour, type, occupants, débit proposé/forcé) et outil Bouche, commandes et stockage comme les murs.
 5. **Export IFC** (BIM).
 6. Publier en amont, plus tard : une issue de cadrage chez `storytold/cadcraft`, puis les PR des murs une par une.
 
