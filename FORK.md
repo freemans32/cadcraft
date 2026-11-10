@@ -113,7 +113,13 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
      - Fusion dans `perso` : conflits seulement là où murs et gaines ajoutent des lignes au même endroit (lib.rs de doc, dxf_ext, objects, sections, cmd.rs, last_used.rs, Cargo.toml d'engine), résolus en gardant les deux. Ensuite `cargo test --workspace` sur `perso` : tout passe.
      - Vérifié : `cargo test --workspace` sur `feat/gaines` (3 762 réussis ; seul échec `cadcraft-fonts` `mtext::tests::strips_formatting`, qui échoue aussi sur l'officiel `a3d9348`), fmt, clippy -D warnings, layers. Pas vérifié : wasm, et l'essai dans l'interface (pas d'écran dans la session).
      - Laissé pour plus tard : accrochage aux dalles de faux plafond, onglet du panneau de gauche, mise à jour des étiquettes quand on modifie un local ou une bouche.
-   - Prochaine étape (3), à présenter avant de coder : tracé du réseau de gaines et accessoires, en s'appuyant sur `cadcraft-hvac`.
+   - **Premier essai de Guillaume (10 novembre)** : un local tracé affiche 70,7 m² / 25 m³/h alors que c'est une salle de sport à 1 200 m³/h ; il ne savait pas comment le corriger. Réponse : option Flow (ou Use Workshop + 20 occupants) avant le contour. Manque constaté : rien ne permet de modifier un objet déjà posé.
+   - **Demandé par Guillaume, étude présentée le 10 novembre, en attente de validation** : modifier les objets posés, pour les locaux, les bouches, les murs et plus tard les gaines :
+     - (A) commandes `SPACEEDIT`, `AIRTERMINALEDIT`, `WALLEDIT` (JSON + ligne de commande) qui régénèrent le bloc en gardant la poignée et la position ;
+     - (B) double-clic sur un local (étiquette ou contour), une bouche ou un mur : sélectionne l'objet et ouvre la palette Propriétés, au lieu de REFEDIT (aujourd'hui `handle_double_click` dans `crates/ui-egui/src/canvas.rs` lance REFEDIT sur toute référence de bloc) ;
+     - (C) sections dédiées dans la palette Propriétés (`properties_section`, `crates/ui-egui/src/palettes.rs`), comme la maquette « fenêtre sélectionnée » de l'étude des murs (artifact SASGo3MXGJcDwdHNRy9whf, écran Ouvertures) ;
+     - (D) onglets « Architecture » et « CVC » dans les Jeux d'outils à gauche (aujourd'hui Drafting / Modeling, `toolsets` dans `palettes.rs`), icônes dessinées en code.
+   - Ensuite, étape (3), à présenter avant de coder : tracé du réseau de gaines et accessoires, en s'appuyant sur `cadcraft-hvac`.
 5. **Export IFC** (BIM).
 6. Publier en amont, plus tard : une issue de cadrage chez `storytold/cadcraft`, puis les PR des murs une par une.
 
