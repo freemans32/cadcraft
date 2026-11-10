@@ -122,6 +122,39 @@ pub struct HvacPiece {
 }
 
 impl crate::Drawing {
+    /// Gives ventilation object `h` (a block reference) the generated `pieces` and the extended
+    /// data `xdata`: a new block, the old one removed when nothing else refers to it. A scaled
+    /// or arrayed reference is refused: its drawn size would no longer match its data.
+    fn regenerate_hvac(&mut self, h: crate::Handle, pieces: Vec<HvacPiece>, xdata: Vec<crate::RawTag>) -> crate::Result<()> {
+        let e = self.entity(h).ok_or(DocError::NoEntity(h))?;
+        let crate::EntityKind::Insert(i) = &e.kind else { return Err(invalid("The object is not a block reference.")) };
+        let unit = |s: f64| (s - 1.0).abs() <= 1e-9;
+        if !(unit(i.scale.x) && unit(i.scale.y) && i.cols <= 1 && i.rows <= 1) {
+            return Err(invalid("The object was scaled or arrayed: it can't be regenerated."));
+        }
+        let old = i.block.clone();
+        let block = self.hvac_block(pieces);
+        self.modify_entity(h, |e| {
+            if let crate::EntityKind::Insert(i) = &mut e.kind {
+                i.block = block;
+            }
+            e.common.xdata = xdata;
+        })?;
+        self.drop_unreferenced_hvac_block(&old);
+        Ok(())
+    }
+
+    /// Removes anonymous block `name` when no object refers to it.
+    fn drop_unreferenced_hvac_block(&mut self, name: &str) {
+        let refers = |e: &std::sync::Arc<crate::Entity>| matches!(&e.kind, crate::EntityKind::Insert(i) if i.block.eq_ignore_ascii_case(name));
+        let used = self.model.iter().any(refers)
+            || self.layouts.iter().any(|l| l.entities.iter().any(refers))
+            || self.blocks.values().any(|b| b.entities.iter().any(refers) || b.array.as_ref().is_some_and(|a| a.source.eq_ignore_ascii_case(name)));
+        if !used && self.block(name).is_some_and(|b| b.anonymous) {
+            self.blocks.retain(|k, _| !k.eq_ignore_ascii_case(name));
+        }
+    }
+
     /// A new anonymous block holding `pieces`, at the block's origin; returns its name.
     fn hvac_block(&mut self, pieces: Vec<HvacPiece>) -> String {
         let name = self.anonymous_block_name("*U");

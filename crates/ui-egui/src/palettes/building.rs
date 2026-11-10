@@ -1,16 +1,16 @@
 //! The Tool Sets tabs for building objects: Architecture (wall styles to draw with, wall
-//! editing). Their content comes from the drawing (its wall styles), so they are drawn here
+//! editing) and HVAC (spaces, air terminals). Their content comes from the drawing (its wall styles), so they are drawn here
 //! rather than from a fixed list of tools.
 
 use cadcraft_color::Color;
-use cadcraft_doc::ComponentFunction;
+use cadcraft_doc::{ComponentFunction, TerminalKind};
 use egui::{Rect, Sense, Stroke, pos2, vec2};
 
 use crate::CadApp;
 use crate::theme::Tokens;
 
 /// The building tabs, after Drafting and Modeling.
-pub(super) const TABS: &[&str] = &["Architecture"];
+pub(super) const TABS: &[&str] = &["Architecture", "HVAC"];
 
 fn header(ui: &mut egui::Ui, title: &str) {
     let t = Tokens::get();
@@ -74,8 +74,128 @@ fn paint_style(p: &egui::Painter, r: Rect, st: &cadcraft_doc::WallStyle) {
 
 /// The body of building tab `tab`.
 pub(super) fn body(app: &mut CadApp, ui: &mut egui::Ui, tab: &str) {
-    if tab == "Architecture" {
-        architecture(app, ui);
+    match tab {
+        "Architecture" => architecture(app, ui),
+        "HVAC" => hvac(app, ui),
+        _ => {}
+    }
+}
+
+/// A small picture of air terminal `kind` in `r`, as it is drawn in plan.
+fn paint_terminal(p: &egui::Painter, r: Rect, kind: TerminalKind) {
+    let t = Tokens::get();
+    let s = Stroke::new(1.2, t.text);
+    let c = r.center();
+    let h = r.height() / 2.0;
+    match kind {
+        TerminalKind::SquareCeiling => {
+            let q = Rect::from_center_size(c, vec2(2.0 * h, 2.0 * h));
+            p.rect_stroke(q, 0.0, s, egui::StrokeKind::Inside);
+            p.circle_stroke(c, h * 0.35, s);
+            for corner in [q.left_top(), q.right_top(), q.left_bottom(), q.right_bottom()] {
+                p.line_segment([c + (corner - c) * 0.4, corner], s);
+            }
+        }
+        TerminalKind::Round => {
+            p.circle_stroke(c, h, s);
+            p.circle_stroke(c, h * 0.45, s);
+        }
+        TerminalKind::Rectangular => {
+            let q = Rect::from_center_size(c, vec2(r.width(), h));
+            p.rect_stroke(q, 0.0, s, egui::StrokeKind::Inside);
+            for k in [-0.25f32, 0.0, 0.25] {
+                p.line_segment([pos2(q.left() + 2.0, c.y + k * h), pos2(q.right() - 2.0, c.y + k * h)], s);
+            }
+        }
+        TerminalKind::Linear => {
+            let q = Rect::from_center_size(c, vec2(r.width(), h * 0.6));
+            p.rect_stroke(q, 0.0, s, egui::StrokeKind::Inside);
+            p.line_segment([pos2(q.left(), c.y), pos2(q.right(), c.y)], s);
+        }
+        TerminalKind::Extract => {
+            p.circle_stroke(c, h, s);
+            let d = h * 0.7;
+            p.line_segment([c + vec2(-d, -d), c + vec2(d, d)], s);
+            p.line_segment([c + vec2(-d, d), c + vec2(d, -d)], s);
+        }
+    }
+}
+
+/// A space outline with lines for its label.
+fn paint_space(p: &egui::Painter, r: Rect) {
+    let t = Tokens::get();
+    let s = Stroke::new(1.2, t.text);
+    p.rect_stroke(r, 0.0, s, egui::StrokeKind::Inside);
+    p.line_segment([pos2(r.left() + 6.0, r.center().y - 2.0), pos2(r.right() - 6.0, r.center().y - 2.0)], Stroke::new(1.0, t.text_dim));
+    p.line_segment([pos2(r.left() + 9.0, r.center().y + 3.0), pos2(r.right() - 9.0, r.center().y + 3.0)], Stroke::new(1.0, t.text_dim));
+}
+
+fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
+    let current = app.session.last_used.air_terminal.kind;
+    let mut start: Option<&'static str> = None;
+    let mut terminal: Option<TerminalKind> = None;
+    let mut distribute = false;
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        header(ui, "Spaces");
+        if row_button(ui, crate::i18n::t("Space"), false, paint_space) {
+            start = Some("spaceadd");
+        }
+        if row_button(ui, crate::i18n::t("Edit Space"), false, |_, _| {}) {
+            start = Some("spaceedit");
+        }
+        ui.add_space(6.0);
+        separator(ui);
+        header(ui, "Air Terminals");
+        for (kind, label) in [
+            (TerminalKind::SquareCeiling, "Square ceiling diffuser"),
+            (TerminalKind::Round, "Round diffuser"),
+            (TerminalKind::Rectangular, "Rectangular grille"),
+            (TerminalKind::Linear, "Slot diffuser"),
+            (TerminalKind::Extract, "Extract valve"),
+        ] {
+            if row_button(ui, crate::i18n::t(label), kind == current, |p, r| paint_terminal(p, r, kind)) {
+                terminal = Some(kind);
+            }
+        }
+        if row_button(ui, crate::i18n::t("Distribute in a Space"), false, |_, _| {}) {
+            distribute = true;
+        }
+        if row_button(ui, crate::i18n::t("Edit Air Terminal"), false, |_, _| {}) {
+            start = Some("airterminaledit");
+        }
+        ui.add_space(6.0);
+        separator(ui);
+        header(ui, "Ducts");
+        let t = Tokens::get();
+        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
+        ui.painter().text(
+            pos2(r.left() + 12.0, r.center().y),
+            egui::Align2::LEFT_CENTER,
+            crate::i18n::t("Coming next: drawing and sizing"),
+            egui::FontId::proportional(11.5),
+            t.text_faint,
+        );
+    });
+    if let Some(kind) = terminal {
+        // The type clicked becomes AIRTERMINALADD's, at the smallest size for the flow.
+        let last = &mut app.session.last_used.air_terminal;
+        last.kind = kind;
+        last.model.clear();
+        if kind == TerminalKind::Extract {
+            last.air = cadcraft_doc::AirDirection::Extract;
+        } else if last.air == cadcraft_doc::AirDirection::Extract {
+            last.air = cadcraft_doc::AirDirection::Supply;
+        }
+        app.cmd.buffer.clear();
+        app.start("airterminaladd");
+    } else if distribute {
+        app.cmd.buffer.clear();
+        app.start("airterminaladd");
+        app.cmdline("Distribute");
+    } else if let Some(cmd) = start {
+        app.cmd.buffer.clear();
+        app.start(cmd);
     }
 }
 

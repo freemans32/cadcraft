@@ -1,7 +1,7 @@
 //! Ventilation in plan: SPACEADD draws a space (a room's outline, its use and occupants, the
 //! fresh air it needs), AIRTERMINALADD places diffusers and grilles one by one or spread over a
 //! space, AIRTERMINALMODELEDIT lists, creates, changes and deletes the drawing's air terminal
-//! models.
+//! models; SPACEEDIT and AIRTERMINALEDIT change spaces and terminals already drawn.
 
 use cadcraft_doc::{
     AirDirection, Distribution, Drawing, EntityKind, Handle, HvacUnits, MAX_DISTRIBUTED, MAX_SPACE_VERTICES, SpaceParams, TerminalKind,
@@ -33,6 +33,18 @@ pub fn specs() -> Vec<CommandSpec> {
                  labelHeight? (mm)} → {handles, model, flow}",
             )
             .interactive(|s| Ok(Box::new(TerminalAddM::new(s)))),
+        CommandSpec::new("spaceedit", "Edit Space", run_spaceedit)
+            .params(
+                "{handle | handles, name?, use?, occupants?, fixtures?, collective?, flow? (m³/h; null: the labour code's)} \
+                 → {regenerated, flow}",
+            )
+            .interactive(|s| Ok(Box::new(SpaceEditM::new(s)))),
+        CommandSpec::new("airterminaledit", "Edit Air Terminal", run_airterminaledit)
+            .params(
+                "{handle | handles, model? (a name or auto), type?, flow? (m³/h), air?: supply|extract, rotation? (degrees)} \
+                 → {regenerated}",
+            )
+            .interactive(|s| Ok(Box::new(TerminalEditM::new(s)))),
         CommandSpec::new("airterminalmodeledit", "Air Terminal Models", run_modeledit).menu(&["Draw", "HVAC", "Air Terminal Models"]).params(
             "{} → {models} | {name, type?, width? (mm), depth? (mm), slots?, neck? (mm), maxFlow? (m³/h), pressureDrop? (Pa), copyFrom?} \
              → {model} | {delete: name}",
@@ -696,4 +708,403 @@ fn run_modeledit(s: &mut Session, p: &Value) -> Result<Value> {
         None => d.air_terminal_models.push(m.clone()),
     }
     Ok(json!({ "model": model_value(&m, false) }))
+}
+
+// =====================================================================================
+// SPACEEDIT
+// =====================================================================================
+
+/// What SPACEEDIT changes; `None` keeps the space's own value.
+#[derive(Clone, Default)]
+struct SpaceChange {
+    name: Option<String>,
+    room: Option<RoomUse>,
+    occupants: Option<u32>,
+    collective: Option<bool>,
+    /// `Some(None)` goes back to the labour code's flow.
+    flow: Option<Option<f64>>,
+}
+
+/// Most objects one edit changes.
+const MAX_EDITED: usize = 10_000;
+
+fn selected_spaces(d: &Drawing, hs: &[Handle]) -> Result<Vec<(Handle, SpaceParams)>> {
+    if hs.is_empty() || hs.len() > MAX_EDITED {
+        return Err(other(format!("Select 1 to {MAX_EDITED} spaces.")));
+    }
+    hs.iter().map(|&h| d.entity(h).and_then(|e| space_of(e)).map(|p| (h, p)).ok_or_else(|| other("Select spaces only."))).collect()
+}
+
+/// Gives every space of `hs` the change; nothing changes when one of them can't take it.
+fn edit_spaces(s: &mut Session, hs: &[Handle], c: &SpaceChange) -> Result<Vec<f64>> {
+    let mut next = Vec::new();
+    for (h, mut p) in selected_spaces(s.doc()?, hs)? {
+        if let Some(n) = &c.name {
+            p.name = n.clone();
+        }
+        if let Some(r) = c.room {
+            p.room = r;
+        }
+        if let Some(o) = c.occupants {
+            p.occupants = o;
+        }
+        if let Some(col) = c.collective {
+            p.collective = col;
+        }
+        if let Some(f) = c.flow {
+            p.flow_m3h = f;
+        }
+        p.validate().map_err(doc_err)?;
+        next.push((h, p));
+    }
+    let d = s.doc_mut()?;
+    let mut flows = Vec::with_capacity(next.len());
+    for (h, p) in &next {
+        d.regenerate_space(*h, p).map_err(doc_err)?;
+        flows.push(p.flow().map_err(doc_err)?);
+    }
+    Ok(flows)
+}
+
+fn run_spaceedit(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "spaceedit";
+    let hs = super::arch::handles_param(CMD, p)?;
+    let fixtures = u32_param(CMD, p, "fixtures", 1)?;
+    let mut c = SpaceChange {
+        name: str_param(p, "name").map(str::to_string),
+        room: match str_param(p, "use") {
+            Some(t) => Some(room_use(t, fixtures).ok_or_else(|| bad(CMD, "unknown `use`"))?),
+            None => None,
+        },
+        occupants: match p.get("occupants") {
+            None | Some(Value::Null) => None,
+            Some(_) => Some(u32_param(CMD, p, "occupants", 0)?),
+        },
+        collective: p.get("collective").and_then(Value::as_bool),
+        flow: match p.get("flow") {
+            None => None,
+            Some(Value::Null) => Some(None),
+            Some(_) => Some(positive_param(CMD, p, "flow")?),
+        },
+    };
+    // `fixtures` alone changes the count of the spaces' grouped sanitary rooms or washbasins.
+    if c.room.is_none() && p.get("fixtures").is_some_and(|v| !v.is_null()) {
+        let d = s.doc()?;
+        if let Some((_, first)) = selected_spaces(d, &hs)?.first() {
+            c.room = match first.room {
+                RoomUse::GroupedSanitary { .. } => Some(RoomUse::GroupedSanitary { fixtures }),
+                RoomUse::GroupedWashbasins { .. } => Some(RoomUse::GroupedWashbasins { fixtures }),
+                _ => None,
+            };
+        }
+    }
+    let flows = edit_spaces(s, &hs, &c)?;
+    Ok(json!({ "regenerated": flows.len(), "flow": if flows.len() == 1 { json!(flows[0]) } else { json!(flows) } }))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EditAsk {
+    Select,
+    Option,
+    Name,
+    Use,
+    Occupants,
+    Flow,
+    Type,
+    Size,
+    Air,
+    Rotation,
+}
+
+fn picked(s: &Session, hs: Vec<Handle>, keep: impl Fn(&cadcraft_doc::Entity) -> bool) -> Vec<Handle> {
+    s.doc().map(|d| hs.into_iter().filter(|h| d.entity(*h).is_some_and(|e| keep(e))).collect()).unwrap_or_default()
+}
+
+fn text_of(i: &Input) -> Option<String> {
+    match i {
+        Input::Text(t) | Input::Keyword(t) => Some(t.trim().to_string()),
+        _ => None,
+    }
+}
+
+struct SpaceEditM {
+    spaces: Vec<Handle>,
+    ask: EditAsk,
+}
+
+impl SpaceEditM {
+    fn new(s: &Session) -> Self {
+        let spaces = picked(s, s.selection(), |e| space_of(e).is_some());
+        let ask = if spaces.is_empty() { EditAsk::Select } else { EditAsk::Option };
+        SpaceEditM { spaces, ask }
+    }
+    fn apply(&mut self, s: &mut Session, c: SpaceChange) -> Result<Step> {
+        match edit_spaces(s, &self.spaces, &c) {
+            Ok(f) => s.echo(format!("{} space(s) changed: {}", f.len(), f.iter().map(|f| format!("{f:.0} m³/h")).collect::<Vec<_>>().join(", "))),
+            Err(e) => s.echo(e.to_string()),
+        }
+        self.ask = EditAsk::Option;
+        Ok(Step::Continue)
+    }
+}
+
+impl Interactive for SpaceEditM {
+    fn name(&self) -> &'static str {
+        "SPACEEDIT"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        match self.ask {
+            EditAsk::Select => Prompt::new("Select spaces", Accept::SELECT),
+            EditAsk::Name => Prompt::new("Enter space name", Accept::TEXT),
+            EditAsk::Use => Prompt::new("Enter space use", super::curves::KW).kw(ROOM_KEYWORDS),
+            EditAsk::Occupants => Prompt::new("Enter number of occupants", Accept::NUMBER),
+            EditAsk::Flow => Prompt::new("Enter flow (m³/h, 0 for the labour code)", Accept::NUMBER),
+            _ => Prompt::new("Enter an option", super::curves::KW).kw(&["Name", "Use", "OCcupants", "Flow"]),
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        let text = text_of(&i);
+        match (self.ask, i, text) {
+            (EditAsk::Select, Input::Pick(hs), _) => {
+                let new = picked(s, hs, |e| space_of(e).is_some());
+                for h in new {
+                    if !self.spaces.contains(&h) {
+                        self.spaces.push(h);
+                    }
+                }
+                Ok(Step::Continue)
+            }
+            (EditAsk::Select, Input::Enter, _) if !self.spaces.is_empty() => {
+                self.ask = EditAsk::Option;
+                Ok(Step::Continue)
+            }
+            (EditAsk::Select | EditAsk::Option, Input::Enter | Input::Cancel, _) => Ok(Step::Done),
+            (EditAsk::Option, _, Some(k)) => {
+                self.ask = match k.as_str() {
+                    "Name" => EditAsk::Name,
+                    "Use" => EditAsk::Use,
+                    "OCcupants" => EditAsk::Occupants,
+                    "Flow" => EditAsk::Flow,
+                    _ => EditAsk::Option,
+                };
+                Ok(Step::Continue)
+            }
+            (EditAsk::Name, _, Some(t)) if !t.is_empty() => self.apply(s, SpaceChange { name: Some(t), ..SpaceChange::default() }),
+            (EditAsk::Use, _, Some(t)) => match room_use(&t, 1) {
+                Some(r) => self.apply(s, SpaceChange { room: Some(r), ..SpaceChange::default() }),
+                None => Ok(Step::Continue),
+            },
+            (EditAsk::Occupants, _, Some(t)) => match t.parse::<u32>() {
+                Ok(n) => self.apply(s, SpaceChange { occupants: Some(n), ..SpaceChange::default() }),
+                Err(_) => {
+                    s.echo("Requires a whole number of occupants.");
+                    Ok(Step::Continue)
+                }
+            },
+            (EditAsk::Flow, _, Some(t)) => match t.parse::<f64>().ok().filter(|f| f.is_finite() && *f >= 0.0) {
+                Some(f) => self.apply(s, SpaceChange { flow: Some((f > 0.0).then_some(f)), ..SpaceChange::default() }),
+                None => {
+                    s.echo("Requires a flow in m³/h (0 for the labour code's).");
+                    Ok(Step::Continue)
+                }
+            },
+            (_, Input::Enter | Input::Cancel, _) => {
+                self.ask = EditAsk::Option;
+                Ok(Step::Continue)
+            }
+            _ => Ok(Step::Continue),
+        }
+    }
+    fn preview(&self, _s: &Session, _c: Vec2) -> Vec<EntityKind> {
+        Vec::new()
+    }
+}
+
+// =====================================================================================
+// AIRTERMINALEDIT
+// =====================================================================================
+
+/// What AIRTERMINALEDIT changes; `None` keeps the terminal's own value.
+#[derive(Clone, Default)]
+struct TerminalChange {
+    /// A model name, or "auto" for the smallest of the terminal's kind for its flow.
+    model: Option<String>,
+    kind: Option<TerminalKind>,
+    flow: Option<f64>,
+    air: Option<AirDirection>,
+    /// Radians.
+    rotation: Option<f64>,
+}
+
+fn selected_terminals(d: &Drawing, hs: &[Handle]) -> Result<Vec<(Handle, TerminalParams)>> {
+    if hs.is_empty() || hs.len() > MAX_EDITED {
+        return Err(other(format!("Select 1 to {MAX_EDITED} air terminals.")));
+    }
+    hs.iter()
+        .map(|&h| d.entity(h).and_then(|e| cadcraft_doc::air_terminal_of(e)).map(|p| (h, p)).ok_or_else(|| other("Select air terminals only.")))
+        .collect()
+}
+
+/// Gives every terminal of `hs` the change; nothing changes when one of them can't take it.
+fn edit_terminals(s: &mut Session, hs: &[Handle], c: &TerminalChange) -> Result<usize> {
+    let d = s.doc()?;
+    let mut next = Vec::new();
+    for (h, mut p) in selected_terminals(d, hs)? {
+        if let Some(f) = c.flow {
+            p.flow_m3h = f;
+        }
+        if let Some(a) = c.air {
+            p.air = a;
+        }
+        let auto = c.model.as_deref().is_some_and(|m| m.trim().eq_ignore_ascii_case("auto"));
+        match (&c.model, c.kind) {
+            (Some(m), _) if !auto => p.model = model_named(d, m)?,
+            (_, Some(k)) => p.model = choose_model(d, "", k, p.flow_m3h)?,
+            _ if auto => p.model = choose_model(d, "", p.model.kind, p.flow_m3h)?,
+            _ => {}
+        }
+        p.validate().map_err(doc_err)?;
+        next.push((h, p));
+    }
+    let d = s.doc_mut()?;
+    for (h, p) in &next {
+        d.regenerate_air_terminal(*h, p).map_err(doc_err)?;
+        if let Some(r) = c.rotation {
+            d.modify_entity(*h, |e| {
+                if let EntityKind::Insert(i) = &mut e.kind {
+                    i.rotation = r;
+                }
+            })
+            .map_err(doc_err)?;
+        }
+        if d.air_terminal_model(&p.model.name).is_none() {
+            d.air_terminal_models.push(p.model.clone());
+        }
+    }
+    Ok(next.len())
+}
+
+fn run_airterminaledit(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "airterminaledit";
+    let hs = super::arch::handles_param(CMD, p)?;
+    let c = TerminalChange {
+        model: str_param(p, "model").map(str::to_string),
+        kind: match str_param(p, "type") {
+            Some(t) => Some(TerminalKind::parse(t).ok_or_else(|| bad(CMD, "unknown `type`"))?),
+            None => None,
+        },
+        flow: positive_param(CMD, p, "flow")?,
+        air: match str_param(p, "air") {
+            Some(t) => Some(AirDirection::parse(t).ok_or_else(|| bad(CMD, "`air` must be supply or extract"))?),
+            None => None,
+        },
+        rotation: match p.get("rotation") {
+            None | Some(Value::Null) => None,
+            Some(v) => Some(v.as_f64().filter(|a| a.is_finite()).ok_or_else(|| bad(CMD, "`rotation` must be a number"))?.to_radians()),
+        },
+    };
+    let n = edit_terminals(s, &hs, &c)?;
+    Ok(json!({ "regenerated": n }))
+}
+
+struct TerminalEditM {
+    terminals: Vec<Handle>,
+    ask: EditAsk,
+}
+
+impl TerminalEditM {
+    fn new(s: &Session) -> Self {
+        let terminals = picked(s, s.selection(), |e| cadcraft_doc::air_terminal_of(e).is_some());
+        let ask = if terminals.is_empty() { EditAsk::Select } else { EditAsk::Option };
+        TerminalEditM { terminals, ask }
+    }
+    fn apply(&mut self, s: &mut Session, c: TerminalChange) -> Result<Step> {
+        match edit_terminals(s, &self.terminals, &c) {
+            Ok(n) => s.echo(format!("{n} air terminal(s) changed.")),
+            Err(e) => s.echo(e.to_string()),
+        }
+        self.ask = EditAsk::Option;
+        Ok(Step::Continue)
+    }
+}
+
+impl Interactive for TerminalEditM {
+    fn name(&self) -> &'static str {
+        "AIRTERMINALEDIT"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        match self.ask {
+            EditAsk::Select => Prompt::new("Select air terminals", Accept::SELECT),
+            EditAsk::Type => Prompt::new("Enter air terminal type", super::curves::KW).kw(&["Square", "Round", "Grille", "Linear", "Extract"]),
+            EditAsk::Size => Prompt::new("Enter model name or [Auto/?]", Accept::TEXT),
+            EditAsk::Flow => Prompt::new("Enter flow per terminal (m³/h)", Accept::NUMBER),
+            EditAsk::Air => Prompt::new("Enter air direction", super::curves::KW).kw(&["Supply", "Extract"]),
+            EditAsk::Rotation => Prompt::new("Specify rotation angle", Accept::NUMBER),
+            _ => Prompt::new("Enter an option", super::curves::KW).kw(&["Type", "Size", "Flow", "Air", "Rotation"]),
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        let text = text_of(&i);
+        match (self.ask, i, text) {
+            (EditAsk::Select, Input::Pick(hs), _) => {
+                let new = picked(s, hs, |e| cadcraft_doc::air_terminal_of(e).is_some());
+                for h in new {
+                    if !self.terminals.contains(&h) {
+                        self.terminals.push(h);
+                    }
+                }
+                Ok(Step::Continue)
+            }
+            (EditAsk::Select, Input::Enter, _) if !self.terminals.is_empty() => {
+                self.ask = EditAsk::Option;
+                Ok(Step::Continue)
+            }
+            (EditAsk::Select | EditAsk::Option, Input::Enter | Input::Cancel, _) => Ok(Step::Done),
+            (EditAsk::Option, _, Some(k)) => {
+                self.ask = match k.as_str() {
+                    "Type" => EditAsk::Type,
+                    "Size" => EditAsk::Size,
+                    "Flow" => EditAsk::Flow,
+                    "Air" => EditAsk::Air,
+                    "Rotation" => EditAsk::Rotation,
+                    _ => EditAsk::Option,
+                };
+                Ok(Step::Continue)
+            }
+            (EditAsk::Type, _, Some(t)) => match TerminalKind::parse(&t) {
+                Some(k) => self.apply(s, TerminalChange { kind: Some(k), ..TerminalChange::default() }),
+                None => Ok(Step::Continue),
+            },
+            (EditAsk::Size, _, Some(t)) if t == "?" => {
+                let names: Vec<String> =
+                    s.doc()?.available_air_terminal_models().into_iter().map(|m| format!("{} ({:.0} m³/h)", m.name, m.max_flow_m3h)).collect();
+                s.echo(format!("Models: {}", names.join(", ")));
+                Ok(Step::Continue)
+            }
+            (EditAsk::Size, _, Some(t)) if !t.is_empty() => self.apply(s, TerminalChange { model: Some(t), ..TerminalChange::default() }),
+            (EditAsk::Flow, _, Some(t)) => match t.parse::<f64>().ok().filter(|f| f.is_finite() && *f > 0.0) {
+                Some(f) => self.apply(s, TerminalChange { flow: Some(f), ..TerminalChange::default() }),
+                None => {
+                    s.echo("Requires a positive flow in m³/h.");
+                    Ok(Step::Continue)
+                }
+            },
+            (EditAsk::Air, _, Some(t)) => match AirDirection::parse(&t) {
+                Some(a) => self.apply(s, TerminalChange { air: Some(a), ..TerminalChange::default() }),
+                None => Ok(Step::Continue),
+            },
+            (EditAsk::Rotation, _, Some(t)) => match t.parse::<f64>().ok().filter(|a| a.is_finite()) {
+                Some(a) => self.apply(s, TerminalChange { rotation: Some(a.to_radians()), ..TerminalChange::default() }),
+                None => Ok(Step::Continue),
+            },
+            (_, Input::Enter | Input::Cancel, _) => {
+                self.ask = EditAsk::Option;
+                Ok(Step::Continue)
+            }
+            _ => Ok(Step::Continue),
+        }
+    }
+    fn preview(&self, _s: &Session, _c: Vec2) -> Vec<EntityKind> {
+        Vec::new()
+    }
 }

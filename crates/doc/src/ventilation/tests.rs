@@ -208,3 +208,41 @@ fn terminals_spread_evenly_inside_a_room() {
     assert!(distribute_in_polygon(&rect, Distribution::Grid { rows: 1000, cols: 1000 }).is_err());
     assert!(distribute_in_polygon(&[], Distribution::Count(1)).is_err());
 }
+
+#[test]
+fn spaces_and_terminals_are_redrawn_in_place() {
+    let mut d = Drawing::new_metric();
+    let h = d.add_space(&Space::Model, Common::default(), office(SIX_BY_FIVE, 4)).unwrap();
+    let old_block = match &d.entity(h).unwrap().kind {
+        EntityKind::Insert(i) => i.block.clone(),
+        _ => panic!("not a block reference"),
+    };
+    let mut p = space_of(d.entity(h).unwrap()).unwrap();
+    p.name = "Salle de sport".into();
+    p.flow_m3h = Some(1200.0);
+    d.regenerate_space(h, &p).unwrap();
+    let e = d.entity(h).unwrap();
+    assert_eq!(space_of(e).map(|s| s.flow().ok()), Some(Some(1200.0)));
+    let EntityKind::Insert(i) = &e.kind else { panic!("not a block reference") };
+    let labels = d.block(&i.block).unwrap().entities.iter().filter_map(|e| match &e.kind {
+        EntityKind::Text(t) => Some(t.value.clone()),
+        _ => None,
+    });
+    assert_eq!(labels.collect::<Vec<_>>(), ["Salle de sport", "30.0 m²", "1200 m³/h"]);
+    assert!(d.block(&old_block).is_none(), "the old block is gone");
+
+    let t = terminal("RD160", 100.0);
+    let th = d.add_air_terminal(&Space::Model, Common::default(), &t, Vec2::new(1.0, 1.0), 0.0).unwrap();
+    let mut t2 = t.clone();
+    t2.flow_m3h = 180.0;
+    d.regenerate_air_terminal(th, &t2).unwrap();
+    assert_eq!(air_terminal_of(d.entity(th).unwrap()), Some(t2));
+    // A scaled reference is refused.
+    d.modify_entity(th, |e| {
+        if let EntityKind::Insert(i) = &mut e.kind {
+            i.scale.x = 2.0;
+        }
+    })
+    .unwrap();
+    assert!(d.regenerate_air_terminal(th, &t).is_err());
+}

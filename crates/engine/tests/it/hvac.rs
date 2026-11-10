@@ -168,3 +168,75 @@ fn airterminalmodeledit_lists_creates_changes_and_deletes() {
     s.execute("airterminalmodeledit", &json!({"delete": "DF 4V 625"})).unwrap();
     assert!(s.execute("airterminalmodeledit", &json!({"delete": "DF 4V 625"})).is_err());
 }
+
+#[test]
+fn spaceedit_turns_an_office_into_a_1200_m3h_gym() {
+    // Guillaume's first test: a gym drawn as the default office, corrected afterwards.
+    let mut s = metric();
+    let sp = s.execute("spaceadd", &json!({"points": ROOM})).unwrap();
+    assert_eq!(sp["flow"], 25.0);
+    let r = s.execute("spaceedit", &json!({"handle": sp["handle"], "name": "Salle de sport", "flow": 1200})).unwrap();
+    assert_eq!(r["flow"], 1200.0);
+    let e = space_of(s.doc().unwrap().entity(h(&sp)).unwrap()).unwrap();
+    assert_eq!((e.name.as_str(), e.flow_m3h), ("Salle de sport", Some(1200.0)));
+    // By use instead: other rooms, 20 people; null goes back to the labour code's flow.
+    let r = s.execute("spaceedit", &json!({"handle": sp["handle"], "use": "workshop", "occupants": 20, "flow": null})).unwrap();
+    assert_eq!(r["flow"], 1200.0);
+    assert_eq!(space_of(s.doc().unwrap().entity(h(&sp)).unwrap()).unwrap().flow_m3h, None);
+    // Fixtures alone change a grouped sanitary room's count.
+    let wc = s.execute("spaceadd", &json!({"points": ROOM, "use": "sanitary", "fixtures": 2})).unwrap();
+    assert_eq!(s.execute("spaceedit", &json!({"handle": wc["handle"], "fixtures": 5})).unwrap()["flow"], 105.0);
+    assert!(s.execute("spaceedit", &json!({"handle": sp["handle"], "use": "kitchen"})).is_err());
+    assert!(s.execute("spaceedit", &json!({"handle": sp["handle"], "flow": -3})).is_err());
+    s.execute("undo", &json!({})).unwrap();
+}
+
+#[test]
+fn spaceedit_at_the_command_line() {
+    let mut s = metric();
+    let sp = s.execute("spaceadd", &json!({"points": ROOM})).unwrap();
+    s.set_selection(vec![h(&sp)]);
+    for t in ["spaceedit", "f", "1200", "n", "Gymnase", ""] {
+        s.cmdline(t).unwrap();
+    }
+    assert!(s.running.is_none());
+    let e = space_of(s.doc().unwrap().entity(h(&sp)).unwrap()).unwrap();
+    assert_eq!((e.name.as_str(), e.flow().ok()), ("Gymnase", Some(1200.0)));
+}
+
+#[test]
+fn airterminaledit_changes_several_terminals_at_once() {
+    let mut s = metric();
+    let sp = s.execute("spaceadd", &json!({"points": ROOM, "flow": 1200})).unwrap();
+    let r = s.execute("airterminaladd", &json!({"space": sp["handle"], "count": 4, "flow": 250})).unwrap();
+    assert_eq!(r["model"], "SQ600-160");
+    let hs = r["handles"].clone();
+    s.execute("airterminaledit", &json!({"handles": hs, "flow": 300, "model": "auto"})).unwrap();
+    let all = terminals(&s);
+    assert!(all.iter().all(|(_, t)| t.model.name == "SQ600-200" && t.flow_m3h == 300.0), "{all:?}");
+    s.execute("airterminaledit", &json!({"handles": hs, "type": "round", "rotation": 45})).unwrap();
+    let all = terminals(&s);
+    assert!(all.iter().all(|(_, t)| t.model.name == "RD200"));
+    assert!((insert_at(&s, all[0].0).2 - std::f64::consts::FRAC_PI_4).abs() < 1e-12);
+    s.execute("airterminaledit", &json!({"handles": hs, "model": "RD250", "air": "extract"})).unwrap();
+    assert!(terminals(&s).iter().all(|(_, t)| t.model.name == "RD250" && t.air == AirDirection::Extract));
+    // A model too small for the flow is refused for "auto"; a missing model or a space is refused.
+    assert!(s.execute("airterminaledit", &json!({"handles": hs, "flow": 5000, "model": "auto"})).is_err());
+    assert!(s.execute("airterminaledit", &json!({"handles": hs, "model": "nope"})).is_err());
+    assert!(s.execute("airterminaledit", &json!({"handle": sp["handle"], "flow": 100})).is_err());
+    assert!(terminals(&s).iter().all(|(_, t)| t.flow_m3h == 300.0), "nothing changed by a refused edit");
+}
+
+#[test]
+fn airterminaledit_at_the_command_line() {
+    let mut s = metric();
+    let r = s.execute("airterminaladd", &json!({"at": [0, 0], "flow": 100})).unwrap();
+    let hd = Handle::parse_hex(r["handles"][0].as_str().unwrap()).unwrap();
+    s.set_selection(vec![hd]);
+    for t in ["airterminaledit", "f", "350", "s", "auto", ""] {
+        s.cmdline(t).unwrap();
+    }
+    assert!(s.running.is_none());
+    let t = &terminals(&s)[0].1;
+    assert_eq!((t.model.name.as_str(), t.flow_m3h), ("SQ600-200", 350.0));
+}
