@@ -53,7 +53,7 @@ Remotes : `origin` = ce fork, `upstream` = `storytold/cadcraft`. Ne pousse jamai
 
 Cette section sert à reprendre le travail dans une nouvelle conversation, avec n'importe quelle IA. Elle est mise à jour en continu (règle n° 2) : date, ce qui est fait, ce qui reste.
 
-*Dernière mise à jour : 10 novembre 2026.*
+*Dernière mise à jour : 10 novembre 2026 (analyse des PR sur a3d9348).*
 
 ### Fait
 
@@ -78,11 +78,15 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
 ### En cours
 
 1. **Intégrer les PR upstream dans `perso`.**
-   - Refaire l'analyse des PR ouvertes sur la base `a3d9348` (certaines sont fusionnées depuis), puis la simulation sans #997.
-   - Boucle `cargo check --workspace --all-targets` : retirer chaque PR qui casse, puis lancer les tests en debug et retirer celles qui les font échouer.
-   - `feat/murs` est déjà dedans : régler le conflit `fr.tsv` au moment des fusions.
-   - Écrire `perso/pr-integrees.tsv` (numéro, titre, intégrée ou écartée, raison).
-   - Pousser `perso` à chaque étape, puis proposer le script `cadcraft-maj` (worktree `/mnt/Jeux/artcraft/cadcraft-perso`, binaire et lanceur « CADCraft Perso »).
+   - **Analyse refaite le 10 novembre sur `a3d9348`, simulation terminée, en attente de l'accord de Guillaume pour fusionner et pousser.**
+     - Liste des PR ouvertes : par `git ls-remote upstream 'refs/pull/*'` (une PR ouverte a une référence `refs/pull/N/merge`) : 653 PR. L'API GitHub de `storytold/cadcraft` n'était pas accessible depuis la session, donc pas de titres ni de statut brouillon : le tableau donne le dernier commit de chaque PR.
+     - 298 s'appliquent seules sur `main`, 355 sont en conflit. Écartées par catégorie : 17 plateforme/paquets/CI, 4 plateforme (titre), 5 langues, 4 docs, 4 refactorisation, #997. Restent 263 candidates.
+     - Fusion cumulée par ordre croissant sur `perso` : 162 intégrées, 82 en conflit avec les PR fusionnées avant elles, 19 retirées parce qu'elles cassent la compilation ou les tests : #1084 #1099 #1229 #1263 #1335 #1445 #1452 #1619 #1632 #1692 #1720 #1816 #1873 #2111 #2301 #2451 #2790 #2808 #2826 (raisons dans le tableau).
+     - Résultat : `cargo check --workspace --all-targets` passe, `cargo test --workspace` en debug : 4 488 tests, 0 échec.
+     - Méthode : les `.tsv` de traduction sont fusionnés en mode `union` (`echo '*.tsv merge=union' > .git/info/attributes`), puis un commit `perso:` retire les doublons (`es.tsv`). `Cargo.lock` : seule la version du paquet change (0.17.0 → 0.19.0), cargo le fait seul.
+     - Plusieurs PR retirées pour une seule ligne (ex. #1452 : traduction chinoise manquante ; #1692 : import en double) pourraient revenir avec un petit commit de correction `perso:`. À proposer.
+     - Le tableau complet (`perso/pr-integrees.tsv`) sera ajouté avec les fusions.
+   - Ensuite : proposer le script `cadcraft-maj` (worktree `/mnt/Jeux/artcraft/cadcraft-perso`, binaire et lanceur « CADCraft Perso »).
 2. Guillaume teste la PR 1 des murs sur son PC (commande `walladd` / « Mur »).
 
 ### Ensuite (chaque étape à présenter et faire valider avant de coder)
