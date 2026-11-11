@@ -57,7 +57,7 @@ Remotes : `origin` = ce fork, `upstream` = `storytold/cadcraft`. Ne pousse jamai
 
 Cette section sert à reprendre le travail dans une nouvelle conversation, avec n'importe quelle IA. Elle est mise à jour en continu (règle n° 2) : date, ce qui est fait, ce qui reste.
 
-*Dernière mise à jour : 11 novembre 2026 (CTA double flux : réseaux soufflage et extraction).*
+*Dernière mise à jour : 11 novembre 2026 (gaines CVC, étape 3b : accessoires et réducteurs).*
 
 ### Fait
 
@@ -165,7 +165,16 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
    - **Bug corrigé le 11 novembre** (signalé par Guillaume : impossible de saisir 20 occupants dans la palette) : la palette envoie `20.0` et le moteur n'acceptait qu'un entier. `u32_param` (`crates/engine/src/cmd/hvac.rs`) accepte maintenant un nombre entier écrit avec une virgule ; deux tests qui échouaient avant.
    - **Bug corrigé le 11 novembre** (signalé par Guillaume, capture de la salle de sport : « le dimensionnement ne fonctionne plus et la CTA ne prend pas le débit du local ») : une gaine qui finit au milieu d'un tronçon n'était pas un té (le tronçon n'avait pas d'extrémité là), et les points d'accrochage d'une gaine sont sur ses bords, à un rayon de l'axe, donc hors tolérance. Corrigé : `Drawing::split_duct_taps` (appelé par `DUCTSIZE`) coupe les tronçons là où une gaine finit dessus ou une bouche s'y trouve ; les tolérances de raccord suivent le diamètre (0,55 × Ø). `DUCTSIZE` donne les coordonnées dans ses messages, le nombre de coupes (`cuts`) et compare chaque local à ses bouches (`spaces`). La CTA prend la somme des débits des bouches, pas le débit du local : dans la capture, 8 bouches de 300 m³/h = 2 400 m³/h pour un local à 1 200, ce que `DUCTSIZE` signale maintenant. Tests : 4 en `doc`, 1 en moteur.
    - **CTA double flux, 11 novembre** (signalé par Guillaume : « la CTA devrait faire 1 200 m³/h, j'ai renseigné soufflage ou extraction dans les bouches ») : une CTA a maintenant deux réseaux, soufflage et extraction. Un réseau se lit avec les gaines **et** les bouches du même sens d'air (le sens d'une gaine se règle par `DUCTADD` option Air ou Propriétés ; celui d'une bouche par `AIRTERMINALADD`). `DuctNetwork.air`. La CTA garde `flow_m3h` / `pressure_pa` (soufflage) et `extract_flow_m3h` / `extract_pressure_pa` (extraction), étiquette « CTA1 S 1200 / E 1200 m³/h … Pa ». `AhuParams.air` supprimé (les anciennes données restent lisibles). `DUCTSIZE` renvoie un réseau par sens (`air`), et compare chaque local à ses bouches, par sens. Une bouche d'extraction au bout d'une gaine de soufflage n'est pas raccordée (signalée). `read_network` refait en `Scan` pour passer la limite de complexité de clippy. Tests : 3 en `doc`, 1 en moteur, aller-retour DXF/DWG.
-   - Ensuite : étape 3b (accessoires), puis étape 4 (note de calcul et métré par local), puis étape 5.
+   - **Étape 3b faite le 11 novembre : accessoires et réducteurs.** Sur `perso`.
+     - `crates/doc/src/ventilation/accessory.rs` : registre de réglage (REG), clapet coupe-feu (CCF), silencieux (SIL), manchette souple (MS) ; un bloc posé sur une gaine, à l'échelle en travers (xdata `CADCRAFT_DUCTACC`, calque `M-HVAC-ACC`), qui prend le diamètre et la direction de la gaine. Perte : coefficient ζ (défauts indicatifs : registre 0,3 ; coupe-feu 0,4 ; manchette 0,05) ou perte de charge en Pa (silencieux : 30 Pa par défaut), modifiables ; la perte en Pa l'emporte sur ζ. Dessins originaux.
+     - `cadcraft-hvac` : `Segment.fixed_pa` (perte en Pa ajoutée aux raccords du tronçon), validé et testé.
+     - `network.rs` : chaque accessoire ajoute sa perte au tronçon de la gaine sur laquelle il est posé, sans la couper ; un accessoire hors gaine est signalé (`unplaced`).
+     - `crates/engine/src/cmd/duct_acc.rs` : `DUCTACCESSORYADD` (au clic sur une gaine, mots-clés Damper / Fire / Silencer / Flex / Length, type retenu), `DUCTACCESSORYEDIT` (JSON ; `zeta` ou `pressureDrop` à `null` rend le défaut).
+     - `DUCTSIZE` ajoute un **réducteur** à chaque changement de diamètre entre un tronçon et son parent, puis redimensionne pour les pertes (le diamètre ne change pas).
+     - Interface : rubrique « Accessoires de gaine » de l'onglet CVC (quatre boutons), groupe « Accessoire de gaine » de la palette Propriétés (type, longueur, coefficient, perte en Pa).
+     - Vérifié : tests `doc` (6), `hvac` (1), moteur (4), palette (1), aller-retour DXF/DWG (accessoire et application enregistrée), capture d'écran du CLI, fmt, clippy -D warnings, `cargo test --workspace` en debug, layers, assets. Pas vérifié : wasm, essai dans l'interface graphique.
+     - Limites : l'étiquette de la gaine peut tomber sous un accessoire posé à mi-longueur ; pas de piquage en tant qu'objet (le té est déduit) ; un accessoire déplacé sur une autre gaine est repris à la lecture suivante (relancer `DUCTSIZE`) ; pas de version interactive de `DUCTACCESSORYEDIT`.
+   - Ensuite : étape 4 (note de calcul et métré par local), puis étape 5, puis étape 4 (note de calcul et métré par local), puis étape 5.
 5. **Export IFC** (BIM).
 6. Publier en amont, plus tard : une issue de cadrage chez `storytold/cadcraft`, puis les PR des murs une par une.
 

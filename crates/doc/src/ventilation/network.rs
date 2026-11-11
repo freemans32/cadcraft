@@ -5,7 +5,9 @@ use cadcraft_geom::Vec2;
 use cadcraft_hvac::{Fitting, Network, NetworkReport, Segment, SegmentKind, Terminal};
 
 use super::duct::{AXIS_REACH, interior_cut};
-use super::{AhuParams, AirDirection, DuctKind, DuctParams, HvacUnits, TerminalParams, ahu_of, air_terminal_of, invalid};
+use super::{
+    AccessoryParams, AhuParams, AirDirection, DuctKind, DuctParams, HvacUnits, Loss, TerminalParams, accessory_of, ahu_of, air_terminal_of, invalid,
+};
 use crate::{EntityKind, Handle, Result};
 
 /// Most ducts one drawing's networks are read from.
@@ -31,6 +33,10 @@ pub struct DuctNetwork {
     pub dangling: Vec<Handle>,
     /// Terminals that no duct of their air direction reaches (set on the first network only).
     pub unconnected: Vec<Handle>,
+    /// The accessories whose loss is in this network.
+    pub accessories: Vec<Handle>,
+    /// Accessories on no duct (set on the first network only).
+    pub unplaced: Vec<Handle>,
 }
 
 struct Duct {
@@ -60,6 +66,7 @@ impl crate::Drawing {
         let mut ducts = Vec::new();
         let mut ahus: Vec<(Handle, AhuParams, Vec2, f64)> = Vec::new();
         let mut terminals: Vec<(Handle, TerminalParams, Vec2)> = Vec::new();
+        let mut accessories: Vec<(Handle, AccessoryParams, Vec2)> = Vec::new();
         for e in self.model.iter() {
             let EntityKind::Insert(i) = &e.kind else { continue };
             if let Some((params, a, b)) = self.duct_ends(e.handle) {
@@ -71,6 +78,8 @@ impl crate::Drawing {
                 ahus.push((e.handle, p, Vec2::new(i.insert.x, i.insert.y), i.rotation));
             } else if let Some(p) = air_terminal_of(e) {
                 terminals.push((e.handle, p, Vec2::new(i.insert.x, i.insert.y)));
+            } else if let Some(p) = accessory_of(e) {
+                accessories.push((e.handle, p, Vec2::new(i.insert.x, i.insert.y)));
             }
         }
         let mut scan =
@@ -100,8 +109,10 @@ impl crate::Drawing {
         }
         // A terminal left unreached by every unit is reported on each network: say so once, on the first.
         let lost: Vec<Handle> = terminals.iter().zip(&scan.touched).filter(|(_, t)| !**t).map(|((h, ..), _)| *h).collect();
+        let unplaced = place_accessories(&ducts, &accessories, units, &mut out);
         if let Some(first) = out.first_mut() {
             first.unconnected = lost;
+            first.unplaced = unplaced;
         }
         Ok(out)
     }
@@ -174,6 +185,39 @@ impl crate::Drawing {
         }
         Ok(())
     }
+}
+
+/// Adds each accessory's loss to the segment of the duct it sits on, and returns the accessories
+/// that sit on no duct. One on a duct left out of every network is dropped without a word.
+fn place_accessories(ducts: &[Duct], accessories: &[(Handle, AccessoryParams, Vec2)], units: HvacUnits, nets: &mut [DuctNetwork]) -> Vec<Handle> {
+    let mut unplaced = Vec::new();
+    for (h, a, at) in accessories {
+        let mut best: Option<(f64, Handle)> = None;
+        for d in ducts {
+            let along = (d.b - d.a).normalized();
+            let t = (*at - d.a).dot(along);
+            let across = (*at - d.a).cross(along).abs();
+            let reach = units.to_units(MEET_MM).max(AXIS_REACH * d.params.units.to_units(d.params.diameter_mm));
+            if across <= reach && t >= 0.0 && t <= d.a.dist(d.b) && best.is_none_or(|x| across < x.0) {
+                best = Some((across, d.handle));
+            }
+        }
+        let Some((_, duct)) = best else {
+            unplaced.push(*h);
+            continue;
+        };
+        for net in nets.iter_mut() {
+            let Some(i) = net.ducts.iter().position(|x| *x == duct) else { continue };
+            if let Some(seg) = net.network.segments.get_mut(i) {
+                match a.loss() {
+                    Loss::Zeta(zeta) => seg.fittings.push(Fitting::Custom { zeta }),
+                    Loss::Pascals(pa) => seg.fixed_pa += pa,
+                }
+                net.accessories.push(*h);
+            }
+        }
+    }
+    unplaced
 }
 
 /// What reading the networks of a drawing shares: the objects found, and which ducts and
@@ -302,10 +346,20 @@ impl Scan<'_> {
                 fittings: n.fittings.clone(),
                 terminal: n.terminal.map(|(_, flow, pa)| Terminal { flow_m3h: flow, pressure_drop_pa: pa }),
                 diameter_mm: d.params.imposed.then_some(d.params.diameter_mm),
+                fixed_pa: 0.0,
             });
             handles.push(d.handle);
         }
-        DuctNetwork { ahu, air, network: Network { segments }, ducts: handles, dangling, unconnected: Vec::new() }
+        DuctNetwork {
+            ahu,
+            air,
+            network: Network { segments },
+            ducts: handles,
+            dangling,
+            unconnected: Vec::new(),
+            accessories: Vec::new(),
+            unplaced: Vec::new(),
+        }
     }
 }
 

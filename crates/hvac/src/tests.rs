@@ -65,6 +65,7 @@ fn seg(parent: Option<usize>, length_m: f64, kind: SegmentKind, fittings: &[Fitt
         fittings: fittings.to_vec(),
         terminal: terminal.map(|flow_m3h| Terminal { flow_m3h, pressure_drop_pa: 15.0 }),
         diameter_mm: None,
+        fixed_pa: 0.0,
     }
 }
 
@@ -188,4 +189,20 @@ fn a_report_reads_back_from_json() {
     let back: (Network, DesignCriteria) = serde_json::from_str(&json).unwrap();
     assert_eq!(back.0, net);
     assert_eq!(size_network(&back.0, &back.1).unwrap(), r);
+}
+
+#[test]
+fn an_accessory_given_in_pascals_adds_to_its_segments_losses() {
+    let mut net = three_offices();
+    let plain = size_network(&net, &DesignCriteria::default()).unwrap();
+    // A silencer of 30 Pa on the trunk.
+    net.segments[0].fixed_pa = 30.0;
+    let with = size_network(&net, &DesignCriteria::default()).unwrap();
+    assert!((with.segments[0].fittings_pa - plain.segments[0].fittings_pa - 30.0).abs() < 1e-9);
+    assert!((with.required_pressure_pa - plain.required_pressure_pa - 30.0).abs() < 1e-9);
+    assert_eq!(with.segments[0].diameter_mm, plain.segments[0].diameter_mm, "the size does not depend on the accessories");
+    for bad in [-1.0, f64::NAN, 1e9] {
+        net.segments[0].fixed_pa = bad;
+        assert!(size_network(&net, &DesignCriteria::default()).is_err(), "{bad}");
+    }
 }

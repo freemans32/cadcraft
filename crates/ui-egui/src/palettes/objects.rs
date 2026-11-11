@@ -3,8 +3,8 @@
 //! command so the object is regenerated, as the command line would.
 
 use cadcraft_doc::{
-    AirDirection, Drawing, DuctKind, DuctParams, Handle, SpaceParams, TerminalKind, TerminalParams, WallJustification, air_terminal_of, duct_of,
-    space_of, wall_of,
+    AccessoryKind, AccessoryParams, AirDirection, Drawing, DuctKind, DuctParams, Handle, SpaceParams, TerminalKind, TerminalParams,
+    WallJustification, accessory_of, air_terminal_of, duct_of, space_of, wall_of,
 };
 use cadcraft_hvac::RoomUse;
 use egui::{Sense, pos2, vec2};
@@ -46,6 +46,10 @@ pub(super) fn section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], len: &dyn 
     if !terminals.is_empty() && terminals.len() == sel.len() {
         return terminal_section(ui, d, sel, &terminals, bad);
     }
+    let accessories: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| accessory_of(e))).collect();
+    if !accessories.is_empty() && accessories.len() == sel.len() {
+        return accessory_section(ui, sel, &accessories, bad);
+    }
     let ducts: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| duct_of(e))).collect();
     if !ducts.is_empty() && ducts.len() == sel.len() {
         return duct_section(ui, sel, &ducts, len, bad);
@@ -55,7 +59,9 @@ pub(super) fn section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], len: &dyn 
 
 /// Whether object `h` is a parametric object with a Properties group of its own.
 pub(crate) fn is_parametric(d: &Drawing, h: Handle) -> bool {
-    d.entity(h).is_some_and(|e| wall_of(e).is_some() || space_of(e).is_some() || air_terminal_of(e).is_some() || duct_of(e).is_some())
+    d.entity(h).is_some_and(|e| {
+        wall_of(e).is_some() || space_of(e).is_some() || air_terminal_of(e).is_some() || duct_of(e).is_some() || accessory_of(e).is_some()
+    })
 }
 
 fn handles(sel: &[Handle]) -> Vec<String> {
@@ -392,6 +398,56 @@ fn duct_section(ui: &mut egui::Ui, sel: &[Handle], ds: &[DuctParams], len: &dyn 
     action
 }
 
+// =====================================================================================
+// Duct accessories
+// =====================================================================================
+
+fn accessory_section(ui: &mut egui::Ui, sel: &[Handle], accs: &[AccessoryParams], bad: &mut Option<String>) -> Action {
+    let ids = handles(sel);
+    let mut action: Action = None;
+    group(ui, "Duct Accessory");
+    let kind = shared(&accs.iter().map(|a| a.kind).collect::<Vec<_>>());
+    prop_row(ui, "Type", |ui| {
+        let label = |k: AccessoryKind| match k {
+            AccessoryKind::Damper => "Damper",
+            AccessoryKind::FireDamper => "Fire damper",
+            AccessoryKind::Silencer => "Silencer",
+            AccessoryKind::FlexConnector => "Flexible connector",
+        };
+        let items = [("damper", "Damper"), ("fireDamper", "Fire damper"), ("silencer", "Silencer"), ("flexConnector", "Flexible connector")];
+        if let Some(k) = choice(ui, kind.map_or(VARIES, label), &items) {
+            action = Some(("ductaccessoryedit", json!({ "handles": ids, "type": k })));
+        }
+    });
+    let length = shared(&accs.iter().map(|a| format!("{:.0}", a.length_mm)).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Length (mm)", |ui| {
+        if let Some(l) = number(edit_field(ui, ui.scope_id().with(("acc_length", &ids)), length), bad) {
+            action = Some(("ductaccessoryedit", json!({ "handles": ids, "length": l })));
+        }
+    });
+    // The coefficient and the pressure drop: the one in use shows its value, the other is empty.
+    let zeta =
+        shared(&accs.iter().map(|a| if let cadcraft_doc::Loss::Zeta(z) = a.loss() { format!("{z}") } else { String::new() }).collect::<Vec<_>>())
+            .unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Loss coefficient", |ui| {
+        if let Some(z) = number(edit_field(ui, ui.scope_id().with(("acc_zeta", &ids)), zeta), bad) {
+            action = Some(("ductaccessoryedit", json!({ "handles": ids, "zeta": z, "pressureDrop": Value::Null })));
+        }
+    });
+    let pa =
+        shared(&accs.iter().map(|a| if let cadcraft_doc::Loss::Pascals(p) = a.loss() { format!("{p}") } else { String::new() }).collect::<Vec<_>>())
+            .unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Pressure drop (Pa)", |ui| {
+        if let Some(p) = number(edit_field(ui, ui.scope_id().with(("acc_pa", &ids)), pa), bad) {
+            action = Some(("ductaccessoryedit", json!({ "handles": ids, "pressureDrop": p })));
+        }
+    });
+    if let [a] = accs {
+        prop_row(ui, "Duct", |ui| read_only(ui, &format!("Ø {:.0} mm", a.diameter_mm)));
+    }
+    action
+}
+
 #[cfg(test)]
 mod tests {
     use cadcraft_engine::Session;
@@ -525,5 +581,22 @@ mod hvac_tests {
         assert_eq!(p.diameter_mm, 315.0);
         assert!(p.imposed, "a typed diameter is the user's: sizing leaves it");
         assert!(super::is_parametric(hn.state().session.doc().unwrap(), h), "a double-click opens Properties");
+    }
+
+    #[test]
+    fn a_selected_accessory_takes_a_typed_pressure_drop_and_length() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        app.run("ductadd", json!({ "points": [[0, 0], [4000, 0]] })).unwrap();
+        let r = app.run("ductaccessoryadd", json!({ "at": [2000, 0], "type": "silencer" })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+        app.session.set_selection(vec![h]);
+        let mut hn = palette(app);
+        // The silencer's length is 1000 mm and its pressure drop 30 Pa.
+        type_into(&mut hn, "1000", "1200");
+        type_into(&mut hn, "30", "45");
+        let a = cadcraft_doc::accessory_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!(a.length_mm, 1200.0);
+        assert_eq!(a.loss(), cadcraft_doc::Loss::Pascals(45.0));
     }
 }

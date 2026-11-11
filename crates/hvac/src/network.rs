@@ -60,6 +60,10 @@ pub struct Segment {
     /// A diameter the user imposes, mm; sizing then only computes its losses.
     #[serde(default)]
     pub diameter_mm: Option<f64>,
+    /// Pressure drop of accessories given in Pa (a silencer's, from its data sheet), added to the
+    /// fittings' loss; the loss of an accessory given as a coefficient is a [`Fitting::Custom`].
+    #[serde(default)]
+    pub fixed_pa: f64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -219,6 +223,7 @@ fn flows(net: &Network, depth: &[usize]) -> Result<Vec<f64>> {
     let mut flow = vec![0.0; net.segments.len()];
     for (i, s) in net.segments.iter().enumerate() {
         checked(&format!("length of segment {i} (m)"), s.length_m, 0.0, MAX_LENGTH_M)?;
+        checked(&format!("accessory pressure drop of segment {i} (Pa)"), s.fixed_pa, 0.0, MAX_TERMINAL_PA)?;
         if s.fittings.len() > MAX_FITTINGS {
             return Err(HvacError::BadValue(format!("segment {i} has more than {MAX_FITTINGS} fittings")));
         }
@@ -283,7 +288,7 @@ fn size_segment(i: usize, s: &Segment, flow: f64, c: &DesignCriteria, warnings: 
         warnings.push(format!("segment {i}: {v:.1} m/s at the imposed Ø{diameter_mm:.0} is above the limit"));
     }
     let friction_pa = gradient_pa_m * s.length_m;
-    let fittings_pa = zeta * c.air.dynamic_pressure(v);
+    let fittings_pa = zeta * c.air.dynamic_pressure(v) + s.fixed_pa;
     let terminal_pa = s.terminal.map(|t| t.pressure_drop_pa).unwrap_or(0.0);
     Ok(SegmentResult {
         flow_m3h: flow,

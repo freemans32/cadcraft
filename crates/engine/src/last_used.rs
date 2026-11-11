@@ -37,6 +37,8 @@ pub struct LastUsed {
     /// AHUADD's size and air direction, DUCTADD's diameter, kind and air direction.
     pub ahu: cmd::AhuLastUsed,
     pub duct: cmd::DuctLastUsed,
+    /// DUCTACCESSORYADD's type.
+    pub accessory: cmd::AccessoryLastUsed,
 }
 
 impl Default for LastUsed {
@@ -58,6 +60,7 @@ impl Default for LastUsed {
             air_terminal: cmd::TerminalLastUsed::default(),
             ahu: cmd::AhuLastUsed::default(),
             duct: cmd::DuctLastUsed::default(),
+            accessory: cmd::AccessoryLastUsed::default(),
         }
     }
 }

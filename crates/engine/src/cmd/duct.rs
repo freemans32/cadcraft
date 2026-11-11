@@ -498,6 +498,26 @@ fn governing_name(g: Governing) -> &'static str {
     }
 }
 
+/// Sizes `net`, then adds a reducer to each run whose diameter differs from the run it continues
+/// from and sizes again for the losses. The fittings do not change a diameter, so the second pass
+/// only adds their loss.
+fn size_with_reducers(
+    net: &cadcraft_hvac::Network,
+    criteria: &DesignCriteria,
+) -> std::result::Result<cadcraft_hvac::NetworkReport, cadcraft_hvac::HvacError> {
+    let first = size_network(net, criteria)?;
+    let mut with = net.clone();
+    for (i, seg) in with.segments.iter_mut().enumerate() {
+        let parent = seg.parent.and_then(|p| first.segments.get(p));
+        if let (Some(parent), Some(own)) = (parent, first.segments.get(i))
+            && (parent.diameter_mm - own.diameter_mm).abs() > 0.5
+        {
+            seg.fittings.push(cadcraft_hvac::Fitting::Reducer);
+        }
+    }
+    size_network(&with, criteria)
+}
+
 /// Where object `h` is, for a message.
 fn place(d: &Drawing, h: Handle) -> String {
     match d.entity(h).map(|e| &e.kind) {
@@ -568,6 +588,7 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
         let d = s.doc()?;
         warnings.extend(net.dangling.iter().map(|h| format!("the duct at {} leads to no terminal and was left out", place(d, *h))));
         warnings.extend(net.unconnected.iter().map(|h| format!("the terminal at {} is reached by no duct of its air direction", place(d, *h))));
+        warnings.extend(net.unplaced.iter().map(|h| format!("the accessory at {} is on no duct", place(d, *h))));
         if net.network.segments.is_empty() {
             warnings.push("no duct leads from this unit to a terminal: a duct must start on the unit, and the ducts meet end to end".into());
             out.push(
@@ -575,7 +596,7 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
             );
             continue;
         }
-        let report = size_network(&net.network, &criteria).map_err(|e| other(e.to_string()))?;
+        let report = size_with_reducers(&net.network, &criteria).map_err(|e| other(e.to_string()))?;
         warnings.extend(report.warnings.iter().cloned());
         let segments: Vec<Value> = net
             .ducts

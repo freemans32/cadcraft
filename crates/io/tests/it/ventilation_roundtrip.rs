@@ -2,8 +2,8 @@
 //! `CADCRAFT_AIRTERMINAL` xdata) and the drawing's air terminal models survive DXF and DWG saves.
 
 use cadcraft_doc::{
-    AHU_APP, AIR_TERMINAL_APP, AhuParams, AirDirection, Common, DUCT_APP, Drawing, DuctKind, DuctParams, HvacUnits, SPACE_APP, Space, SpaceParams,
-    TerminalParams, air_terminal_of, space_of, standard_air_terminal_models,
+    ACCESSORY_APP, AHU_APP, AIR_TERMINAL_APP, AccessoryKind, AccessoryParams, AhuParams, AirDirection, Common, DUCT_APP, Drawing, DuctKind,
+    DuctParams, HvacUnits, SPACE_APP, Space, SpaceParams, TerminalParams, air_terminal_of, space_of, standard_air_terminal_models,
 };
 use cadcraft_geom::Vec2;
 use cadcraft_hvac::RoomUse;
@@ -85,6 +85,16 @@ fn ducted() -> Drawing {
     for (a, b) in [((750.0, 0.0), (6000.0, 0.0)), ((6000.0, 0.0), (9000.0, 0.0)), ((6000.0, 0.0), (6000.0, 3000.0))] {
         d.add_duct(&Space::Model, Common::default(), duct.clone(), Vec2::new(a.0, a.1), Vec2::new(b.0, b.1)).expect("add duct");
     }
+    let silencer = AccessoryParams {
+        kind: AccessoryKind::Silencer,
+        length_mm: 1200.0,
+        diameter_mm: 250.0,
+        zeta: None,
+        pressure_drop_pa: Some(35.0),
+        label_height_mm: 100.0,
+        units,
+    };
+    d.add_accessory(&Space::Model, Common::default(), &silencer, Vec2::new(3000.0, 0.0), 0.0).expect("add accessory");
     let model = standard_air_terminal_models().into_iter().next().expect("a model");
     let t = TerminalParams { model, flow_m3h: 150.0, air: AirDirection::Supply, label_height_mm: 100.0, units };
     for at in [(9000.0, 0.0), (6000.0, 3000.0)] {
@@ -104,6 +114,7 @@ fn ducts_and_units_survive_dxf_and_dwg_and_the_network_is_read_back() {
         let got = back.duct_networks().unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(got.len(), 1, "{name}: one unit");
         assert_eq!(got[0].network, want[0].network, "{name}: the same network");
+        assert_eq!(got[0].network.segments[0].fixed_pa, 35.0, "{name}: the silencer's loss is in it");
         let unit = back.model.iter().find_map(|e| cadcraft_doc::ahu_of(e)).expect("unit");
         assert_eq!((unit.name.as_str(), unit.flow_m3h, unit.pressure_pa), ("CTA1", Some(500.0), Some(120.0)), "{name}");
         assert_eq!((unit.extract_flow_m3h, unit.extract_pressure_pa), (Some(450.0), Some(90.0)), "{name}");
@@ -113,7 +124,7 @@ fn ducts_and_units_survive_dxf_and_dwg_and_the_network_is_read_back() {
 #[test]
 fn other_programs_see_the_duct_applications_registered() {
     let text = String::from_utf8(cadcraft_io::write(&ducted(), "ducts.dxf").expect("dxf")).expect("utf-8");
-    for app in [AHU_APP, DUCT_APP] {
+    for app in [AHU_APP, DUCT_APP, ACCESSORY_APP] {
         assert!(text.contains(&format!("AcDbRegAppTableRecord\r\n  2\r\n{app}")), "APPID record for {app}");
     }
 }

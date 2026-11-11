@@ -1114,6 +1114,18 @@
 	Duct	Gaine
 	Edit Duct	Modifier la gaine
 	Size Ducts	Dimensionner les gaines
+	Duct Accessory	Accessoire de gaine
+	Edit Duct Accessory	Modifier l'accessoire de gaine
+	Duct Accessories	Accessoires de gaine
+	Damper	Registre de réglage
+	Fire damper	Clapet coupe-feu
+	Silencer	Silencieux
+	Flexible connector	Manchette souple
+	Specify location of accessory on a duct	Spécifiez la position de l'accessoire sur une gaine
+	Enter accessory length (mm)	Entrez la longueur de l'accessoire (mm)
+	Length (mm)	Longueur (mm)
+	Loss coefficient	Coefficient de perte
+	Pressure drop (Pa)	Perte de charge (Pa)
 	Specify location of air handling unit	Spécifiez la position de la centrale
 	Enter unit name	Entrez le nom de la centrale
 	Enter unit width (mm)	Entrez la largeur de la centrale (mm)

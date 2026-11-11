@@ -3,7 +3,7 @@
 //! rather than from a fixed list of tools.
 
 use cadcraft_color::Color;
-use cadcraft_doc::{ComponentFunction, TerminalKind};
+use cadcraft_doc::{AccessoryKind, ComponentFunction, TerminalKind};
 use egui::{Rect, Sense, Stroke, pos2, vec2};
 
 use crate::CadApp;
@@ -136,6 +136,8 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
     let mut terminal: Option<TerminalKind> = None;
     let mut distribute = false;
     let mut size = false;
+    let accessory = app.session.last_used.accessory.kind;
+    let mut chosen_accessory: Option<AccessoryKind> = None;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         header(ui, "Spaces");
@@ -177,6 +179,19 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         if row_button(ui, crate::i18n::t("Size Ducts"), false, |_, _| {}) {
             size = true;
         }
+        ui.add_space(6.0);
+        separator(ui);
+        header(ui, "Duct Accessories");
+        for (kind, label) in [
+            (AccessoryKind::Damper, "Damper"),
+            (AccessoryKind::FireDamper, "Fire damper"),
+            (AccessoryKind::Silencer, "Silencer"),
+            (AccessoryKind::FlexConnector, "Flexible connector"),
+        ] {
+            if row_button(ui, crate::i18n::t(label), kind == accessory, |_, _| {}) {
+                chosen_accessory = Some(kind);
+            }
+        }
     });
     if let Some(kind) = terminal {
         // The type clicked becomes AIRTERMINALADD's, at the smallest size for the flow.
@@ -194,6 +209,11 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         app.cmd.buffer.clear();
         app.start("airterminaladd");
         app.cmdline("Distribute");
+    } else if let Some(kind) = chosen_accessory {
+        // The type clicked becomes DUCTACCESSORYADD's, then it starts with it.
+        app.session.last_used.accessory.kind = kind;
+        app.cmd.buffer.clear();
+        app.start("ductaccessoryadd");
     } else if size {
         // DUCTSIZE asks nothing: it runs at once and says what it did.
         match app.run("ductsize", serde_json::json!({})) {
