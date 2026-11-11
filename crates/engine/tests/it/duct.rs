@@ -285,3 +285,31 @@ fn ductsize_counts_the_accessories_and_the_reducers_in_the_pressure() {
     let r = s.execute("ductsize", &json!({})).unwrap();
     assert!(r["networks"][0]["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("accessory at")), "{r}");
 }
+
+#[test]
+fn an_unreached_terminal_says_how_far_the_nearest_duct_end_is() {
+    let mut s = metric();
+    s.execute("ahuadd", &json!({"at": [0, 0]})).unwrap();
+    s.execute("ductadd", &json!({"points": [[500, 0], [3000, 0]]})).unwrap();
+    // 2 m past the duct's end, and of the other air direction.
+    s.execute("airterminaladd", &json!({"at": [5000, 0], "flow": 150})).unwrap();
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    let ws: Vec<&str> = r["networks"][0]["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+    let w = ws.iter().find(|w| w.starts_with("the terminal")).expect("the terminal is named");
+    assert!(w.contains("2000 mm away") && w.contains("supply duct"), "{w}");
+}
+
+/// A short duct drops from the trunk to the edge of the terminal's face, as a snap to the face lands.
+#[test]
+fn ductsize_reaches_a_terminal_by_the_edge_of_its_face() {
+    let mut s = metric();
+    s.execute("ahuadd", &json!({"at": [0, 0]})).unwrap();
+    s.execute("ductadd", &json!({"points": [[500, 0], [3000, 0], [6000, 0]]})).unwrap();
+    for x in [3000, 6000] {
+        s.execute("ductadd", &json!({"points": [[x, 0], [x, -700]]})).unwrap();
+        s.execute("airterminaladd", &json!({"at": [x, -1000], "flow": 150})).unwrap();
+    }
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    assert_eq!(r["networks"][0]["totalFlow"], 300.0, "{r}");
+    assert!(r["networks"][0]["warnings"].as_array().unwrap().is_empty(), "{r}");
+}

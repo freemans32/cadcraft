@@ -57,7 +57,7 @@ Remotes : `origin` = ce fork, `upstream` = `storytold/cadcraft`. Ne pousse jamai
 
 Cette section sert à reprendre le travail dans une nouvelle conversation, avec n'importe quelle IA. Elle est mise à jour en continu (règle n° 2) : date, ce qui est fait, ce qui reste.
 
-*Dernière mise à jour : 11 novembre 2026 (gaines CVC, étape 3b : accessoires et réducteurs).*
+*Dernière mise à jour : 11 novembre 2026 (correctif : bouches raccordées par le bord de leur face).*
 
 ### Fait
 
@@ -174,7 +174,9 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
      - Interface : rubrique « Accessoires de gaine » de l'onglet CVC (quatre boutons), groupe « Accessoire de gaine » de la palette Propriétés (type, longueur, coefficient, perte en Pa).
      - Vérifié : tests `doc` (6), `hvac` (1), moteur (4), palette (1), aller-retour DXF/DWG (accessoire et application enregistrée), capture d'écran du CLI, fmt, clippy -D warnings, `cargo test --workspace` en debug, layers, assets. Pas vérifié : wasm, essai dans l'interface graphique.
      - Limites : l'étiquette de la gaine peut tomber sous un accessoire posé à mi-longueur ; pas de piquage en tant qu'objet (le té est déduit) ; un accessoire déplacé sur une autre gaine est repris à la lecture suivante (relancer `DUCTSIZE`) ; pas de version interactive de `DUCTACCESSORYEDIT`.
-   - Ensuite : étape 4 (note de calcul et métré par local), puis étape 5, puis étape 4 (note de calcul et métré par local), puis étape 5.
+   - **Bouches non raccordées, 11 novembre** (signalé par Guillaume, capture : « le dimensionnement automatique ne fonctionne toujours pas ») : les petites gaines de raccordement finissent sur le bord de la face de la bouche (300 mm du centre pour une bouche 600), et le test ne regardait que le centre plus le rayon du col (≈ 190 mm). Corrigé : une gaine qui finit sur la face d'une bouche (tournée comme la bouche) ou près d'elle la raccorde ; la portée d'une extrémité sur l'axe d'une gaine passe à 0,75 × Ø (un accrochage sur le trait tombe à 0,5 × Ø). `DUCTSIZE` ajoute à « bouche non raccordée » la distance à la gaine la plus proche et son sens d'air. Tests : 2 en `doc`, 2 en moteur.
+   - Test instable connu, sans rapport : `theme::tests::an_unfound_font_is_not_retried_while_the_font_table_is_unchanged` échoue parfois dans la suite complète (état global partagé), passe seul.
+   - Ensuite : étape 4 (note de calcul et métré par local), puis étape 5.
 5. **Export IFC** (BIM).
 6. Publier en amont, plus tard : une issue de cadrage chez `storytold/cadcraft`, puis les PR des murs une par une.
 

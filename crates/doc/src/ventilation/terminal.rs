@@ -197,7 +197,7 @@ impl TerminalParams {
     }
 
     /// Half the face's width and depth, in drawing units.
-    fn half(&self) -> Vec2 {
+    pub(super) fn half(&self) -> Vec2 {
         let m = &self.model;
         let depth = match m.kind {
             TerminalKind::SquareCeiling | TerminalKind::Round | TerminalKind::Extract => m.width_mm,

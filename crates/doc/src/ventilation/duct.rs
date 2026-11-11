@@ -258,7 +258,7 @@ fn reads_upside_down(rotation: f64) -> bool {
 
 /// How far from its axis, in diameters, a point may be and still be on a duct: snapping to the
 /// lines drawn for a duct lands a radius off its axis.
-pub(crate) const AXIS_REACH: f64 = 0.55;
+pub(crate) const AXIS_REACH: f64 = 0.75;
 
 /// Where the duct from `a` to `b` of `diameter` (drawing units) is cut by a branch ending or
 /// starting at `at`: the foot of `at` on the axis, when `at` is within [`AXIS_REACH`] diameters (or

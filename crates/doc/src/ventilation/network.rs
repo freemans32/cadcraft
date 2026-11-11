@@ -46,6 +46,25 @@ struct Duct {
     b: Vec2,
 }
 
+/// A terminal found in the drawing: where it is and how it is turned.
+struct TerminalAt {
+    handle: Handle,
+    params: TerminalParams,
+    at: Vec2,
+    rotation: f64,
+}
+
+impl TerminalAt {
+    /// Whether a duct ending at `end` reaches this terminal: it is on its face, or within `reach`
+    /// of it (a click snapped to the face's edge is not at the centre).
+    fn is_reached(&self, end: Vec2, reach: f64) -> bool {
+        let half = self.params.half();
+        let local = (end - self.at).rotate(-self.rotation);
+        let neck = self.params.units.to_units(self.params.model.neck_mm) / 2.0;
+        local.x.abs() <= half.x.max(neck) + reach && local.y.abs() <= half.y.max(neck) + reach
+    }
+}
+
 struct Node {
     duct: usize,
     parent: Option<usize>,
@@ -65,7 +84,7 @@ impl crate::Drawing {
         let tol = units.to_units(MEET_MM);
         let mut ducts = Vec::new();
         let mut ahus: Vec<(Handle, AhuParams, Vec2, f64)> = Vec::new();
-        let mut terminals: Vec<(Handle, TerminalParams, Vec2)> = Vec::new();
+        let mut terminals: Vec<TerminalAt> = Vec::new();
         let mut accessories: Vec<(Handle, AccessoryParams, Vec2)> = Vec::new();
         for e in self.model.iter() {
             let EntityKind::Insert(i) = &e.kind else { continue };
@@ -77,7 +96,7 @@ impl crate::Drawing {
             } else if let Some(p) = ahu_of(e) {
                 ahus.push((e.handle, p, Vec2::new(i.insert.x, i.insert.y), i.rotation));
             } else if let Some(p) = air_terminal_of(e) {
-                terminals.push((e.handle, p, Vec2::new(i.insert.x, i.insert.y)));
+                terminals.push(TerminalAt { handle: e.handle, params: p, at: Vec2::new(i.insert.x, i.insert.y), rotation: i.rotation });
             } else if let Some(p) = accessory_of(e) {
                 accessories.push((e.handle, p, Vec2::new(i.insert.x, i.insert.y)));
             }
@@ -108,7 +127,7 @@ impl crate::Drawing {
             out.extend(found);
         }
         // A terminal left unreached by every unit is reported on each network: say so once, on the first.
-        let lost: Vec<Handle> = terminals.iter().zip(&scan.touched).filter(|(_, t)| !**t).map(|((h, ..), _)| *h).collect();
+        let lost: Vec<Handle> = terminals.iter().zip(&scan.touched).filter(|(_, t)| !**t).map(|(t, _)| t.handle).collect();
         let unplaced = place_accessories(&ducts, &accessories, units, &mut out);
         if let Some(first) = out.first_mut() {
             first.unconnected = lost;
@@ -224,7 +243,7 @@ fn place_accessories(ducts: &[Duct], accessories: &[(Handle, AccessoryParams, Ve
 /// terminals the units read so far have used.
 struct Scan<'a> {
     ducts: &'a [Duct],
-    terminals: &'a [(Handle, TerminalParams, Vec2)],
+    terminals: &'a [TerminalAt],
     units: HvacUnits,
     tol: f64,
     taken: Vec<bool>,
@@ -308,11 +327,11 @@ impl Scan<'_> {
         for n in nodes {
             let diameter = self.ducts.get(n.duct).map_or(0.0, |d| d.params.diameter_mm);
             let reach = self.tol.max(self.units.to_units(AXIS_REACH * diameter));
-            for (ti, (h, p, at)) in self.terminals.iter().enumerate() {
-                if p.air == air && at.near(n.to, reach + p.units.to_units(p.model.neck_mm) / 2.0) {
-                    n.terminal = Some((*h, p.flow_m3h, p.model.pressure_drop_pa));
-                    if let Some(t) = self.touched.get_mut(ti) {
-                        *t = true;
+            for (ti, t) in self.terminals.iter().enumerate() {
+                if t.params.air == air && t.is_reached(n.to, reach) {
+                    n.terminal = Some((t.handle, t.params.flow_m3h, t.params.model.pressure_drop_pa));
+                    if let Some(x) = self.touched.get_mut(ti) {
+                        *x = true;
                     }
                     break;
                 }

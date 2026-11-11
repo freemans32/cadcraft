@@ -307,3 +307,40 @@ fn a_terminal_on_a_duct_of_the_other_air_direction_is_not_connected() {
     assert!(net.network.segments.is_empty(), "no supply terminal at the end");
     assert_eq!(net.unconnected, [wrong]);
 }
+
+/// A unit, a trunk along x and a short duct that drops from it to the top edge of a terminal's
+/// face: where a user clicks (a snap to the face), not the terminal's centre.
+fn drop_to_the_face(end_y: f64) -> Drawing {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    add_duct(&mut d, (500.0, 0.0), (3000.0, 0.0));
+    add_duct(&mut d, (3000.0, 0.0), (3000.0, end_y));
+    // The face is 600 mm: its top edge is 300 mm above the centre.
+    add_terminal(&mut d, (3000.0, -1000.0), 150.0);
+    d
+}
+
+#[test]
+fn a_duct_ending_on_the_face_of_a_terminal_reaches_it() {
+    for end_y in [-700.0, -800.0, -1000.0] {
+        let d = drop_to_the_face(end_y);
+        let net = d.duct_networks().unwrap().remove(0);
+        assert!(net.unconnected.is_empty(), "end at {end_y}");
+        assert_eq!(net.network.segments.len(), 2, "end at {end_y}");
+    }
+    // Past the face by a few hundred millimetres it does not.
+    let net = drop_to_the_face(-400.0).duct_networks().unwrap().remove(0);
+    assert_eq!(net.unconnected.len(), 1);
+}
+
+#[test]
+fn a_duct_ending_on_the_face_of_a_turned_terminal_reaches_it() {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    add_duct(&mut d, (500.0, 0.0), (3000.0, 0.0));
+    let model = standard_air_terminal_models().into_iter().find(|m| m.name == "RG300x150").unwrap();
+    let t = TerminalParams { model, flow_m3h: 100.0, air: AirDirection::Supply, label_height_mm: 100.0, units: HvacUnits::default() };
+    // A 300 x 150 grille turned a quarter turn: 150 mm wide along x, 300 along y. Its near end is 150 mm off.
+    d.add_air_terminal(&Space::Model, Common::default(), &t, Vec2::new(3140.0, 0.0), std::f64::consts::FRAC_PI_2).unwrap();
+    assert!(d.duct_networks().unwrap()[0].unconnected.is_empty());
+}

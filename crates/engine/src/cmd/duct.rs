@@ -518,6 +518,26 @@ fn size_with_reducers(
     size_network(&with, criteria)
 }
 
+/// For a message about object `h` that no duct reaches: how far the nearest end of a duct of any
+/// air direction is, when it is within a few metres (the duct may be of the wrong direction, or
+/// stop short).
+fn nearest_end(d: &Drawing, h: Handle) -> String {
+    let Some(EntityKind::Insert(i)) = d.entity(h).map(|e| &e.kind) else { return String::new() };
+    let at = Vec2::new(i.insert.x, i.insert.y);
+    let mm = HvacUnits::of(d).mm_per_unit;
+    let nearest = d
+        .model
+        .iter()
+        .filter_map(|e| d.duct_ends(e.handle))
+        .flat_map(|(p, a, b)| [(p.air, a), (p.air, b)])
+        .map(|(air, end)| (end.dist(at) * mm, air))
+        .min_by(|x, y| x.0.total_cmp(&y.0));
+    match nearest {
+        Some((dist, air)) if dist <= 5000.0 => format!(" (the nearest duct end is {dist:.0} mm away, a {} duct)", air.name()),
+        _ => String::new(),
+    }
+}
+
 /// Where object `h` is, for a message.
 fn place(d: &Drawing, h: Handle) -> String {
     match d.entity(h).map(|e| &e.kind) {
@@ -587,7 +607,11 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
         let mut warnings: Vec<String> = Vec::new();
         let d = s.doc()?;
         warnings.extend(net.dangling.iter().map(|h| format!("the duct at {} leads to no terminal and was left out", place(d, *h))));
-        warnings.extend(net.unconnected.iter().map(|h| format!("the terminal at {} is reached by no duct of its air direction", place(d, *h))));
+        warnings.extend(
+            net.unconnected
+                .iter()
+                .map(|h| format!("the terminal at {} is reached by no duct of its air direction{}", place(d, *h), nearest_end(d, *h))),
+        );
         warnings.extend(net.unplaced.iter().map(|h| format!("the accessory at {} is on no duct", place(d, *h))));
         if net.network.segments.is_empty() {
             warnings.push("no duct leads from this unit to a terminal: a duct must start on the unit, and the ducts meet end to end".into());
