@@ -182,12 +182,7 @@ pub struct Machine {
 impl Machine {
     /// A machine evaluating `forms` in turn.
     pub fn forms(forms: Vec<Value>) -> Machine {
-        Machine {
-            stack: vec![Frame::Forms { rest: forms.into_iter().rev().collect() }],
-            state: State::Ret(Value::Nil),
-            need: None,
-            last_steps: 0,
-        }
+        Machine { stack: vec![Frame::Forms { rest: forms.into_iter().rev().collect() }], state: State::Ret(Value::Nil), need: None, last_steps: 0 }
     }
 
     /// A machine calling `f` with `args`.

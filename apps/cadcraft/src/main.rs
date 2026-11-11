@@ -223,15 +223,19 @@ pub fn install_io() {
 
 fn services() -> Services {
     Services {
-        pick_open: Some(Box::new(|| file_dialog(&Pick::Open).pick_file().map(|p| p.to_string_lossy().to_string()))),
-        pick_save: Some(Box::new(|name: &str| file_dialog(&Pick::Save(name.into())).save_file().map(|p| p.to_string_lossy().to_string()))),
+        pick_open: Some(Box::new(|| with_system_cursor(|| file_dialog(&Pick::Open).pick_file().map(|p| p.to_string_lossy().to_string())))),
+        pick_save: Some(Box::new(|name: &str| {
+            with_system_cursor(|| file_dialog(&Pick::Save(name.into())).save_file().map(|p| p.to_string_lossy().to_string()))
+        })),
         // macOS shows the dialogs as sheets (`sheet::start_pick`), set once the window exists.
         start_pick: None,
         // APPLOAD: AutoLISP routines only, starting where the last one was loaded from.
-        pick_lisp: Some(Box::new(|dir: &str| file_dialog(&Pick::Lisp(dir.into())).pick_file().map(|p| p.to_string_lossy().to_string()))),
+        pick_lisp: Some(Box::new(|dir: &str| {
+            with_system_cursor(|| file_dialog(&Pick::Lisp(dir.into())).pick_file().map(|p| p.to_string_lossy().to_string()))
+        })),
         no_file_system: false,
         pick_pgp: Some(Box::new(|dir: Option<&str>| {
-            file_dialog(&Pick::Pgp(dir.unwrap_or_default().into())).pick_file().map(|p| p.to_string_lossy().to_string())
+            with_system_cursor(|| file_dialog(&Pick::Pgp(dir.unwrap_or_default().into())).pick_file().map(|p| p.to_string_lossy().to_string()))
         })),
     }
 }

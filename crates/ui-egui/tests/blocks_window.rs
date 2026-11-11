@@ -34,7 +34,7 @@ fn a_long_block_list_scrolls_to_its_last_block() {
         app,
     );
     h.run_steps(5);
-    let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("Blocks"))).unwrap();
+    let window = h.ctx.memory(|m| m.area_rect(egui::Id::unique("Blocks"))).unwrap();
     h.get_by_label(&last).scroll_to_me();
     h.run_steps(5);
     let mut found = Vec::new();

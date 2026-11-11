@@ -57,9 +57,19 @@ Remotes : `origin` = ce fork, `upstream` = `storytold/cadcraft`. Ne pousse jamai
 
 Cette section sert à reprendre le travail dans une nouvelle conversation, avec n'importe quelle IA. Elle est mise à jour en continu (règle n° 2) : date, ce qui est fait, ce qui reste.
 
-*Dernière mise à jour : 11 novembre 2026 (WALLADD : un mur par segment, accrochage et fermeture).*
+*Dernière mise à jour : 11 novembre 2026 (base passée sur l'officiel 0.20.0 + 6 commits, `e5021f01`).*
 
 ### Fait
+
+- **Base passée sur l'officiel 0.20.0** (11 novembre, validé par Guillaume : « fais au mieux ») : `main` du fork avancé en fast-forward sur `upstream/main` `e5021f01` (0.20.0 plus 6 commits) et poussé ; `upstream/main` fusionné dans `perso` (commit de fusion, pas de réécriture). `feat/murs` sur `origin` est une ancienne version (les commits récents des murs ne vivent que dans `perso`) : pas rebasé.
+  - 10 conflits, tous avec des PR de `perso` que l'officiel a refaites autrement. Règle suivie : le code officiel gagne, et la fonction de la PR est portée dessus quand c'est simple.
+    - Dialogues de fichiers (`pick_then`, `Pick`) : DXFIN, DXFOUT (#2455) et Plot portés ; `with_system_cursor` remis autour des dialogues natifs.
+    - `managers.rs` : version `perso` (dialogue Style de cote, validation des champs) gardée, avec les 73 lignes de l'officiel appliquées.
+    - Pris tels quels depuis l'officiel : décompte des CLASS du DXF (`sections.rs`), remplissage et vignettes de hachures (`hatch.rs`).
+    - **Perdu** : la PR qui zoomait les vignettes de hachures (AR-CONC) ; son test a été retiré. À redemander si besoin.
+    - `entity_parts` dépassait la limite de complexité de clippy (deux PR y ajoutaient chacune une branche) : calcul de la transparence sorti dans `shown_transparency`.
+  - Vérifié : `cargo fmt`, `cargo clippy --workspace --all-targets -D warnings`, `cargo test --workspace` en debug (0 échec), `cargo xtask layers`, `cargo xtask assets`. Pas vérifié : wasm, essai dans l'interface.
+  - Pas refait : l'analyse des PR ouvertes (celles ouvertes depuis le 10 novembre, et celles retirées pour une ligne).
 
 - **Mise à jour avec l'officiel** (10 novembre) : upstream `main` est passé de `a655cee` à `a3d9348` (8 novembre, 106 commits, beaucoup de PR fusionnées). Fait, validé par Guillaume :
   - `main` du fork avancé en fast-forward sur `a3d9348`.

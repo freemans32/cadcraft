@@ -499,7 +499,7 @@ pub fn pattern_swatch(lines: &[PatternLine], side: f64) -> Vec<Vec<Vec2>> {
     if !side.is_finite() || side <= 0.0 || repeat < 1e-9 {
         return Vec::new();
     }
-    let mut h = Hatch {
+    let h = Hatch {
         pattern: String::new(),
         solid: false,
         loops: Vec::new(),
