@@ -1110,6 +1110,27 @@
 	Extract valve	Bouche d'extraction
 	Distribute in a Space	Répartir dans un local
 	Edit Air Terminal	Modifier la bouche
+	Air Handling Unit	Centrale de traitement d'air
+	Duct	Gaine
+	Edit Duct	Modifier la gaine
+	Size Ducts	Dimensionner les gaines
+	Specify location of air handling unit	Spécifiez la position de la centrale
+	Enter unit name	Entrez le nom de la centrale
+	Enter unit width (mm)	Entrez la largeur de la centrale (mm)
+	Enter unit depth (mm)	Entrez la profondeur de la centrale (mm)
+	Specify start point of duct	Spécifiez le point de départ de la gaine
+	Enter duct diameter (mm) or [Auto]	Entrez le diamètre de la gaine (mm) ou [Auto]
+	Enter duct kind	Entrez le type de gaine
+	Diameter set by	Diamètre fixé par
+	Diameter (mm)	Diamètre (mm)
+	Kind	Type
+	Auto	Auto
+	Main	Principale
+	Branch	Antenne
+	Connection	Raccordement
+	Sizing	Dimensionnement
+	Velocity	Vitesse
+	Ducts sized: {flow} m³/h, {pa} Pa	Gaines dimensionnées : {flow} m³/h, {pa} Pa
 	Ducts	Gaines
 	Coming next: drawing and sizing	À venir : tracé et dimensionnement
 	Use	Usage

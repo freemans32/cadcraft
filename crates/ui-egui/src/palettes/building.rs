@@ -135,6 +135,7 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
     let mut start: Option<&'static str> = None;
     let mut terminal: Option<TerminalKind> = None;
     let mut distribute = false;
+    let mut size = false;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         header(ui, "Spaces");
@@ -167,15 +168,15 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         ui.add_space(6.0);
         separator(ui);
         header(ui, "Ducts");
-        let t = Tokens::get();
-        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
-        ui.painter().text(
-            pos2(r.left() + 12.0, r.center().y),
-            egui::Align2::LEFT_CENTER,
-            crate::i18n::t("Coming next: drawing and sizing"),
-            egui::FontId::proportional(11.5),
-            t.text_faint,
-        );
+        if row_button(ui, crate::i18n::t("Air Handling Unit"), false, |_, _| {}) {
+            start = Some("ahuadd");
+        }
+        if row_button(ui, crate::i18n::t("Duct"), false, |_, _| {}) {
+            start = Some("ductadd");
+        }
+        if row_button(ui, crate::i18n::t("Size Ducts"), false, |_, _| {}) {
+            size = true;
+        }
     });
     if let Some(kind) = terminal {
         // The type clicked becomes AIRTERMINALADD's, at the smallest size for the flow.
@@ -193,6 +194,20 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         app.cmd.buffer.clear();
         app.start("airterminaladd");
         app.cmdline("Distribute");
+    } else if size {
+        // DUCTSIZE asks nothing: it runs at once and says what it did.
+        match app.run("ductsize", serde_json::json!({})) {
+            Ok(r) => {
+                for net in r["networks"].as_array().into_iter().flatten() {
+                    let (flow, pa) = (net["totalFlow"].as_f64().unwrap_or(0.0), net["requiredPressure"].as_f64().unwrap_or(0.0));
+                    app.session.echo(crate::tf!("Ducts sized: {flow} m³/h, {pa} Pa", flow = format!("{flow:.0}"), pa = format!("{pa:.0}")));
+                    for w in net["warnings"].as_array().into_iter().flatten().filter_map(|w| w.as_str()) {
+                        app.session.echo(w.to_string());
+                    }
+                }
+            }
+            Err(e) => app.session.echo(e.to_string()),
+        }
     } else if let Some(cmd) = start {
         app.cmd.buffer.clear();
         app.start(cmd);

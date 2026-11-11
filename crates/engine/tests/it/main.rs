@@ -50,6 +50,7 @@ mod dimtedit_prompts;
 mod drafting_spacing;
 mod draw_prompts;
 mod draworder;
+mod duct;
 mod dyn_input;
 mod dynamic_block_data;
 mod dynamic_grips;

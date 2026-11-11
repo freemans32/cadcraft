@@ -2,7 +2,10 @@
 //! terminals): when the selection is only such objects of one kind, a group of their own parameters, each change running the object's edit
 //! command so the object is regenerated, as the command line would.
 
-use cadcraft_doc::{AirDirection, Drawing, Handle, SpaceParams, TerminalKind, TerminalParams, WallJustification, air_terminal_of, space_of, wall_of};
+use cadcraft_doc::{
+    AirDirection, Drawing, DuctKind, DuctParams, Handle, SpaceParams, TerminalKind, TerminalParams, WallJustification, air_terminal_of, duct_of,
+    space_of, wall_of,
+};
 use cadcraft_hvac::RoomUse;
 use egui::{Sense, pos2, vec2};
 use serde_json::{Value, json};
@@ -43,12 +46,16 @@ pub(super) fn section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], len: &dyn 
     if !terminals.is_empty() && terminals.len() == sel.len() {
         return terminal_section(ui, d, sel, &terminals, bad);
     }
+    let ducts: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| duct_of(e))).collect();
+    if !ducts.is_empty() && ducts.len() == sel.len() {
+        return duct_section(ui, sel, &ducts, len, bad);
+    }
     None
 }
 
 /// Whether object `h` is a parametric object with a Properties group of its own.
 pub(crate) fn is_parametric(d: &Drawing, h: Handle) -> bool {
-    d.entity(h).is_some_and(|e| wall_of(e).is_some() || space_of(e).is_some() || air_terminal_of(e).is_some())
+    d.entity(h).is_some_and(|e| wall_of(e).is_some() || space_of(e).is_some() || air_terminal_of(e).is_some() || duct_of(e).is_some())
 }
 
 fn handles(sel: &[Handle]) -> Vec<String> {
@@ -325,6 +332,66 @@ fn terminal_section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], ts: &[Termin
     action
 }
 
+// =====================================================================================
+// Ducts
+// =====================================================================================
+
+fn duct_kind_label(k: DuctKind) -> &'static str {
+    match k {
+        DuctKind::Auto => "Auto",
+        DuctKind::Main => "Main",
+        DuctKind::Branch => "Branch",
+        DuctKind::Connection => "Connection",
+    }
+}
+
+fn duct_section(ui: &mut egui::Ui, sel: &[Handle], ds: &[DuctParams], len: &dyn Fn(f64) -> String, bad: &mut Option<String>) -> Action {
+    let ids = handles(sel);
+    let mut action: Action = None;
+    let edit = |key: &str, value: Value| Some(("ductedit", json!({ "handles": ids, key: value })));
+    group(ui, "Duct");
+    let imposed = shared(&ds.iter().map(|p| p.imposed).collect::<Vec<_>>());
+    prop_row(ui, "Diameter set by", |ui| {
+        let shown = imposed.map_or(VARIES, |i| if i { "User" } else { "Sizing" });
+        // Giving the diameter back to sizing keeps the size until the next DUCTSIZE.
+        if let Some(c) = choice(ui, shown, &[("auto", "Sizing"), ("keep", "User")]) {
+            if c == "auto" {
+                action = edit("diameter", json!("auto"));
+            } else if let Some(mm) = shared(&ds.iter().map(|p| p.diameter_mm.to_bits()).collect::<Vec<_>>()).map(f64::from_bits) {
+                action = edit("diameter", json!(mm));
+            }
+        }
+    });
+    let diameter = shared(&ds.iter().map(|p| format!("{:.0}", p.diameter_mm)).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Diameter (mm)", |ui| {
+        if let Some(mm) = number(edit_field(ui, ui.scope_id().with(("duct_diameter", &ids)), diameter), bad) {
+            action = edit("diameter", json!(mm));
+        }
+    });
+    let kind = shared(&ds.iter().map(|p| p.kind).collect::<Vec<_>>());
+    prop_row(ui, "Kind", |ui| {
+        let items = [("auto", "Auto"), ("main", "Main"), ("branch", "Branch"), ("connection", "Connection")];
+        if let Some(k) = choice(ui, kind.map_or(VARIES, duct_kind_label), &items) {
+            action = edit("kind", json!(k));
+        }
+    });
+    let air = shared(&ds.iter().map(|p| p.air).collect::<Vec<_>>());
+    prop_row(ui, "Air", |ui| {
+        let shown = air.map_or(VARIES, |a| if a == AirDirection::Supply { "Supply" } else { "Extract" });
+        if let Some(a) = choice(ui, shown, &[("supply", "Supply"), ("extract", "Extract")]) {
+            action = edit("air", json!(a));
+        }
+    });
+    if let [p] = ds {
+        prop_row(ui, "Length", |ui| read_only(ui, &len(p.length)));
+        let flow = p.flow_m3h.map_or("—".to_string(), |f| format!("{f:.0} m³/h"));
+        prop_row(ui, "Flow", |ui| read_only(ui, &flow));
+        let velocity = p.velocity.map_or("—".to_string(), |v| format!("{v:.1} m/s"));
+        prop_row(ui, "Velocity", |ui| read_only(ui, &velocity));
+    }
+    action
+}
+
 #[cfg(test)]
 mod tests {
     use cadcraft_engine::Session;
@@ -430,5 +497,20 @@ mod hvac_tests {
             let t = cadcraft_doc::air_terminal_of(d.entity(h).unwrap()).unwrap();
             assert_eq!(t.flow_m3h, 320.0);
         }
+    }
+
+    #[test]
+    fn a_selected_duct_shows_its_diameter_and_a_typed_one_is_imposed() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        let r = app.run("ductadd", json!({ "points": [[0, 0], [3000, 0]] })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handles"][0].as_str().unwrap()).unwrap();
+        app.session.set_selection(vec![h]);
+        let mut hn = palette(app);
+        type_into(&mut hn, "200", "315");
+        let p = cadcraft_doc::duct_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!(p.diameter_mm, 315.0);
+        assert!(p.imposed, "a typed diameter is the user's: sizing leaves it");
+        assert!(super::is_parametric(hn.state().session.doc().unwrap(), h), "a double-click opens Properties");
     }
 }

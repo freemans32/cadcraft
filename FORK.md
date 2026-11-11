@@ -57,7 +57,7 @@ Remotes : `origin` = ce fork, `upstream` = `storytold/cadcraft`. Ne pousse jamai
 
 Cette section sert à reprendre le travail dans une nouvelle conversation, avec n'importe quelle IA. Elle est mise à jour en continu (règle n° 2) : date, ce qui est fait, ce qui reste.
 
-*Dernière mise à jour : 11 novembre 2026 (base passée sur l'officiel 0.20.0 + 6 commits, `e5021f01`).*
+*Dernière mise à jour : 11 novembre 2026 (gaines CVC, étape 3a : CTA, tronçons droits, dimensionnement).*
 
 ### Fait
 
@@ -155,7 +155,14 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
        - Vérifié : tests unitaires et d'intégration des deux branches, tests d'interface (egui_kittest) pour le double-clic et la palette, captures d'écran de l'application réelle (Xvfb, rendu logiciel) en anglais et en français. Les valeurs en lecture seule de la palette sont peintes (pas lisibles par les tests) : vérifiées sur capture.
        - Fusion dans `perso` : conflits de `arch.rs` et `walls.rs` (anciennes versions des murs), un test en double dans `crates/io/src/tests.rs` (`wall_styles_xrecord_…`, supprimé), et l'ordre du double-clic remis avant REFEDIT. Puis `cargo test --workspace` sur `perso` : tout passe.
        - Limites connues : l'en-tête de la palette dit « Référence de bloc » au lieu de « Mur », « Local » ou « Bouche » ; le gestionnaire de styles de murs reste en JSON.
-   - Ensuite, étape (3), à présenter avant de coder : tracé du réseau de gaines et accessoires, en s'appuyant sur `cadcraft-hvac`.
+   - **Étape 3a faite le 11 novembre** (plan validé par Guillaume : CTA et tronçon droit avec `DUCTSIZE` d'abord, accessoires ensuite ; plan seulement, pas d'altitudes ; plusieurs CTA, un réseau par CTA). Sur `perso`.
+     - `crates/doc/src/ventilation/duct.rs` : CTA (`AhuParams`, xdata `CADCRAFT_AHU`, calque `M-HVAC-AHU`, rectangle croisé + étiquette nom / débit / pression) et tronçon rond (`DuctParams`, xdata `CADCRAFT_DUCT`, calque `M-HVAC-DUCT`, double trait à l'échelle + étiquette Ø et débit, retournée pour rester lisible). `split_duct_at` coupe un tronçon quand un autre démarre ou finit dessus (le té se fait ainsi).
+     - `crates/doc/src/ventilation/network.rs` : `Drawing::duct_networks()` relit le réseau depuis les extrémités qui se touchent (tolérance 10 mm ; 100 mm autour d'une CTA), jamais stocké. Coudes 45° (≥ 10°) et 90° (≥ 67,5°), tés (le plus droit traverse, les autres tournent), type du tronçon déduit (raccordement vers une bouche, principal le long du tronc, sinon antenne) sauf s'il est imposé. Un tronçon qui ne mène à aucune bouche est écarté et signalé ; une bouche sans gaine aussi. `apply_duct_report` écrit Ø, débit, vitesse sur les gaines, débit et pression sur la CTA.
+     - `crates/engine/src/cmd/duct.rs` : `AHUADD`, `DUCTADD` (un tronçon par clic, `Diameter`, `Kind`, `Air`, `Undo`), `DUCTEDIT` (JSON ; `diameter` ou `auto`, `kind`, `air`), `DUCTSIZE` (JSON ; limites modifiables ; rapport par tronçon). Menu Dessin › CVC.
+     - Interface : l'onglet CVC a les boutons CTA, Gaine, Dimensionner ; la palette Propriétés a un groupe « Gaine » (diamètre fixé par Dimensionnement/Utilisateur, diamètre, type, air, longueur, débit, vitesse) ; double-clic sur une gaine ouvre Propriétés. Libellés fr et zh.
+     - Vérifié : tests unitaires (9 + 1), intégration moteur (6, ligne de commande comprise), aller-retour DXF et DWG avec relecture du réseau, test de la palette, capture d'écran réelle du CLI (`cadcraft-cli`, dessin en mm via `INSUNITS 4`), fmt, clippy -D warnings, `cargo test --workspace` en debug, layers, assets. Pas vérifié : wasm, essai dans l'interface graphique.
+     - Pas fait (limites) : accessoires (registre, clapet coupe-feu, silencieux, manchette) ; réducteurs aux changements de diamètre (les raccords sont déduits avant le dimensionnement) ; recalcul des étiquettes après MOVE/STRETCH (relancer `DUCTSIZE`) ; un STRETCH d'un tronçon ne met pas sa longueur à jour ; un `Undo` pendant `DUCTADD` ne rattache pas un tronçon coupé ; `DUCTEDIT` sans version interactive.
+   - Ensuite : étape 3b (accessoires), puis étape 4 (note de calcul et métré par local), puis étape 5.
 5. **Export IFC** (BIM).
 6. Publier en amont, plus tard : une issue de cadrage chez `storytold/cadcraft`, puis les PR des murs une par une.
 

@@ -34,6 +34,9 @@ pub struct LastUsed {
     pub wall_justification: cadcraft_doc::WallJustification,
     /// AIRTERMINALADD's type, model, flow and air direction.
     pub air_terminal: cmd::TerminalLastUsed,
+    /// AHUADD's size and air direction, DUCTADD's diameter, kind and air direction.
+    pub ahu: cmd::AhuLastUsed,
+    pub duct: cmd::DuctLastUsed,
 }
 
 impl Default for LastUsed {
@@ -53,6 +56,8 @@ impl Default for LastUsed {
             wall_style: String::new(),
             wall_justification: cadcraft_doc::WallJustification::Left,
             air_terminal: cmd::TerminalLastUsed::default(),
+            ahu: cmd::AhuLastUsed::default(),
+            duct: cmd::DuctLastUsed::default(),
         }
     }
 }

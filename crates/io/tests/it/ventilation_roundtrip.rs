@@ -2,8 +2,8 @@
 //! `CADCRAFT_AIRTERMINAL` xdata) and the drawing's air terminal models survive DXF and DWG saves.
 
 use cadcraft_doc::{
-    AIR_TERMINAL_APP, AirDirection, Common, Drawing, HvacUnits, SPACE_APP, Space, SpaceParams, TerminalParams, air_terminal_of, space_of,
-    standard_air_terminal_models,
+    AHU_APP, AIR_TERMINAL_APP, AhuParams, AirDirection, Common, DUCT_APP, Drawing, DuctKind, DuctParams, HvacUnits, SPACE_APP, Space, SpaceParams,
+    TerminalParams, air_terminal_of, space_of, standard_air_terminal_models,
 };
 use cadcraft_geom::Vec2;
 use cadcraft_hvac::RoomUse;
@@ -51,6 +51,67 @@ fn other_programs_see_the_applications_registered() {
     let (d, _, _) = drawing();
     let text = String::from_utf8(cadcraft_io::write(&d, "hvac.dxf").expect("dxf")).expect("utf-8");
     for app in [SPACE_APP, AIR_TERMINAL_APP] {
+        assert!(text.contains(&format!("AcDbRegAppTableRecord\r\n  2\r\n{app}")), "APPID record for {app}");
+    }
+}
+
+/// A unit, a trunk with a branch up from a tee, and a terminal at the end of each run.
+fn ducted() -> Drawing {
+    let mut d = Drawing::new_metric();
+    let units = HvacUnits::of(&d);
+    let ahu = AhuParams {
+        name: "CTA1".into(),
+        width_mm: 1500.0,
+        depth_mm: 800.0,
+        air: AirDirection::Supply,
+        flow_m3h: Some(500.0),
+        pressure_pa: Some(120.0),
+        label_height_mm: 100.0,
+        units,
+    };
+    d.add_ahu(&Space::Model, Common::default(), &ahu, Vec2::ZERO, 0.0).expect("add unit");
+    let duct = DuctParams {
+        length: 1.0,
+        diameter_mm: 250.0,
+        imposed: false,
+        kind: DuctKind::Auto,
+        air: AirDirection::Supply,
+        flow_m3h: Some(500.0),
+        velocity: Some(3.5),
+        label_height_mm: 100.0,
+        units,
+    };
+    for (a, b) in [((750.0, 0.0), (6000.0, 0.0)), ((6000.0, 0.0), (9000.0, 0.0)), ((6000.0, 0.0), (6000.0, 3000.0))] {
+        d.add_duct(&Space::Model, Common::default(), duct.clone(), Vec2::new(a.0, a.1), Vec2::new(b.0, b.1)).expect("add duct");
+    }
+    let model = standard_air_terminal_models().into_iter().next().expect("a model");
+    let t = TerminalParams { model, flow_m3h: 150.0, air: AirDirection::Supply, label_height_mm: 100.0, units };
+    for at in [(9000.0, 0.0), (6000.0, 3000.0)] {
+        d.add_air_terminal(&Space::Model, Common::default(), &t, Vec2::new(at.0, at.1), 0.0).expect("add terminal");
+    }
+    d
+}
+
+#[test]
+fn ducts_and_units_survive_dxf_and_dwg_and_the_network_is_read_back() {
+    let d = ducted();
+    let want = d.duct_networks().expect("network");
+    assert_eq!(want[0].network.segments.len(), 3);
+    for name in ["ducts.dxf", "ducts.dwg"] {
+        let bytes = cadcraft_io::write(&d, name).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let back = cadcraft_io::read(&bytes, name).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let got = back.duct_networks().unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(got.len(), 1, "{name}: one unit");
+        assert_eq!(got[0].network, want[0].network, "{name}: the same network");
+        let unit = back.model.iter().find_map(|e| cadcraft_doc::ahu_of(e)).expect("unit");
+        assert_eq!((unit.name.as_str(), unit.flow_m3h, unit.pressure_pa), ("CTA1", Some(500.0), Some(120.0)), "{name}");
+    }
+}
+
+#[test]
+fn other_programs_see_the_duct_applications_registered() {
+    let text = String::from_utf8(cadcraft_io::write(&ducted(), "ducts.dxf").expect("dxf")).expect("utf-8");
+    for app in [AHU_APP, DUCT_APP] {
         assert!(text.contains(&format!("AcDbRegAppTableRecord\r\n  2\r\n{app}")), "APPID record for {app}");
     }
 }
