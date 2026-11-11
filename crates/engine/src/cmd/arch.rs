@@ -120,6 +120,8 @@ enum Ask {
 
 struct WallAddM {
     pts: Vec<Vec2>,
+    /// The walls added so far, one per segment.
+    handles: Vec<Handle>,
     style: WallStyle,
     justification: WallJustification,
     /// Millimetres.
@@ -131,7 +133,7 @@ impl WallAddM {
     fn new(s: &Session) -> Self {
         let style = current_style(s).unwrap_or_else(|_| cadcraft_doc::standard_wall_styles().into_iter().next().unwrap_or_else(fallback_style));
         let height = style.default_height;
-        WallAddM { pts: Vec::new(), style, justification: s.last_used.wall_justification, height, ask: Ask::Point }
+        WallAddM { pts: Vec::new(), handles: Vec::new(), style, justification: s.last_used.wall_justification, height, ask: Ask::Point }
     }
     fn settings(&self, s: &mut Session) {
         s.echo(format!("Current settings: Style = {}, Justification = {}, Height = {}", self.style.name, self.justification.name(), self.height));
@@ -140,38 +142,59 @@ impl WallAddM {
         let d = s.doc().ok()?;
         Some(params(d, self.style.clone(), pts, closed, self.justification, self.height))
     }
-    /// Adds the wall drawn so far and remembers its settings; the points stay when the wall
-    /// can't be added.
-    fn finish(&mut self, s: &mut Session, closed: bool) -> Result<()> {
-        if let Some(w) = self.wall(s, self.pts.clone(), closed) {
-            add(s, w)?;
-        }
-        self.pts.clear();
+    /// Remembers the settings for the next WALLADD.
+    fn remember(&self, s: &mut Session) {
         s.last_used.wall_style = self.style.name.clone();
         s.last_used.wall_justification = self.justification;
-        Ok(())
     }
     /// The reason the wall along `pts` can't be drawn, if any.
     fn problem(&self, s: &Session, pts: Vec<Vec2>, closed: bool) -> Option<String> {
         self.wall(s, pts, closed).and_then(|w| w.validate().err()).map(|e| e.to_string())
     }
+    /// Adds the wall from `a` to `b` at once, as AutoCAD Architecture does, so the walls drawn
+    /// so far snap and join while the next one is drawn. False when it can't be drawn there.
+    /// `corner` is the path around the corners the new wall makes with its neighbours, checked
+    /// as one wall so a turn too sharp is refused as before.
+    fn segment(&mut self, s: &mut Session, a: Vec2, b: Vec2, corner: Vec<Vec2>) -> Result<bool> {
+        if let Some(why) = self.problem(s, corner, false) {
+            s.echo(why);
+            return Ok(false);
+        }
+        if let Some(w) = self.wall(s, vec![a, b], false) {
+            self.handles.push(add(s, w)?);
+            self.remember(s);
+        }
+        Ok(true)
+    }
+    /// Draws the last wall back to the start point and ends the command.
+    fn close(&mut self, s: &mut Session) -> Result<Step> {
+        let n = self.pts.len();
+        let corner: Vec<Vec2> =
+            [n.checked_sub(2), n.checked_sub(1), Some(0), Some(1)].into_iter().flatten().filter_map(|i| self.pts.get(i).copied()).collect();
+        if let (Some(a), Some(b)) = (self.pts.last().copied(), self.pts.first().copied())
+            && !self.segment(s, a, b, corner)?
+        {
+            return Ok(Step::Continue);
+        }
+        Ok(Step::Done)
+    }
     fn point(&mut self, s: &mut Session, p: Vec2) -> Result<Step> {
         if self.pts.last().is_some_and(|l| l.near(p, 1e-9)) {
             return Ok(Step::Continue);
         }
-        if self.pts.len() >= MAX_WALL_VERTICES {
-            s.echo(format!("A wall has at most {MAX_WALL_VERTICES} points: press Enter to draw it, then start the next wall."));
-            return Ok(Step::Continue);
+        // A click back on the start point (snapped to it) closes the outline.
+        if self.pts.len() >= 3 && self.pts.first().is_some_and(|f| f.near(p, 1e-6)) {
+            return self.close(s);
         }
-        let mut pts = self.pts.clone();
-        pts.push(p);
-        if pts.len() >= 2
-            && let Some(why) = self.problem(s, pts.clone(), false)
+        let mut corner: Vec<Vec2> = self.pts.iter().rev().take(2).rev().copied().collect();
+        corner.push(p);
+        if let Some(last) = self.pts.last().copied()
+            && !self.segment(s, last, p, corner)?
         {
-            s.echo(why);
             return Ok(Step::Continue);
         }
-        self.pts = pts;
+        self.pts.push(p);
+        s.last_point = p;
         Ok(Step::Continue)
     }
     fn keyword(&mut self, s: &mut Session, k: &str) -> Result<Step> {
@@ -180,16 +203,17 @@ impl WallAddM {
             "Justification" => self.ask = Ask::Justification,
             "Height" => self.ask = Ask::Height,
             "Undo" => {
+                if self.pts.len() >= 2
+                    && let Some(h) = self.handles.pop()
+                {
+                    let space = s.space();
+                    let d = s.doc_mut()?;
+                    d.remove_entity(h);
+                    join_walls(d, &space);
+                }
                 self.pts.pop();
             }
-            "Close" if self.pts.len() >= 3 => {
-                if let Some(why) = self.problem(s, self.pts.clone(), true) {
-                    s.echo(why);
-                    return Ok(Step::Continue);
-                }
-                self.finish(s, true)?;
-                return Ok(Step::Done);
-            }
+            "Close" if self.pts.len() >= 3 => return self.close(s),
             _ => {}
         }
         Ok(Step::Continue)
@@ -268,32 +292,23 @@ impl Interactive for WallAddM {
         match i {
             Input::Keyword(k) => self.keyword(s, &k),
             Input::Point(p) => self.point(s, p),
-            Input::Enter => {
-                if self.pts.len() >= 2 {
-                    self.finish(s, false)?;
-                    Ok(Step::Done)
-                } else {
-                    Ok(Step::Cancel)
-                }
-            }
+            // Enter closes an outline of three points or more, else ends with what is drawn.
+            Input::Enter if self.pts.len() >= 3 => self.close(s),
+            Input::Enter => Ok(Step::Done),
             _ => Ok(Step::Continue),
         }
     }
     fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
-        // The path, in case the wall itself can't be drawn there (a corner too sharp).
-        let mut pts = self.pts.clone();
-        pts.push(c);
-        pts.windows(2).filter_map(|w| Some(EntityKind::Line(Line { a: w.first()?.to3(0.0), b: w.get(1)?.to3(0.0) }))).collect()
+        // The segment under way, in case the wall itself can't be drawn there.
+        self.pts.last().map(|l| vec![EntityKind::Line(Line { a: l.to3(0.0), b: c.to3(0.0) })]).unwrap_or_default()
     }
     fn preview_objects(&self, s: &Session, c: Vec2) -> Vec<Entity> {
         if self.ask != Ask::Point || self.pts.is_empty() {
             return Vec::new();
         }
-        let mut pts = self.pts.clone();
-        if pts.last().is_some_and(|l| !l.near(c, 1e-9)) {
-            pts.push(c);
-        }
-        let Some(Ok(pieces)) = self.wall(s, pts, false).map(|w| w.generate()) else { return Vec::new() };
+        // The walls drawn so far are in the drawing: only the one under way is previewed.
+        let Some(last) = self.pts.last().copied().filter(|l| !l.near(c, 1e-9)) else { return Vec::new() };
+        let Some(Ok(pieces)) = self.wall(s, vec![last, c], false).map(|w| w.generate()) else { return Vec::new() };
         pieces
             .into_iter()
             .map(|p| Entity { handle: Handle(0), common: Common { layer: p.layer.into(), color: p.color, ..Common::default() }, kind: p.kind })
