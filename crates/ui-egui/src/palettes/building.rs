@@ -200,15 +200,22 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
             Ok(r) => {
                 for net in r["networks"].as_array().into_iter().flatten() {
                     let (flow, pa) = (net["totalFlow"].as_f64().unwrap_or(0.0), net["requiredPressure"].as_f64().unwrap_or(0.0));
-                    app.session.echo(crate::tf!("Ducts sized: {flow} m³/h, {pa} Pa", flow = format!("{flow:.0}"), pa = format!("{pa:.0}")));
+                    let air = if net["air"] == "extract" { crate::i18n::t("Extract") } else { crate::i18n::t("Supply") };
+                    app.session.echo(crate::tf!(
+                        "Ducts sized, {air}: {flow} m³/h, {pa} Pa",
+                        air = air,
+                        flow = format!("{flow:.0}"),
+                        pa = format!("{pa:.0}")
+                    ));
                     for w in net["warnings"].as_array().into_iter().flatten().filter_map(|w| w.as_str()) {
                         app.session.echo(w.to_string());
                     }
                 }
                 for sp in r["spaces"].as_array().into_iter().flatten() {
                     app.session.echo(crate::tf!(
-                        "{name}: the terminals supply {supplied} m³/h, the space needs {needed} m³/h",
+                        "{name} ({air}): the terminals carry {supplied} m³/h, the space needs {needed} m³/h",
                         name = sp["space"].as_str().unwrap_or(""),
+                        air = if sp["air"] == "extract" { crate::i18n::t("Extract") } else { crate::i18n::t("Supply") },
                         supplied = format!("{:.0}", sp["supplied"].as_f64().unwrap_or(0.0)),
                         needed = format!("{:.0}", sp["needed"].as_f64().unwrap_or(0.0))
                     ));

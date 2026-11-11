@@ -9,9 +9,10 @@ fn ahu() -> AhuParams {
         name: "CTA1".into(),
         width_mm: 1000.0,
         depth_mm: 600.0,
-        air: AirDirection::Supply,
         flow_m3h: None,
         pressure_pa: None,
+        extract_flow_m3h: None,
+        extract_pressure_pa: None,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     }
@@ -245,4 +246,64 @@ fn a_terminal_in_the_middle_of_a_run_cuts_it() {
     let net = d.duct_networks().unwrap().remove(0);
     assert_eq!(net.network.segments.len(), 2);
     assert!(net.unconnected.is_empty());
+}
+
+fn extract_duct(d: &mut Drawing, a: (f64, f64), b: (f64, f64)) -> Handle {
+    let p = DuctParams { air: AirDirection::Extract, ..duct(200.0) };
+    d.add_duct(&Space::Model, Common::default(), p, Vec2::new(a.0, a.1), Vec2::new(b.0, b.1)).unwrap()
+}
+
+fn extract_terminal(d: &mut Drawing, at: (f64, f64), flow: f64) -> Handle {
+    let model = standard_air_terminal_models().into_iter().find(|m| m.name == "EX125").unwrap();
+    let t = TerminalParams { model, flow_m3h: flow, air: AirDirection::Extract, label_height_mm: 100.0, units: HvacUnits::default() };
+    d.add_air_terminal(&Space::Model, Common::default(), &t, Vec2::new(at.0, at.1), 0.0).unwrap()
+}
+
+/// A double-flux unit: supply ducts and terminals above it, extract ones below.
+fn double_flux() -> Drawing {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    add_duct(&mut d, (500.0, 100.0), (4000.0, 100.0));
+    add_terminal(&mut d, (4000.0, 100.0), 300.0);
+    extract_duct(&mut d, (500.0, -100.0), (4000.0, -100.0));
+    extract_terminal(&mut d, (4000.0, -100.0), 250.0);
+    d
+}
+
+#[test]
+fn a_double_flux_unit_has_a_supply_and_an_extract_network_each_with_its_own_terminals() {
+    let d = double_flux();
+    let nets = d.duct_networks().unwrap();
+    assert_eq!(nets.iter().map(|n| n.air).collect::<Vec<_>>(), [AirDirection::Supply, AirDirection::Extract]);
+    for n in &nets {
+        assert_eq!(n.network.segments.len(), 1, "{:?}", n.air);
+        assert!(n.unconnected.is_empty());
+    }
+    assert_eq!(nets[0].network.segments[0].terminal.map(|t| t.flow_m3h), Some(300.0));
+    assert_eq!(nets[1].network.segments[0].terminal.map(|t| t.flow_m3h), Some(250.0));
+}
+
+#[test]
+fn each_network_gives_its_flow_to_the_unit_and_the_label_shows_both() {
+    let mut d = double_flux();
+    for net in d.duct_networks().unwrap() {
+        let report = size_network(&net.network, &DesignCriteria::default()).unwrap();
+        d.apply_duct_report(&net, &report).unwrap();
+    }
+    let unit = d.model.iter().find_map(|e| ahu_of(e)).unwrap();
+    assert_eq!((unit.flow_m3h, unit.extract_flow_m3h), (Some(300.0), Some(250.0)));
+    assert!(unit.pressure_pa.is_some() && unit.extract_pressure_pa.is_some());
+    let text = unit.generate().unwrap().into_iter().find_map(|p| if let EntityKind::Text(t) = p.kind { Some(t.value) } else { None }).unwrap();
+    assert!(text.contains("S 300 / E 250 m³/h"), "{text}");
+}
+
+#[test]
+fn a_terminal_on_a_duct_of_the_other_air_direction_is_not_connected() {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    add_duct(&mut d, (500.0, 0.0), (4000.0, 0.0));
+    let wrong = extract_terminal(&mut d, (4000.0, 0.0), 250.0);
+    let net = d.duct_networks().unwrap().remove(0);
+    assert!(net.network.segments.is_empty(), "no supply terminal at the end");
+    assert_eq!(net.unconnected, [wrong]);
 }

@@ -38,14 +38,18 @@ pub struct AhuParams {
     pub name: String,
     pub width_mm: f64,
     pub depth_mm: f64,
-    #[serde(default)]
-    pub air: AirDirection,
-    /// The flow the network asks of the unit, m³/h, once the network is sized.
+    /// The supply flow the network asks of the unit, m³/h, once the network is sized. A unit is
+    /// double-flux: the supply and the extract networks start from it.
     #[serde(default)]
     pub flow_m3h: Option<f64>,
-    /// The pressure the unit must supply, Pa, once the network is sized.
+    /// The pressure the unit must supply to the supply network, Pa, once sized.
     #[serde(default)]
     pub pressure_pa: Option<f64>,
+    /// The same for the extract network.
+    #[serde(default)]
+    pub extract_flow_m3h: Option<f64>,
+    #[serde(default)]
+    pub extract_pressure_pa: Option<f64>,
     #[serde(default = "default_label_mm")]
     pub label_height_mm: f64,
     #[serde(default)]
@@ -61,7 +65,7 @@ impl AhuParams {
         if !size(self.width_mm) || !size(self.depth_mm) {
             return Err(invalid(format!("A unit's sizes are more than 0 and at most {MAX_AHU_SIZE_MM} mm.")));
         }
-        for v in [self.flow_m3h, self.pressure_pa].into_iter().flatten() {
+        for v in [self.flow_m3h, self.pressure_pa, self.extract_flow_m3h, self.extract_pressure_pa].into_iter().flatten() {
             if !(v.is_finite() && (0.0..=1e9).contains(&v)) {
                 return Err(invalid("A unit's flow and pressure are 0 or more."));
             }
@@ -89,11 +93,17 @@ impl AhuParams {
         let line = |a: Vec2, b: Vec2| HvacPiece { layer: AHU_LAYER, kind: EntityKind::Line(Line { a: v3(a), b: v3(b) }) };
         let h = self.units.to_units(self.label_height_mm);
         let mut text = self.name.clone();
-        if let Some(f) = self.flow_m3h {
-            text.push_str(&format!(" {f:.0} m³/h"));
+        // Supply first, extract after; one prefix tells them apart when both are known.
+        let flows = [("S", self.flow_m3h), ("E", self.extract_flow_m3h)];
+        let both = flows.iter().all(|(_, f)| f.is_some());
+        let part = |tag: &str, v: Option<f64>, unit: &str| v.map(|v| if both { format!("{tag} {v:.0}{unit}") } else { format!("{v:.0}{unit}") });
+        let flow: Vec<String> = [part("S", self.flow_m3h, ""), part("E", self.extract_flow_m3h, "")].into_iter().flatten().collect();
+        if !flow.is_empty() {
+            text.push_str(&format!(" {} m³/h", flow.join(" / ")));
         }
-        if let Some(p) = self.pressure_pa {
-            text.push_str(&format!(" {p:.0} Pa"));
+        let pa: Vec<String> = [part("S", self.pressure_pa, ""), part("E", self.extract_pressure_pa, "")].into_iter().flatten().collect();
+        if !pa.is_empty() {
+            text.push_str(&format!(" {} Pa", pa.join(" / ")));
         }
         Ok(vec![
             HvacPiece { layer: AHU_LAYER, kind: EntityKind::LwPolyline(outline) },

@@ -38,7 +38,7 @@ fn ahuadd_places_a_numbered_unit() {
     assert_eq!(b["name"], "CTA bureaux");
     let u = ahu_of(s.doc().unwrap().entity(hd(&b["handle"])).unwrap()).unwrap();
     assert_eq!((u.width_mm, u.depth_mm), (2000.0, 900.0));
-    for bad in [json!({}), json!({"at": [0, 0], "width": -1}), json!({"at": [0, 0], "air": "sideways"}), json!({"at": [0, 0], "name": " "})] {
+    for bad in [json!({}), json!({"at": [0, 0], "width": -1}), json!({"at": [0, 0], "name": " "})] {
         assert!(s.execute("ahuadd", &bad).is_err(), "{bad}");
     }
 }
@@ -167,4 +167,31 @@ fn ductsize_cuts_a_run_the_stub_ends_on_and_compares_the_terminals_with_the_spac
     assert_eq!(r["spaces"][0]["supplied"], 1800.0);
     assert_eq!(r["spaces"][0]["needed"], 1200.0);
     assert!(r["networks"][0]["warnings"][0].as_str().unwrap().contains("reached by no duct"));
+}
+
+/// The sports hall again, with a double-flux unit: four supply diffusers and four extract valves,
+/// each side carrying the 1200 m³/h the hall needs.
+#[test]
+fn a_double_flux_unit_carries_the_flow_of_the_space_in_both_directions() {
+    let mut s = metric();
+    s.execute("spaceadd", &json!({"points": [[-4000, -4000], [4000, -4000], [4000, 4000], [-4000, 4000]], "name": "Salle", "flow": 1200})).unwrap();
+    let unit = s.execute("ahuadd", &json!({"at": [0, 0]})).unwrap();
+    // From each face, up (or down) to the middle, then an arm to each side with its terminals on it.
+    for (air, y) in [("supply", 1), ("extract", -1)] {
+        s.execute("ductadd", &json!({"points": [[0, 400 * y], [0, 2500 * y]], "air": air})).unwrap();
+        for end in [-3000, 3000] {
+            s.execute("ductadd", &json!({"points": [[0, 2500 * y], [end, 2500 * y]], "air": air})).unwrap();
+        }
+    }
+    for x in [-3000, -1000, 1000, 3000] {
+        s.execute("airterminaladd", &json!({"at": [x, 2500], "flow": 300})).unwrap();
+        s.execute("airterminaladd", &json!({"at": [x, -2500], "flow": 300, "air": "extract", "type": "squareCeiling"})).unwrap();
+    }
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    let nets = r["networks"].as_array().unwrap();
+    assert_eq!(nets.iter().map(|n| n["air"].as_str().unwrap()).collect::<Vec<_>>(), ["supply", "extract"], "{r}");
+    assert!(nets.iter().all(|n| n["totalFlow"] == 1200.0 && n["warnings"].as_array().unwrap().is_empty()), "{r}");
+    assert!(r["spaces"].as_array().unwrap().is_empty(), "{r}");
+    let u = cadcraft_doc::ahu_of(s.doc().unwrap().entity(hd(&unit["handle"])).unwrap()).unwrap();
+    assert_eq!((u.flow_m3h, u.extract_flow_m3h), (Some(1200.0), Some(1200.0)));
 }

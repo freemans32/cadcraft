@@ -16,7 +16,7 @@ pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("ahuadd", "Air Handling Unit", run_ahuadd)
             .menu(&["Draw", "HVAC", "Air Handling Unit"])
-            .params("{at, name?, width? (mm), depth? (mm), air?: supply|extract, rotation? (degrees), labelHeight? (mm)} → {handle, name}")
+            .params("{at, name?, width? (mm), depth? (mm), rotation? (degrees), labelHeight? (mm)} → {handle, name} (a double-flux unit: its ducts and terminals say supply or extract)")
             .interactive(|s| Ok(Box::new(AhuAddM::new(s)))),
         CommandSpec::new("ductadd", "Duct", run_ductadd)
             .menu(&["Draw", "HVAC", "Duct"])
@@ -39,12 +39,11 @@ pub fn specs() -> Vec<CommandSpec> {
 pub struct AhuLastUsed {
     pub width_mm: f64,
     pub depth_mm: f64,
-    pub air: AirDirection,
 }
 
 impl Default for AhuLastUsed {
     fn default() -> Self {
-        AhuLastUsed { width_mm: 1500.0, depth_mm: 800.0, air: AirDirection::Supply }
+        AhuLastUsed { width_mm: 1500.0, depth_mm: 800.0 }
     }
 }
 
@@ -122,9 +121,10 @@ fn run_ahuadd(s: &mut Session, p: &Value) -> Result<Value> {
         name: str_param(p, "name").map(str::to_string).unwrap_or_else(|| s.doc().map(next_ahu_name).unwrap_or_else(|_| "CTA".into())),
         width_mm: positive(CMD, p, "width")?.unwrap_or(last.width_mm),
         depth_mm: positive(CMD, p, "depth")?.unwrap_or(last.depth_mm),
-        air: air_param(CMD, p)?.unwrap_or(last.air),
         flow_m3h: None,
         pressure_pa: None,
+        extract_flow_m3h: None,
+        extract_pressure_pa: None,
         label_height_mm: positive(CMD, p, "labelHeight")?.unwrap_or(100.0),
         units: units_of(s)?,
     };
@@ -139,7 +139,6 @@ enum AhuAsk {
     Name,
     Width,
     Depth,
-    Air,
 }
 
 struct AhuAddM {
@@ -153,13 +152,7 @@ impl AhuAddM {
         AhuAddM { last: s.last_used.ahu.clone(), name: s.doc().map(next_ahu_name).unwrap_or_else(|_| "CTA".into()), ask: AhuAsk::Location }
     }
     fn settings(&self, s: &mut Session) {
-        s.echo(format!(
-            "Current settings: Name = {}, Width = {}, Depth = {}, Air = {}",
-            self.name,
-            self.last.width_mm,
-            self.last.depth_mm,
-            self.last.air.name()
-        ));
+        s.echo(format!("Current settings: Name = {}, Width = {}, Depth = {}", self.name, self.last.width_mm, self.last.depth_mm));
     }
     fn size(t: &str) -> Result<f64> {
         t.parse::<f64>()
@@ -176,7 +169,6 @@ impl AhuAddM {
             (AhuAsk::Name, _, Some(t)) if !t.is_empty() => self.name = t.to_string(),
             (AhuAsk::Width, _, Some(t)) => self.last.width_mm = Self::size(t)?,
             (AhuAsk::Depth, _, Some(t)) => self.last.depth_mm = Self::size(t)?,
-            (AhuAsk::Air, _, Some(t)) => self.last.air = AirDirection::parse(t).ok_or_else(|| other("Enter Supply or Extract."))?,
             (AhuAsk::Rotation(at), _, _) => {
                 let angle = match (&i, text.as_deref()) {
                     (Input::Point(p), _) => (*p - at).angle(),
@@ -189,9 +181,10 @@ impl AhuAddM {
                     name: self.name.clone(),
                     width_mm: self.last.width_mm,
                     depth_mm: self.last.depth_mm,
-                    air: self.last.air,
                     flow_m3h: None,
                     pressure_pa: None,
+                    extract_flow_m3h: None,
+                    extract_pressure_pa: None,
                     label_height_mm: 100.0,
                     units: units_of(s)?,
                 };
@@ -218,12 +211,11 @@ impl Interactive for AhuAddM {
     }
     fn prompt(&self, _s: &Session) -> Prompt {
         match self.ask {
-            AhuAsk::Location => Prompt::new("Specify location of air handling unit", Accept::POINT).kw(&["Name", "Width", "Depth", "Air"]),
+            AhuAsk::Location => Prompt::new("Specify location of air handling unit", Accept::POINT).kw(&["Name", "Width", "Depth"]),
             AhuAsk::Rotation(at) => Prompt::new("Specify rotation angle", Accept::POINT_OR_NUMBER).base(at).default("0"),
             AhuAsk::Name => Prompt::new("Enter unit name", Accept::TEXT).default(self.name.clone()),
             AhuAsk::Width => Prompt::new("Enter unit width (mm)", Accept::NUMBER).default(format!("{}", self.last.width_mm)),
             AhuAsk::Depth => Prompt::new("Enter unit depth (mm)", Accept::NUMBER).default(format!("{}", self.last.depth_mm)),
-            AhuAsk::Air => Prompt::new("Enter air direction", super::curves::KW).kw(&["Supply", "Extract"]).default(self.last.air.name()),
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
@@ -236,7 +228,6 @@ impl Interactive for AhuAddM {
                     "Name" => AhuAsk::Name,
                     "Width" => AhuAsk::Width,
                     "Depth" => AhuAsk::Depth,
-                    "Air" => AhuAsk::Air,
                     _ => AhuAsk::Location,
                 };
                 Ok(Step::Continue)
@@ -515,13 +506,14 @@ fn place(d: &Drawing, h: Handle) -> String {
     }
 }
 
-/// The spaces whose terminals do not supply the flow the space needs: name, needed, supplied (m³/h).
+/// The spaces whose terminals of an air direction do not carry the flow the space needs: name,
+/// air direction, needed and carried (m³/h). A double-flux unit supplies and extracts as much.
 fn space_mismatches(d: &Drawing) -> Vec<Value> {
-    let terminals: Vec<(Vec2, f64)> = d
+    let terminals: Vec<(Vec2, AirDirection, f64)> = d
         .model
         .iter()
         .filter_map(|e| match (&e.kind, cadcraft_doc::air_terminal_of(e)) {
-            (EntityKind::Insert(i), Some(t)) => Some((Vec2::new(i.insert.x, i.insert.y), t.flow_m3h)),
+            (EntityKind::Insert(i), Some(t)) => Some((Vec2::new(i.insert.x, i.insert.y), t.air, t.flow_m3h)),
             _ => None,
         })
         .collect();
@@ -529,9 +521,11 @@ fn space_mismatches(d: &Drawing) -> Vec<Value> {
     for e in d.model.iter() {
         let Some((sp, outline)) = d.space_outline(e.handle) else { continue };
         let Ok(need) = sp.flow() else { continue };
-        let supplied: f64 = terminals.iter().filter(|(p, _)| cadcraft_geom::point_in_polygon(&outline, *p)).map(|(_, f)| f).sum();
-        if (supplied - need).abs() > 0.05 * need.max(1.0) && supplied > 0.0 {
-            out.push(json!({ "space": sp.name, "needed": need, "supplied": supplied }));
+        for air in [AirDirection::Supply, AirDirection::Extract] {
+            let carried: f64 = terminals.iter().filter(|(p, a, _)| *a == air && cadcraft_geom::point_in_polygon(&outline, *p)).map(|(.., f)| f).sum();
+            if carried > 0.0 && (carried - need).abs() > 0.05 * need.max(1.0) {
+                out.push(json!({ "space": sp.name, "air": air.name(), "needed": need, "supplied": carried }));
+            }
         }
     }
     out
@@ -573,11 +567,11 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
         let mut warnings: Vec<String> = Vec::new();
         let d = s.doc()?;
         warnings.extend(net.dangling.iter().map(|h| format!("the duct at {} leads to no terminal and was left out", place(d, *h))));
-        warnings.extend(net.unconnected.iter().map(|h| format!("the terminal at {} is reached by no duct", place(d, *h))));
+        warnings.extend(net.unconnected.iter().map(|h| format!("the terminal at {} is reached by no duct of its air direction", place(d, *h))));
         if net.network.segments.is_empty() {
             warnings.push("no duct leads from this unit to a terminal: a duct must start on the unit, and the ducts meet end to end".into());
             out.push(
-                json!({ "ahu": net.ahu.hex(), "totalFlow": 0.0, "requiredPressure": 0.0, "criticalPath": [], "segments": [], "warnings": warnings }),
+                json!({ "ahu": net.ahu.hex(), "air": net.air.name(), "totalFlow": 0.0, "requiredPressure": 0.0, "criticalPath": [], "segments": [], "warnings": warnings }),
             );
             continue;
         }
@@ -596,7 +590,7 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
             .collect();
         let path: Vec<String> = report.critical_path.iter().filter_map(|i| net.ducts.get(*i)).map(|h| h.hex()).collect();
         out.push(json!({
-            "ahu": net.ahu.hex(), "totalFlow": report.total_flow_m3h, "requiredPressure": report.required_pressure_pa,
+            "ahu": net.ahu.hex(), "air": net.air.name(), "totalFlow": report.total_flow_m3h, "requiredPressure": report.required_pressure_pa,
             "criticalPath": path, "segments": segments, "warnings": warnings,
         }));
         sized.push((net, report));

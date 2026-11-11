@@ -5,7 +5,7 @@ use cadcraft_geom::Vec2;
 use cadcraft_hvac::{Fitting, Network, NetworkReport, Segment, SegmentKind, Terminal};
 
 use super::duct::{AXIS_REACH, interior_cut};
-use super::{AhuParams, DuctKind, DuctParams, HvacUnits, TerminalParams, ahu_of, air_terminal_of, invalid};
+use super::{AhuParams, AirDirection, DuctKind, DuctParams, HvacUnits, TerminalParams, ahu_of, air_terminal_of, invalid};
 use crate::{EntityKind, Handle, Result};
 
 /// Most ducts one drawing's networks are read from.
@@ -18,16 +18,18 @@ const UNIT_MEET_MM: f64 = 100.0;
 const ELBOW_45_DEG: f64 = 10.0;
 const ELBOW_90_DEG: f64 = 67.5;
 
-/// One air handling unit's ducts as a network ready to size.
+/// One air handling unit's ducts of one air direction as a network ready to size. A double-flux
+/// unit has two: its supply ducts with the supply terminals, its extract ducts with the extract ones.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DuctNetwork {
     pub ahu: Handle,
+    pub air: AirDirection,
     pub network: Network,
     /// The duct of each segment of `network`, in the same order.
     pub ducts: Vec<Handle>,
     /// Ducts connected to the unit that lead to no terminal, so are left out of the sizing.
     pub dangling: Vec<Handle>,
-    /// Terminals that no duct reaches.
+    /// Terminals that no duct of their air direction reaches (set on the first network only).
     pub unconnected: Vec<Handle>,
 }
 
@@ -71,8 +73,8 @@ impl crate::Drawing {
                 terminals.push((e.handle, p, Vec2::new(i.insert.x, i.insert.y)));
             }
         }
-        let mut taken = vec![false; ducts.len()];
-        let mut touched_terminals = vec![false; terminals.len()];
+        let mut scan =
+            Scan { ducts: &ducts, terminals: &terminals, units, tol, taken: vec![false; ducts.len()], touched: vec![false; terminals.len()] };
         let mut out = Vec::new();
         let unit_tol = units.to_units(UNIT_MEET_MM);
         for (handle, p, at, rotation) in &ahus {
@@ -83,11 +85,21 @@ impl crate::Drawing {
                 let reach = unit_tol.max(units.to_units(AXIS_REACH * diameter_mm));
                 l.x.abs() <= half.x + reach && l.y.abs() <= half.y + reach
             };
-            let net = read_network(*handle, &ducts, &mut taken, &terminals, &mut touched_terminals, (units, tol), inside);
-            out.push(net);
+            let mut found = Vec::new();
+            for air in [AirDirection::Supply, AirDirection::Extract] {
+                let net = scan.read(*handle, air, &inside);
+                if !(net.ducts.is_empty() && net.dangling.is_empty()) {
+                    found.push(net);
+                }
+            }
+            // A unit none of whose ducts leave it still gets its (empty) supply network, to say so.
+            if found.is_empty() {
+                found.push(scan.read(*handle, AirDirection::Supply, &inside));
+            }
+            out.extend(found);
         }
         // A terminal left unreached by every unit is reported on each network: say so once, on the first.
-        let lost: Vec<Handle> = terminals.iter().zip(&touched_terminals).filter(|(_, t)| !**t).map(|((h, ..), _)| *h).collect();
+        let lost: Vec<Handle> = terminals.iter().zip(&scan.touched).filter(|(_, t)| !**t).map(|((h, ..), _)| *h).collect();
         if let Some(first) = out.first_mut() {
             first.unconnected = lost;
         }
@@ -153,102 +165,182 @@ impl crate::Drawing {
         }
         let e = self.entity(net.ahu).ok_or(crate::DocError::NoEntity(net.ahu))?;
         if let Some(mut a) = ahu_of(e) {
-            a.flow_m3h = Some(report.total_flow_m3h);
-            a.pressure_pa = Some(report.required_pressure_pa);
+            let (flow, pressure) = (Some(report.total_flow_m3h), Some(report.required_pressure_pa));
+            match net.air {
+                AirDirection::Supply => (a.flow_m3h, a.pressure_pa) = (flow, pressure),
+                AirDirection::Extract => (a.extract_flow_m3h, a.extract_pressure_pa) = (flow, pressure),
+            }
             self.regenerate_ahu(net.ahu, &a)?;
         }
         Ok(())
     }
 }
 
-fn read_network(
-    ahu: Handle,
-    ducts: &[Duct],
-    taken: &mut [bool],
-    terminals: &[(Handle, TerminalParams, Vec2)],
-    touched: &mut [bool],
-    (units, tol): (HvacUnits, f64),
-    inside: impl Fn(Vec2, f64) -> bool,
-) -> DuctNetwork {
-    let mut nodes: Vec<Node> = Vec::new();
-    // Ducts leaving the unit.
-    for (i, d) in ducts.iter().enumerate() {
-        if taken.get(i).copied().unwrap_or(true) {
-            continue;
-        }
-        let (from, to) = if inside(d.a, d.params.diameter_mm) {
-            (d.a, d.b)
-        } else if inside(d.b, d.params.diameter_mm) {
-            (d.b, d.a)
-        } else {
-            continue;
-        };
-        if let Some(t) = taken.get_mut(i) {
+/// What reading the networks of a drawing shares: the objects found, and which ducts and
+/// terminals the units read so far have used.
+struct Scan<'a> {
+    ducts: &'a [Duct],
+    terminals: &'a [(Handle, TerminalParams, Vec2)],
+    units: HvacUnits,
+    tol: f64,
+    taken: Vec<bool>,
+    touched: Vec<bool>,
+}
+
+impl Scan<'_> {
+    fn is_free(&self, i: usize, air: AirDirection) -> bool {
+        !self.taken.get(i).copied().unwrap_or(true) && self.ducts.get(i).is_some_and(|d| d.params.air == air)
+    }
+
+    fn take(&mut self, i: usize) {
+        if let Some(t) = self.taken.get_mut(i) {
             *t = true;
         }
-        nodes.push(Node { duct: i, parent: None, from, to, terminal: None, fittings: Vec::new(), terminals_below: 0 });
     }
-    // Each run's far end leads on to the runs that start there.
-    let mut next = 0;
-    while let Some(n) = nodes.get(next) {
-        let (here, to, from) = (next, n.to, n.from);
-        let parent_diameter = ducts.get(n.duct).map_or(0.0, |d| d.params.diameter_mm);
-        let mut children: Vec<(usize, Vec2, Vec2)> = Vec::new();
-        for (i, d) in ducts.iter().enumerate() {
-            if taken.get(i).copied().unwrap_or(true) {
-                continue;
-            }
-            // Ends meet within a radius of the wider duct: snapping lands on a line's edge.
-            let meet = tol.max(units.to_units(AXIS_REACH * d.params.diameter_mm.max(parent_diameter)));
-            let (f, t) = if d.a.near(to, meet) {
+
+    /// The network of `air` leaving unit `ahu`, whose face `inside` tells (a point and a duct diameter).
+    fn read(&mut self, ahu: Handle, air: AirDirection, inside: &impl Fn(Vec2, f64) -> bool) -> DuctNetwork {
+        let mut nodes = self.roots(air, inside);
+        self.grow(&mut nodes, air);
+        self.attach_terminals(&mut nodes, air);
+        count_terminals(&mut nodes);
+        self.build(ahu, air, &nodes)
+    }
+
+    /// The ducts of `air` that leave the unit.
+    fn roots(&mut self, air: AirDirection, inside: &impl Fn(Vec2, f64) -> bool) -> Vec<Node> {
+        let mut nodes = Vec::new();
+        for i in 0..self.ducts.len() {
+            let Some(d) = self.ducts.get(i).filter(|_| self.is_free(i, air)) else { continue };
+            let (from, to) = if inside(d.a, d.params.diameter_mm) {
                 (d.a, d.b)
-            } else if d.b.near(to, meet) {
+            } else if inside(d.b, d.params.diameter_mm) {
                 (d.b, d.a)
             } else {
                 continue;
             };
-            if let Some(x) = taken.get_mut(i) {
-                *x = true;
-            }
-            children.push((i, f, t));
+            self.take(i);
+            nodes.push(Node { duct: i, parent: None, from, to, terminal: None, fittings: Vec::new(), terminals_below: 0 });
         }
-        // The straightest child goes through the tee, the others turn into it.
-        let heading = (to - from).normalized();
-        let turn = |f: Vec2, t: Vec2| heading.dot((t - f).normalized()).clamp(-1.0, 1.0).acos().to_degrees();
-        children.sort_by(|x, y| turn(x.1, x.2).total_cmp(&turn(y.1, y.2)));
-        let many = children.len() > 1;
-        for (k, (i, f, t)) in children.into_iter().enumerate() {
-            let angle = turn(f, t);
-            let mut fittings = Vec::new();
-            if many {
-                fittings.push(if k == 0 { Fitting::TeeStraight } else { Fitting::TeeBranch });
-            }
-            if !many || k > 0 {
-                if angle >= ELBOW_90_DEG {
-                    fittings.push(Fitting::Elbow90);
-                } else if angle >= ELBOW_45_DEG {
-                    fittings.push(Fitting::Elbow45);
-                }
-            }
-            nodes.push(Node { duct: i, parent: Some(here), from: f, to: t, terminal: None, fittings, terminals_below: 0 });
-        }
-        next += 1;
+        nodes
     }
-    // The terminal at each run's far end.
-    for n in &mut nodes {
-        for (ti, (h, p, at)) in terminals.iter().enumerate() {
-            let diameter = ducts.get(n.duct).map_or(0.0, |d| d.params.diameter_mm);
-            let reach = tol.max(units.to_units(AXIS_REACH * diameter)) + p.units.to_units(p.model.neck_mm) / 2.0;
-            if at.near(n.to, reach) {
-                n.terminal = Some((*h, p.flow_m3h, p.model.pressure_drop_pa));
-                if let Some(t) = touched.get_mut(ti) {
-                    *t = true;
-                }
-                break;
+
+    /// Each run's far end leads on to the runs that start there.
+    fn grow(&mut self, nodes: &mut Vec<Node>, air: AirDirection) {
+        let mut next = 0;
+        while let Some(n) = nodes.get(next) {
+            let (to, from) = (n.to, n.from);
+            let parent_diameter = self.ducts.get(n.duct).map_or(0.0, |d| d.params.diameter_mm);
+            let mut children: Vec<(usize, Vec2, Vec2)> = Vec::new();
+            for i in 0..self.ducts.len() {
+                let Some(d) = self.ducts.get(i).filter(|_| self.is_free(i, air)) else { continue };
+                // Ends meet within a radius of the wider duct: snapping lands on a line's edge.
+                let meet = self.tol.max(self.units.to_units(AXIS_REACH * d.params.diameter_mm.max(parent_diameter)));
+                let (f, t) = if d.a.near(to, meet) {
+                    (d.a, d.b)
+                } else if d.b.near(to, meet) {
+                    (d.b, d.a)
+                } else {
+                    continue;
+                };
+                self.take(i);
+                children.push((i, f, t));
             }
+            // The straightest child goes through the tee, the others turn into it.
+            let heading = (to - from).normalized();
+            let turn = |f: Vec2, t: Vec2| heading.dot((t - f).normalized()).clamp(-1.0, 1.0).acos().to_degrees();
+            children.sort_by(|x, y| turn(x.1, x.2).total_cmp(&turn(y.1, y.2)));
+            let many = children.len() > 1;
+            for (k, (i, f, t)) in children.into_iter().enumerate() {
+                let fittings = junction_fittings(many, k, turn(f, t));
+                nodes.push(Node { duct: i, parent: Some(next), from: f, to: t, terminal: None, fittings, terminals_below: 0 });
+            }
+            next += 1;
         }
     }
-    // Runs that lead to no terminal are left out; each count comes from the runs below it.
+
+    /// The terminal of `air` at each run's far end.
+    fn attach_terminals(&mut self, nodes: &mut [Node], air: AirDirection) {
+        for n in nodes {
+            let diameter = self.ducts.get(n.duct).map_or(0.0, |d| d.params.diameter_mm);
+            let reach = self.tol.max(self.units.to_units(AXIS_REACH * diameter));
+            for (ti, (h, p, at)) in self.terminals.iter().enumerate() {
+                if p.air == air && at.near(n.to, reach + p.units.to_units(p.model.neck_mm) / 2.0) {
+                    n.terminal = Some((*h, p.flow_m3h, p.model.pressure_drop_pa));
+                    if let Some(t) = self.touched.get_mut(ti) {
+                        *t = true;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    /// The runs that lead to a terminal as a network; the others are left out and named.
+    fn build(&self, ahu: Handle, air: AirDirection, nodes: &[Node]) -> DuctNetwork {
+        let kept: Vec<usize> = (0..nodes.len()).filter(|i| nodes.get(*i).is_some_and(|n| n.terminals_below > 0)).collect();
+        let dangling = (0..nodes.len())
+            .filter(|i| nodes.get(*i).is_some_and(|n| n.terminals_below == 0))
+            .filter_map(|i| nodes.get(i).and_then(|n| self.ducts.get(n.duct)).map(|d| d.handle))
+            .collect();
+        let index_of = |old: usize| kept.iter().position(|k| *k == old);
+        let mut segments = Vec::with_capacity(kept.len());
+        let mut handles = Vec::with_capacity(kept.len());
+        let mut main_chain = vec![false; nodes.len()];
+        for &old in &kept {
+            let Some(n) = nodes.get(old) else { continue };
+            let Some(d) = self.ducts.get(n.duct) else { continue };
+            let parent_chain = n.parent.is_none_or(|p| main_chain.get(p).copied().unwrap_or(false));
+            let on_trunk = parent_chain && !n.fittings.contains(&Fitting::TeeBranch);
+            if let Some(c) = main_chain.get_mut(old) {
+                *c = on_trunk;
+            }
+            segments.push(Segment {
+                parent: n.parent.and_then(index_of),
+                length_m: d.params.length_m(),
+                kind: segment_kind(d.params.kind, n.terminals_below, on_trunk),
+                fittings: n.fittings.clone(),
+                terminal: n.terminal.map(|(_, flow, pa)| Terminal { flow_m3h: flow, pressure_drop_pa: pa }),
+                diameter_mm: d.params.imposed.then_some(d.params.diameter_mm),
+            });
+            handles.push(d.handle);
+        }
+        DuctNetwork { ahu, air, network: Network { segments }, ducts: handles, dangling, unconnected: Vec::new() }
+    }
+}
+
+/// The fittings at the start of child `k` of a node, `many` when the node has several children and
+/// `angle` degrees the child turns away from the way the air was going.
+fn junction_fittings(many: bool, k: usize, angle: f64) -> Vec<Fitting> {
+    let mut fittings = Vec::new();
+    if many {
+        fittings.push(if k == 0 { Fitting::TeeStraight } else { Fitting::TeeBranch });
+    }
+    if !many || k > 0 {
+        if angle >= ELBOW_90_DEG {
+            fittings.push(Fitting::Elbow90);
+        } else if angle >= ELBOW_45_DEG {
+            fittings.push(Fitting::Elbow45);
+        }
+    }
+    fittings
+}
+
+/// The velocity class of a run: the one given, else a connection to one terminal, a main along the
+/// trunk, or a branch.
+fn segment_kind(kind: DuctKind, terminals_below: usize, on_trunk: bool) -> SegmentKind {
+    match kind {
+        DuctKind::Main => SegmentKind::Main,
+        DuctKind::Branch => SegmentKind::Branch,
+        DuctKind::Connection => SegmentKind::Connection,
+        DuctKind::Auto if terminals_below <= 1 => SegmentKind::Connection,
+        DuctKind::Auto if on_trunk => SegmentKind::Main,
+        DuctKind::Auto => SegmentKind::Branch,
+    }
+}
+
+/// How many terminals each run serves, itself and all the runs below it.
+fn count_terminals(nodes: &mut [Node]) {
     for i in (0..nodes.len()).rev() {
         let own = usize::from(nodes.get(i).is_some_and(|n| n.terminal.is_some()));
         let below = nodes.get(i).map_or(0, |n| n.terminals_below) + own;
@@ -261,41 +353,4 @@ fn read_network(
             parent.terminals_below += below;
         }
     }
-    let kept: Vec<usize> = (0..nodes.len()).filter(|i| nodes.get(*i).is_some_and(|n| n.terminals_below > 0)).collect();
-    let dangling = (0..nodes.len())
-        .filter(|i| nodes.get(*i).is_some_and(|n| n.terminals_below == 0))
-        .filter_map(|i| nodes.get(i).and_then(|n| ducts.get(n.duct)).map(|d| d.handle))
-        .collect();
-    let index_of = |old: usize| kept.iter().position(|k| *k == old);
-    let mut segments = Vec::with_capacity(kept.len());
-    let mut handles = Vec::with_capacity(kept.len());
-    let mut main_chain = vec![false; nodes.len()];
-    for &old in &kept {
-        let Some(n) = nodes.get(old) else { continue };
-        let Some(d) = ducts.get(n.duct) else { continue };
-        let parent_chain = n.parent.is_none_or(|p| main_chain.get(p).copied().unwrap_or(false));
-        let straight = !n.fittings.contains(&Fitting::TeeBranch);
-        let on_trunk = parent_chain && straight;
-        if let Some(c) = main_chain.get_mut(old) {
-            *c = on_trunk;
-        }
-        let kind = match d.params.kind {
-            DuctKind::Main => SegmentKind::Main,
-            DuctKind::Branch => SegmentKind::Branch,
-            DuctKind::Connection => SegmentKind::Connection,
-            DuctKind::Auto if n.terminals_below <= 1 => SegmentKind::Connection,
-            DuctKind::Auto if on_trunk => SegmentKind::Main,
-            DuctKind::Auto => SegmentKind::Branch,
-        };
-        segments.push(Segment {
-            parent: n.parent.and_then(index_of),
-            length_m: d.params.length_m(),
-            kind,
-            fittings: n.fittings.clone(),
-            terminal: n.terminal.map(|(_, flow, pa)| Terminal { flow_m3h: flow, pressure_drop_pa: pa }),
-            diameter_mm: d.params.imposed.then_some(d.params.diameter_mm),
-        });
-        handles.push(d.handle);
-    }
-    DuctNetwork { ahu, network: Network { segments }, ducts: handles, dangling, unconnected: Vec::new() }
 }

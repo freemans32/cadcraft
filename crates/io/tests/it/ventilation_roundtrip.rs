@@ -63,9 +63,10 @@ fn ducted() -> Drawing {
         name: "CTA1".into(),
         width_mm: 1500.0,
         depth_mm: 800.0,
-        air: AirDirection::Supply,
         flow_m3h: Some(500.0),
         pressure_pa: Some(120.0),
+        extract_flow_m3h: Some(450.0),
+        extract_pressure_pa: Some(90.0),
         label_height_mm: 100.0,
         units,
     };
@@ -105,6 +106,7 @@ fn ducts_and_units_survive_dxf_and_dwg_and_the_network_is_read_back() {
         assert_eq!(got[0].network, want[0].network, "{name}: the same network");
         let unit = back.model.iter().find_map(|e| cadcraft_doc::ahu_of(e)).expect("unit");
         assert_eq!((unit.name.as_str(), unit.flow_m3h, unit.pressure_pa), ("CTA1", Some(500.0), Some(120.0)), "{name}");
+        assert_eq!((unit.extract_flow_m3h, unit.extract_pressure_pa), (Some(450.0), Some(90.0)), "{name}");
     }
 }
 
