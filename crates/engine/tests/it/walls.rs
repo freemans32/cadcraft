@@ -78,8 +78,9 @@ fn walladd_at_the_command_line_takes_style_justification_and_points() {
         s.cmdline(t).unwrap();
     }
     assert!(s.running.is_none());
+    // One wall per segment, as in AutoCAD Architecture; Enter after three points closes.
     let all = walls(&s);
-    assert_eq!(all.len(), 1);
+    assert_eq!(all.len(), 3);
     let w = &all[0].1;
     assert_eq!((w.style.name.as_str(), w.justification), (PARTITION, WallJustification::Center));
     // The next wall takes the same settings.
@@ -87,33 +88,84 @@ fn walladd_at_the_command_line_takes_style_justification_and_points() {
         s.cmdline(t).unwrap();
     }
     let all = walls(&s);
-    assert_eq!(all.len(), 2);
-    assert_eq!((all[1].1.style.name.as_str(), all[1].1.justification), (PARTITION, WallJustification::Center));
+    assert_eq!(all.len(), 4);
+    assert_eq!((all[3].1.style.name.as_str(), all[3].1.justification), (PARTITION, WallJustification::Center));
 }
 
 #[test]
 fn walladd_skips_a_point_that_would_make_the_wall_impossible() {
     let mut s = metric();
-    for t in ["walladd", "0,0", "1000,0", "0,100", "1000,1000", ""] {
+    for t in ["walladd", "0,0", "1000,0", "0,100", "1000,1000"] {
         s.cmdline(t).unwrap();
     }
+    s.cancel();
     assert!(s.log.iter().any(|l| l.contains("turn this sharply")), "{:?}", s.log);
-    let all = walls(&s);
-    assert_eq!(all.len(), 1);
-    assert_eq!(path(&all[0].1), [(0.0, 0.0), (1000.0, 0.0), (1000.0, 1000.0)]);
+    assert_eq!(outline(&s), [vec![(0.0, 0.0), (1000.0, 0.0)], vec![(1000.0, 0.0), (1000.0, 1000.0)]]);
+}
+
+/// Each wall's path in drawing coordinates (the path is kept relative to the block reference).
+fn outline(s: &Session) -> Vec<Vec<(f64, f64)>> {
+    let d = s.doc().unwrap();
+    walls(s)
+        .iter()
+        .map(|(hd, w)| {
+            let EntityKind::Insert(i) = &d.entity(*hd).unwrap().kind else { panic!("a wall is a block reference") };
+            let (c, sn) = (i.rotation.cos(), i.rotation.sin());
+            w.path.iter().map(|p| ((i.insert.x + p.x * c - p.y * sn).round(), (i.insert.y + p.x * sn + p.y * c).round())).collect()
+        })
+        .collect()
+}
+
+const SQUARE: [[(f64, f64); 2]; 4] =
+    [[(0.0, 0.0), (4000.0, 0.0)], [(4000.0, 0.0), (4000.0, -3000.0)], [(4000.0, -3000.0), (0.0, -3000.0)], [(0.0, -3000.0), (0.0, 0.0)]];
+
+#[test]
+fn walladd_close_enter_or_a_click_on_the_start_point_closes_the_outline() {
+    for last in ["c", "", "0,0"] {
+        let mut s = metric();
+        for t in ["walladd", "0,0", "4000,0", "4000,-3000", "0,-3000", last] {
+            s.cmdline(t).unwrap();
+        }
+        assert!(s.running.is_none(), "{last:?} ends the command");
+        assert_eq!(outline(&s), SQUARE.map(|w| w.to_vec()).to_vec(), "{last:?}");
+        // Every corner is joined, the last one included.
+        assert!(walls(&s).iter().all(|(_, w)| w.joints.start.is_some() && w.joints.end.is_some()), "{last:?}");
+    }
 }
 
 #[test]
-fn walladd_close_draws_a_closed_wall() {
+fn walladd_adds_each_wall_at_once_so_the_next_point_snaps_to_it() {
+    use cadcraft_doc::Space;
+    use cadcraft_engine::snap::{mode, osnap};
     let mut s = metric();
-    for t in ["walladd", "0,0", "4000,0", "4000,-3000", "0,-3000", "c"] {
+    for t in ["walladd", "0,0", "4000,0", "4000,-3000"] {
+        s.cmdline(t).unwrap();
+    }
+    assert!(s.running.is_some());
+    assert_eq!(walls(&s).len(), 2, "the walls drawn so far are in the drawing");
+    let d = s.doc().unwrap();
+    let near = |m: u32, x: f64, y: f64| osnap(d, &Space::Model, cadcraft_geom::Vec2::new(x, y), 50.0, m, None, false).map(|h| (h.point.x, h.point.y));
+    // The start point and the middle of the first wall, from beside them.
+    assert_eq!(near(mode::END, 20.0, 15.0), Some((0.0, 0.0)));
+    assert_eq!(near(mode::MID, 2010.0, 10.0), Some((2000.0, 0.0)));
+}
+
+#[test]
+fn walladd_enter_or_escape_ends_an_open_run_and_undo_takes_back_the_last_wall() {
+    let mut s = metric();
+    for t in ["walladd", "0,0", "4000,0", ""] {
         s.cmdline(t).unwrap();
     }
     assert!(s.running.is_none());
-    let all = walls(&s);
-    assert_eq!(all.len(), 1);
-    assert!(all[0].1.closed);
-    assert_eq!(all[0].1.path.len(), 4);
+    assert_eq!(walls(&s).len(), 1, "Enter after two points draws one straight wall");
+    let mut s = metric();
+    for t in ["walladd", "0,0", "4000,0", "4000,-3000", "0,-3000", "u"] {
+        s.cmdline(t).unwrap();
+    }
+    assert_eq!(outline(&s), SQUARE[..2].iter().map(|w| w.to_vec()).collect::<Vec<_>>());
+    s.cancel();
+    assert!(s.running.is_none());
+    assert_eq!(walls(&s).len(), 2, "Escape keeps the walls already drawn");
 }
 
 #[test]
@@ -250,31 +302,16 @@ fn walladd_options_undo_and_style_list() {
         s.cmdline(t).unwrap();
     }
     assert!(s.running.is_none());
+    // Enter after three points closes the outline.
     let all = walls(&s);
-    assert_eq!(all.len(), 1);
     let w = &all[0].1;
     assert_eq!((w.style.name.as_str(), w.height), (BRICK, 2700.0));
-    assert_eq!(path(w), [(0.0, 0.0), (3000.0, 0.0), (3000.0, -3000.0)]);
+    assert_eq!(outline(&s), [vec![(0.0, 0.0), (3000.0, 0.0)], vec![(3000.0, 0.0), (3000.0, -3000.0)], vec![(3000.0, -3000.0), (0.0, 0.0)]]);
     // A height is a plain number of millimetres.
     for t in ["walladd", "h"] {
         s.cmdline(t).unwrap();
     }
     assert!(s.cmdline("10'").is_err() || s.log.iter().any(|l| l.contains("millimetres")));
-}
-
-#[test]
-fn walladd_stops_taking_points_at_the_limit_and_draws_on_enter() {
-    let mut s = metric();
-    s.cmdline("walladd").unwrap();
-    for i in 0..70 {
-        s.cmdline(&format!("{},{}", i * 1000, (i % 2) * 1000)).unwrap();
-    }
-    assert!(s.log.iter().any(|l| l.contains("at most 64 points")), "{:?}", s.log.iter().rev().take(3).collect::<Vec<_>>());
-    s.cmdline("").unwrap();
-    assert!(s.running.is_none());
-    let all = walls(&s);
-    assert_eq!(all.len(), 1);
-    assert_eq!(all[0].1.path.len(), 64);
 }
 
 #[test]
