@@ -205,6 +205,14 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
                         app.session.echo(w.to_string());
                     }
                 }
+                for sp in r["spaces"].as_array().into_iter().flatten() {
+                    app.session.echo(crate::tf!(
+                        "{name}: the terminals supply {supplied} m³/h, the space needs {needed} m³/h",
+                        name = sp["space"].as_str().unwrap_or(""),
+                        supplied = format!("{:.0}", sp["supplied"].as_f64().unwrap_or(0.0)),
+                        needed = format!("{:.0}", sp["needed"].as_f64().unwrap_or(0.0))
+                    ));
+                }
             }
             Err(e) => app.session.echo(e.to_string()),
         }

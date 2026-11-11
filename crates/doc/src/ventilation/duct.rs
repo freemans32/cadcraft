@@ -246,6 +246,21 @@ fn reads_upside_down(rotation: f64) -> bool {
     a > std::f64::consts::FRAC_PI_2 + 1e-9 && a <= 3.0 * std::f64::consts::FRAC_PI_2 + 1e-9
 }
 
+/// How far from its axis, in diameters, a point may be and still be on a duct: snapping to the
+/// lines drawn for a duct lands a radius off its axis.
+pub(super) const AXIS_REACH: f64 = 0.55;
+
+/// Where the duct from `a` to `b` of `diameter` (drawing units) is cut by a branch ending or
+/// starting at `at`: the foot of `at` on the axis, when `at` is within [`AXIS_REACH`] diameters (or
+/// `tol`) of the axis and more than `tol` from either end. `None` otherwise.
+pub(super) fn interior_cut(a: Vec2, b: Vec2, diameter: f64, at: Vec2, tol: f64) -> Option<Vec2> {
+    let length = a.dist(b);
+    let along = (b - a).normalized();
+    let t = (at - a).dot(along);
+    let across = (at - a).cross(along).abs();
+    (across <= tol.max(AXIS_REACH * diameter) && t > tol && t < length - tol).then(|| a + along * t)
+}
+
 impl crate::Drawing {
     /// Adds unit `p` centred at `at`, its width turned `rotation` radians from the x axis.
     pub fn add_ahu(&mut self, space: &crate::Space, mut common: crate::Common, p: &AhuParams, at: Vec2, rotation: f64) -> Result<crate::Handle> {
@@ -306,18 +321,12 @@ impl crate::Drawing {
 
     /// Cuts the duct under `at` in two, when `at` is inside it and not at an end, so a branch can
     /// start there: the first part keeps `h`, the second is new. `None` when `at` is not on the
-    /// duct's interior (within `tol` drawing units).
+    /// duct's interior (see [`interior_cut`]).
     pub fn split_duct_at(&mut self, space: &crate::Space, h: crate::Handle, at: Vec2, tol: f64) -> Result<Option<crate::Handle>> {
         let Some((p, a, b)) = self.duct_ends(h) else { return Ok(None) };
-        let along = (b - a).normalized();
-        let t = (at - a).dot(along);
-        let across = (at - a).cross(along).abs();
-        if !(across <= tol && t > tol && t < a.dist(b) - tol) {
-            return Ok(None);
-        }
-        let cut = a + along * t;
+        let Some(cut) = interior_cut(a, b, p.units.to_units(p.diameter_mm), at, tol) else { return Ok(None) };
         let common = self.entity(h).ok_or(crate::DocError::NoEntity(h))?.common.clone();
-        let first = DuctParams { length: t, ..p.clone() };
+        let first = DuctParams { length: a.dist(cut), ..p.clone() };
         self.regenerate_duct(h, &first)?;
         let second = self.add_duct(space, common, p, cut, b)?;
         Ok(Some(second))

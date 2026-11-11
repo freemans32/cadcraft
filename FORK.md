@@ -57,7 +57,7 @@ Remotes : `origin` = ce fork, `upstream` = `storytold/cadcraft`. Ne pousse jamai
 
 Cette section sert à reprendre le travail dans une nouvelle conversation, avec n'importe quelle IA. Elle est mise à jour en continu (règle n° 2) : date, ce qui est fait, ce qui reste.
 
-*Dernière mise à jour : 11 novembre 2026 (correctif : nombre d'occupants saisi dans la palette).*
+*Dernière mise à jour : 11 novembre 2026 (correctif : dimensionnement des gaines, tés au milieu d'un tronçon).*
 
 ### Fait
 
@@ -163,6 +163,7 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
      - Vérifié : tests unitaires (9 + 1), intégration moteur (6, ligne de commande comprise), aller-retour DXF et DWG avec relecture du réseau, test de la palette, capture d'écran réelle du CLI (`cadcraft-cli`, dessin en mm via `INSUNITS 4`), fmt, clippy -D warnings, `cargo test --workspace` en debug, layers, assets. Pas vérifié : wasm, essai dans l'interface graphique.
      - Pas fait (limites) : accessoires (registre, clapet coupe-feu, silencieux, manchette) ; réducteurs aux changements de diamètre (les raccords sont déduits avant le dimensionnement) ; recalcul des étiquettes après MOVE/STRETCH (relancer `DUCTSIZE`) ; un STRETCH d'un tronçon ne met pas sa longueur à jour ; un `Undo` pendant `DUCTADD` ne rattache pas un tronçon coupé ; `DUCTEDIT` sans version interactive.
    - **Bug corrigé le 11 novembre** (signalé par Guillaume : impossible de saisir 20 occupants dans la palette) : la palette envoie `20.0` et le moteur n'acceptait qu'un entier. `u32_param` (`crates/engine/src/cmd/hvac.rs`) accepte maintenant un nombre entier écrit avec une virgule ; deux tests qui échouaient avant.
+   - **Bug corrigé le 11 novembre** (signalé par Guillaume, capture de la salle de sport : « le dimensionnement ne fonctionne plus et la CTA ne prend pas le débit du local ») : une gaine qui finit au milieu d'un tronçon n'était pas un té (le tronçon n'avait pas d'extrémité là), et les points d'accrochage d'une gaine sont sur ses bords, à un rayon de l'axe, donc hors tolérance. Corrigé : `Drawing::split_duct_taps` (appelé par `DUCTSIZE`) coupe les tronçons là où une gaine finit dessus ou une bouche s'y trouve ; les tolérances de raccord suivent le diamètre (0,55 × Ø). `DUCTSIZE` donne les coordonnées dans ses messages, le nombre de coupes (`cuts`) et compare chaque local à ses bouches (`spaces`). La CTA prend la somme des débits des bouches, pas le débit du local : dans la capture, 8 bouches de 300 m³/h = 2 400 m³/h pour un local à 1 200, ce que `DUCTSIZE` signale maintenant. Tests : 4 en `doc`, 1 en moteur.
    - Ensuite : étape 3b (accessoires), puis étape 4 (note de calcul et métré par local), puis étape 5.
 5. **Export IFC** (BIM).
 6. Publier en amont, plus tard : une issue de cadrage chez `storytold/cadcraft`, puis les PR des murs une par une.

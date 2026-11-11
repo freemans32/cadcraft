@@ -200,3 +200,49 @@ fn a_duct_started_near_the_face_of_a_unit_is_connected_to_it() {
     add_terminal(&mut far, (3000.0, 0.0), 100.0);
     assert!(far.duct_networks().unwrap()[0].network.segments.is_empty());
 }
+
+/// The unit turned a quarter turn at the origin, a duct up from its face that ends in the middle of
+/// a run laid between two terminals (the run has no end there).
+fn stub_into_a_run(offset_mm: f64) -> Drawing {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, std::f64::consts::FRAC_PI_2).unwrap();
+    add_duct(&mut d, (-2000.0, 2500.0), (2000.0, 2500.0));
+    add_duct(&mut d, (0.0, 500.0), (offset_mm, 2500.0));
+    add_terminal(&mut d, (-2000.0, 2500.0), 150.0);
+    add_terminal(&mut d, (2000.0, 2500.0), 150.0);
+    d
+}
+
+#[test]
+fn a_duct_ending_in_the_middle_of_a_run_is_not_a_tee_until_the_run_is_cut() {
+    let mut d = stub_into_a_run(0.0);
+    assert!(d.duct_networks().unwrap()[0].network.segments.is_empty(), "read as it is, the stub leads nowhere");
+    assert_eq!(d.split_duct_taps(&Space::Model).unwrap(), 1);
+    let net = d.duct_networks().unwrap().remove(0);
+    assert_eq!(net.network.segments.len(), 3, "the stub and the two halves of the run");
+    assert!(net.unconnected.is_empty() && net.dangling.is_empty());
+    let report = size_network(&net.network, &DesignCriteria::default()).unwrap();
+    assert!((report.total_flow_m3h - 300.0).abs() < 1e-9);
+    assert_eq!(d.split_duct_taps(&Space::Model).unwrap(), 0, "cutting twice changes nothing");
+}
+
+#[test]
+fn a_duct_snapped_to_the_side_of_a_run_still_meets_it() {
+    // Snapping to the lines of a duct lands a radius (100 mm) off its axis.
+    let mut d = stub_into_a_run(100.0);
+    assert_eq!(d.split_duct_taps(&Space::Model).unwrap(), 1);
+    assert_eq!(d.duct_networks().unwrap()[0].network.segments.len(), 3);
+}
+
+#[test]
+fn a_terminal_in_the_middle_of_a_run_cuts_it() {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    add_duct(&mut d, (500.0, 0.0), (6000.0, 0.0));
+    add_terminal(&mut d, (3000.0, 0.0), 100.0);
+    add_terminal(&mut d, (6000.0, 0.0), 100.0);
+    assert_eq!(d.split_duct_taps(&Space::Model).unwrap(), 1);
+    let net = d.duct_networks().unwrap().remove(0);
+    assert_eq!(net.network.segments.len(), 2);
+    assert!(net.unconnected.is_empty());
+}

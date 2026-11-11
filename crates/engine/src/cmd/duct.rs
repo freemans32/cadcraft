@@ -507,6 +507,36 @@ fn governing_name(g: Governing) -> &'static str {
     }
 }
 
+/// Where object `h` is, for a message.
+fn place(d: &Drawing, h: Handle) -> String {
+    match d.entity(h).map(|e| &e.kind) {
+        Some(EntityKind::Insert(i)) => format!("({:.0}, {:.0})", i.insert.x, i.insert.y),
+        _ => h.hex(),
+    }
+}
+
+/// The spaces whose terminals do not supply the flow the space needs: name, needed, supplied (m³/h).
+fn space_mismatches(d: &Drawing) -> Vec<Value> {
+    let terminals: Vec<(Vec2, f64)> = d
+        .model
+        .iter()
+        .filter_map(|e| match (&e.kind, cadcraft_doc::air_terminal_of(e)) {
+            (EntityKind::Insert(i), Some(t)) => Some((Vec2::new(i.insert.x, i.insert.y), t.flow_m3h)),
+            _ => None,
+        })
+        .collect();
+    let mut out = Vec::new();
+    for e in d.model.iter() {
+        let Some((sp, outline)) = d.space_outline(e.handle) else { continue };
+        let Ok(need) = sp.flow() else { continue };
+        let supplied: f64 = terminals.iter().filter(|(p, _)| cadcraft_geom::point_in_polygon(&outline, *p)).map(|(_, f)| f).sum();
+        if (supplied - need).abs() > 0.05 * need.max(1.0) && supplied > 0.0 {
+            out.push(json!({ "space": sp.name, "needed": need, "supplied": supplied }));
+        }
+    }
+    out
+}
+
 fn criteria(p: &Value) -> Result<DesignCriteria> {
     const CMD: &str = "ductsize";
     let mut c = DesignCriteria::default();
@@ -530,6 +560,9 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => None,
         Some(v) => Some(v.as_str().and_then(Handle::parse_hex).ok_or_else(|| bad(CMD, "`ahu` must be a handle"))?),
     };
+    // Ducts drawn across one another, or a terminal on a run, are cut so their ends meet.
+    let space = s.space();
+    let cuts = s.doc_mut()?.split_duct_taps(&space).map_err(doc_err)?;
     let nets: Vec<_> = s.doc()?.duct_networks().map_err(doc_err)?.into_iter().filter(|n| only.is_none_or(|h| h == n.ahu)).collect();
     if nets.is_empty() {
         return Err(other("There is no air handling unit to size: place one with AHUADD."));
@@ -538,10 +571,11 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
     let mut sized = Vec::new();
     for net in &nets {
         let mut warnings: Vec<String> = Vec::new();
-        warnings.extend(net.dangling.iter().map(|h| format!("duct {} leads to no terminal and was left out", h.hex())));
-        warnings.extend(net.unconnected.iter().map(|h| format!("terminal {} is reached by no duct", h.hex())));
+        let d = s.doc()?;
+        warnings.extend(net.dangling.iter().map(|h| format!("the duct at {} leads to no terminal and was left out", place(d, *h))));
+        warnings.extend(net.unconnected.iter().map(|h| format!("the terminal at {} is reached by no duct", place(d, *h))));
         if net.network.segments.is_empty() {
-            warnings.push("no duct leads from this unit to a terminal".into());
+            warnings.push("no duct leads from this unit to a terminal: a duct must start on the unit, and the ducts meet end to end".into());
             out.push(
                 json!({ "ahu": net.ahu.hex(), "totalFlow": 0.0, "requiredPressure": 0.0, "criticalPath": [], "segments": [], "warnings": warnings }),
             );
@@ -567,9 +601,10 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
         }));
         sized.push((net, report));
     }
+    let mismatches = space_mismatches(s.doc()?);
     let d = s.doc_mut()?;
     for (net, report) in &sized {
         d.apply_duct_report(net, report).map_err(doc_err)?;
     }
-    Ok(json!({ "networks": out }))
+    Ok(json!({ "networks": out, "cuts": cuts, "spaces": mismatches }))
 }

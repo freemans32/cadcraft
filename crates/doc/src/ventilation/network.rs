@@ -4,6 +4,7 @@
 use cadcraft_geom::Vec2;
 use cadcraft_hvac::{Fitting, Network, NetworkReport, Segment, SegmentKind, Terminal};
 
+use super::duct::{AXIS_REACH, interior_cut};
 use super::{AhuParams, DuctKind, DuctParams, HvacUnits, TerminalParams, ahu_of, air_terminal_of, invalid};
 use crate::{EntityKind, Handle, Result};
 
@@ -76,11 +77,13 @@ impl crate::Drawing {
         let unit_tol = units.to_units(UNIT_MEET_MM);
         for (handle, p, at, rotation) in &ahus {
             let half = p.half();
-            let inside = |q: Vec2| {
+            // A duct end within a radius of the unit's face is on it (snapping lands on a line's edge).
+            let inside = |q: Vec2, diameter_mm: f64| {
                 let l = (q - *at).rotate(-rotation);
-                l.x.abs() <= half.x + unit_tol && l.y.abs() <= half.y + unit_tol
+                let reach = unit_tol.max(units.to_units(AXIS_REACH * diameter_mm));
+                l.x.abs() <= half.x + reach && l.y.abs() <= half.y + reach
             };
-            let net = read_network(*handle, &ducts, &mut taken, &terminals, &mut touched_terminals, tol, inside);
+            let net = read_network(*handle, &ducts, &mut taken, &terminals, &mut touched_terminals, (units, tol), inside);
             out.push(net);
         }
         // A terminal left unreached by every unit is reported on each network: say so once, on the first.
@@ -89,6 +92,48 @@ impl crate::Drawing {
             first.unconnected = lost;
         }
         Ok(out)
+    }
+
+    /// Cuts every duct in model space where another duct ends on it, or a terminal sits on it, so
+    /// the pieces meet at their ends and the network can be read. Returns how many cuts it made.
+    /// Run it before reading the networks of a drawing whose ducts were not all drawn with DUCTADD.
+    pub fn split_duct_taps(&mut self, space: &crate::Space) -> Result<usize> {
+        let units = HvacUnits::of(self);
+        let tol = units.to_units(MEET_MM);
+        let mut ducts: Vec<(Handle, Vec2, Vec2, f64)> = Vec::new();
+        let mut points: Vec<Vec2> = Vec::new();
+        for e in self.model.iter() {
+            if let Some((p, a, b)) = self.duct_ends(e.handle) {
+                if ducts.len() >= MAX_DUCTS {
+                    return Err(invalid(format!("The drawing has more than {MAX_DUCTS} ducts.")));
+                }
+                ducts.push((e.handle, a, b, p.units.to_units(p.diameter_mm)));
+                points.extend([a, b]);
+            } else if let (Some(_), EntityKind::Insert(i)) = (air_terminal_of(e), &e.kind) {
+                points.push(Vec2::new(i.insert.x, i.insert.y));
+            }
+        }
+        let mut cuts = 0;
+        for p in points {
+            // Ducts cut on the way are appended: the point is tried against them too.
+            let mut i = 0;
+            while let Some(&(h, a, b, d)) = ducts.get(i) {
+                i += 1;
+                let Some(cut) = interior_cut(a, b, d, p, tol) else { continue };
+                if ducts.len() >= MAX_DUCTS {
+                    return Err(invalid(format!("The drawing would have more than {MAX_DUCTS} ducts.")));
+                }
+                if let Some(new) = self.split_duct_at(space, h, p, tol)? {
+                    if let Some(first) = ducts.get_mut(i - 1) {
+                        first.2 = cut;
+                    }
+                    ducts.push((new, cut, b, d));
+                    cuts += 1;
+                    break;
+                }
+            }
+        }
+        Ok(cuts)
     }
 
     /// Gives every duct of `net` its diameter, flow and velocity from `report`, and the unit the
@@ -122,8 +167,8 @@ fn read_network(
     taken: &mut [bool],
     terminals: &[(Handle, TerminalParams, Vec2)],
     touched: &mut [bool],
-    tol: f64,
-    inside: impl Fn(Vec2) -> bool,
+    (units, tol): (HvacUnits, f64),
+    inside: impl Fn(Vec2, f64) -> bool,
 ) -> DuctNetwork {
     let mut nodes: Vec<Node> = Vec::new();
     // Ducts leaving the unit.
@@ -131,9 +176,9 @@ fn read_network(
         if taken.get(i).copied().unwrap_or(true) {
             continue;
         }
-        let (from, to) = if inside(d.a) {
+        let (from, to) = if inside(d.a, d.params.diameter_mm) {
             (d.a, d.b)
-        } else if inside(d.b) {
+        } else if inside(d.b, d.params.diameter_mm) {
             (d.b, d.a)
         } else {
             continue;
@@ -147,14 +192,17 @@ fn read_network(
     let mut next = 0;
     while let Some(n) = nodes.get(next) {
         let (here, to, from) = (next, n.to, n.from);
+        let parent_diameter = ducts.get(n.duct).map_or(0.0, |d| d.params.diameter_mm);
         let mut children: Vec<(usize, Vec2, Vec2)> = Vec::new();
         for (i, d) in ducts.iter().enumerate() {
             if taken.get(i).copied().unwrap_or(true) {
                 continue;
             }
-            let (f, t) = if d.a.near(to, tol) {
+            // Ends meet within a radius of the wider duct: snapping lands on a line's edge.
+            let meet = tol.max(units.to_units(AXIS_REACH * d.params.diameter_mm.max(parent_diameter)));
+            let (f, t) = if d.a.near(to, meet) {
                 (d.a, d.b)
-            } else if d.b.near(to, tol) {
+            } else if d.b.near(to, meet) {
                 (d.b, d.a)
             } else {
                 continue;
@@ -189,7 +237,8 @@ fn read_network(
     // The terminal at each run's far end.
     for n in &mut nodes {
         for (ti, (h, p, at)) in terminals.iter().enumerate() {
-            let reach = tol + p.units.to_units(p.model.neck_mm) / 2.0;
+            let diameter = ducts.get(n.duct).map_or(0.0, |d| d.params.diameter_mm);
+            let reach = tol.max(units.to_units(AXIS_REACH * diameter)) + p.units.to_units(p.model.neck_mm) / 2.0;
             if at.near(n.to, reach) {
                 n.terminal = Some((*h, p.flow_m3h, p.model.pressure_drop_pa));
                 if let Some(t) = touched.get_mut(ti) {

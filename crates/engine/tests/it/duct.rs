@@ -137,3 +137,34 @@ fn ductsize_says_what_it_cannot_size() {
     assert!(s.execute("ductsize", &json!({"ahu": "ZZZ"})).is_err());
     assert!(s.execute("ductsize", &json!({"maxGradient": -1})).is_err());
 }
+
+/// The sports hall: a unit turned a quarter turn, a duct up from it drawn first, then a run
+/// along the terminals that crosses the duct's end.
+#[test]
+fn ductsize_cuts_a_run_the_stub_ends_on_and_compares_the_terminals_with_the_space() {
+    let mut s = metric();
+    s.execute("spaceadd", &json!({"points": [[-4000, 0], [4000, 0], [4000, 6000], [-4000, 6000]], "name": "Salle", "flow": 1200})).unwrap();
+    let unit = s.execute("ahuadd", &json!({"at": [0, 1000], "rotation": 90})).unwrap();
+    // Up from the unit's face to the middle of the run laid afterwards, its end a radius off the axis.
+    s.execute("ductadd", &json!({"points": [[0, 1800], [100, 4000]]})).unwrap();
+    s.execute("ductadd", &json!({"points": [[-3000, 4000], [-1000, 4000], [1000, 4000], [3000, 4000]]})).unwrap();
+    for x in [-3000, -1000, 1000, 3000] {
+        s.execute("airterminaladd", &json!({"at": [x, 4000], "flow": 300})).unwrap();
+    }
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    assert_eq!(r["cuts"], 1, "{r}");
+    let net = &r["networks"][0];
+    assert_eq!(net["ahu"], unit["handle"]);
+    assert_eq!(net["totalFlow"], 1200.0, "{net}");
+    assert_eq!(net["segments"].as_array().unwrap().len(), 5, "the stub and the run's four pieces");
+    assert!(net["warnings"].as_array().unwrap().is_empty(), "{net}");
+    assert!(r["spaces"].as_array().unwrap().is_empty(), "1200 m³/h supplied, 1200 needed");
+    // Twice the terminals: the space is said to get more than it needs.
+    for x in [-3000, 3000] {
+        s.execute("airterminaladd", &json!({"at": [x, 500], "flow": 300})).unwrap();
+    }
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    assert_eq!(r["spaces"][0]["supplied"], 1800.0);
+    assert_eq!(r["spaces"][0]["needed"], 1200.0);
+    assert!(r["networks"][0]["warnings"][0].as_str().unwrap().contains("reached by no duct"));
+}

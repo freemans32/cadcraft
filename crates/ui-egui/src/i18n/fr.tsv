@@ -1131,6 +1131,7 @@
 	Sizing	Dimensionnement
 	Velocity	Vitesse
 	Ducts sized: {flow} m³/h, {pa} Pa	Gaines dimensionnées : {flow} m³/h, {pa} Pa
+	{name}: the terminals supply {supplied} m³/h, the space needs {needed} m³/h	{name} : les bouches soufflent {supplied} m³/h, le local en demande {needed} m³/h
 	Ducts	Gaines
 	Coming next: drawing and sizing	À venir : tracé et dimensionnement
 	Use	Usage
