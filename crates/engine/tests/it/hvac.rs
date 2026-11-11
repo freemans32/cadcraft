@@ -240,3 +240,15 @@ fn airterminaledit_at_the_command_line() {
     let t = &terminals(&s)[0].1;
     assert_eq!((t.model.name.as_str(), t.flow_m3h), ("SQ600-200", 350.0));
 }
+
+#[test]
+fn a_count_written_with_a_decimal_point_is_a_whole_number() {
+    let mut s = metric();
+    let r = s.execute("spaceadd", &json!({"points": ROOM, "occupants": 6})).unwrap();
+    // A palette field sends 20.0 for the 20 typed in it.
+    s.execute("spaceedit", &json!({"handle": r["handle"], "occupants": 20.0})).unwrap();
+    assert_eq!(space_of(s.doc().unwrap().entity(h(&r)).unwrap()).unwrap().occupants, 20);
+    for bad in [json!(20.5), json!(-1.0), json!(1e12), json!("20")] {
+        assert!(s.execute("spaceedit", &json!({"handle": r["handle"], "occupants": bad})).is_err(), "{bad}");
+    }
+}

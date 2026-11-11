@@ -57,7 +57,7 @@ Remotes : `origin` = ce fork, `upstream` = `storytold/cadcraft`. Ne pousse jamai
 
 Cette section sert à reprendre le travail dans une nouvelle conversation, avec n'importe quelle IA. Elle est mise à jour en continu (règle n° 2) : date, ce qui est fait, ce qui reste.
 
-*Dernière mise à jour : 11 novembre 2026 (gaines CVC, étape 3a : CTA, tronçons droits, dimensionnement).*
+*Dernière mise à jour : 11 novembre 2026 (correctif : nombre d'occupants saisi dans la palette).*
 
 ### Fait
 
@@ -162,6 +162,7 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
      - Interface : l'onglet CVC a les boutons CTA, Gaine, Dimensionner ; la palette Propriétés a un groupe « Gaine » (diamètre fixé par Dimensionnement/Utilisateur, diamètre, type, air, longueur, débit, vitesse) ; double-clic sur une gaine ouvre Propriétés. Libellés fr et zh.
      - Vérifié : tests unitaires (9 + 1), intégration moteur (6, ligne de commande comprise), aller-retour DXF et DWG avec relecture du réseau, test de la palette, capture d'écran réelle du CLI (`cadcraft-cli`, dessin en mm via `INSUNITS 4`), fmt, clippy -D warnings, `cargo test --workspace` en debug, layers, assets. Pas vérifié : wasm, essai dans l'interface graphique.
      - Pas fait (limites) : accessoires (registre, clapet coupe-feu, silencieux, manchette) ; réducteurs aux changements de diamètre (les raccords sont déduits avant le dimensionnement) ; recalcul des étiquettes après MOVE/STRETCH (relancer `DUCTSIZE`) ; un STRETCH d'un tronçon ne met pas sa longueur à jour ; un `Undo` pendant `DUCTADD` ne rattache pas un tronçon coupé ; `DUCTEDIT` sans version interactive.
+   - **Bug corrigé le 11 novembre** (signalé par Guillaume : impossible de saisir 20 occupants dans la palette) : la palette envoie `20.0` et le moteur n'acceptait qu'un entier. `u32_param` (`crates/engine/src/cmd/hvac.rs`) accepte maintenant un nombre entier écrit avec une virgule ; deux tests qui échouaient avant.
    - Ensuite : étape 3b (accessoires), puis étape 4 (note de calcul et métré par local), puis étape 5.
 5. **Export IFC** (BIM).
 6. Publier en amont, plus tard : une issue de cadrage chez `storytold/cadcraft`, puis les PR des murs une par une.

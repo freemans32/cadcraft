@@ -481,6 +481,19 @@ mod hvac_tests {
     }
 
     #[test]
+    fn a_space_takes_the_number_of_occupants_typed_in_the_palette() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        let r = app.run("spaceadd", json!({ "points": [[0, 0], [6000, 0], [6000, 5000], [0, 5000]], "occupants": 6 })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+        app.session.set_selection(vec![h]);
+        let mut hn = palette(app);
+        type_into(&mut hn, "6", "20");
+        let p = cadcraft_doc::space_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!(p.occupants, 20);
+    }
+
+    #[test]
     fn selected_terminals_take_a_new_flow_together() {
         let mut app = CadApp::new(Session::new(), Services::default());
         *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();

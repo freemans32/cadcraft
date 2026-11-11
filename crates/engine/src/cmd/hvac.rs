@@ -141,7 +141,12 @@ fn add_space(s: &mut Session, p: SpaceParams) -> Result<(Handle, f64, f64)> {
 fn u32_param(cmd: &str, p: &Value, key: &str, default: u32) -> Result<u32> {
     match p.get(key) {
         None | Some(Value::Null) => Ok(default),
-        Some(v) => v.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| bad(cmd, format!("`{key}` must be a whole number"))),
+        // A whole number, written 20 or 20.0: a palette field sends the second.
+        Some(v) => v
+            .as_u64()
+            .or_else(|| v.as_f64().filter(|f| f.fract() == 0.0 && (0.0..=f64::from(u32::MAX)).contains(f)).map(|f| f as u64))
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or_else(|| bad(cmd, format!("`{key}` must be a whole number"))),
     }
 }
 
