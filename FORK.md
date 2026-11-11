@@ -18,6 +18,10 @@ Avant toute modification de code, de branche ou de script, présente ce que tu c
 
 À chaque étape terminée (commit, push, décision de Guillaume, question posée, problème rencontré), mets à jour la section « Où nous en sommes » et pousse-la sur `perso` dans la foulée, sans attendre la fin de la session. Une conversation peut s'arrêter à tout moment : ce fichier doit toujours permettre de reprendre là où on en était. Cette mise à jour fait partie de la tâche et ne demande pas d'accord séparé.
 
+## Règle n° 3 : économiser le quota
+
+Guillaume a un forfait limité. Lis seulement les passages utiles (`grep`, `sed -n`), filtre les sorties de compilation et de tests (`| grep -E "FAILED|panicked|^error"`), lance seulement les tests du crate touché, puis la suite complète une fois avant de fusionner. Une étape par conversation. Si ça économise, exécute sur son PC (il l'autorise).
+
 ## Les branches
 
 | Branche | Rôle | Règles |
@@ -53,7 +57,7 @@ Remotes : `origin` = ce fork, `upstream` = `storytold/cadcraft`. Ne pousse jamai
 
 Cette section sert à reprendre le travail dans une nouvelle conversation, avec n'importe quelle IA. Elle est mise à jour en continu (règle n° 2) : date, ce qui est fait, ce qui reste.
 
-*Dernière mise à jour : 10 novembre 2026 (raccords de murs L, T, X).*
+*Dernière mise à jour : 11 novembre 2026 (WALLADD : un mur par segment, accrochage et fermeture).*
 
 ### Fait
 
@@ -88,8 +92,9 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
      - Méthode : les `.tsv` de traduction sont fusionnés en mode `union` (`echo '*.tsv merge=union' > .git/info/attributes`), puis un commit `perso:` retire les doublons (`es.tsv`). `Cargo.lock` : seule la version du paquet change (0.17.0 → 0.19.0), cargo le fait seul.
      - Plusieurs PR retirées pour une seule ligne (ex. #1452 : traduction chinoise manquante ; #1692 : import en double) pourraient revenir avec un petit commit de correction `perso:`. À proposer.
      - Le tableau complet (`perso/pr-integrees.tsv`) sera ajouté avec les fusions.
-   - Ensuite : proposer le script `cadcraft-maj` (worktree `/mnt/Jeux/artcraft/cadcraft-perso`, binaire et lanceur « CADCraft Perso »).
-2. Guillaume teste la PR 1 des murs sur son PC (commande `walladd` / « Mur »).
+2. Guillaume teste la PR 1 des murs sur son PC (commande `walladd` / « Mur ») : relancer `cadcraft-maj`.
+   - **11 novembre, signalé par Guillaume (vidéo)** : en traçant un carré en une seule commande, aucun point d'accrochage sur les murs en cours, car WALLADD ne créait le mur qu'à la fin. **Corrigé, validé par Guillaume** : commit `feat/murs` « walls: add each wall as it is drawn, so it snaps and joins at once », fusionné dans `feat/gaines` et `perso`. Un mur par segment, ajouté dès le clic (comme AutoCAD Architecture) ; raccords au fil du tracé ; clic sur le point de départ, `C` ou Entrée (à partir de 3 points) ferment le contour ; Entrée avec 2 points termine un mur droit ; Échap garde les murs posés ; `U` retire le dernier. L'appel JSON `walladd` avec plusieurs points crée toujours un seul mur. Vérifié : tests de `cadcraft-engine` (dont accrochage extrémité/milieu pendant le tracé et raccord des 4 angles), clippy, fmt, sur `feat/murs` et `perso`. Pas vérifié : wasm, essai dans l'interface.
+   - Question de Guillaume : la touche Tab ne change pas la justification (Tab fait défiler les accrochages) ; justification par `J` avant le 1er point ou WALLEDIT. Basculer en cours de tracé : proposé, pas demandé.
 
 ### Ensuite (chaque étape à présenter et faire valider avant de coder)
 
