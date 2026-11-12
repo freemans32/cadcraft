@@ -437,10 +437,15 @@ impl Scan<'_> {
                 continue;
             };
             // A direction fixed by hand is the only one tried; else each in turn, the terminals deciding.
-            // A duct on a collar takes the collar's direction.
+            // A direction fixed by hand is the only one tried. A duct on a collar tries the collar's
+            // direction first, then the others: a collar set the other way round from the terminals
+            // does not leave the duct unread.
             let candidates: Vec<usize> = match (d.params.air_set, port(from)) {
                 (true, _) => airs.iter().position(|a| *a == d.params.air).into_iter().collect(),
-                (false, Some(role)) => airs.iter().position(|a| *a == role).into_iter().collect(),
+                (false, Some(role)) => {
+                    let first = airs.iter().position(|a| *a == role);
+                    first.into_iter().chain((0..airs.len()).filter(|k| Some(*k) != first)).collect()
+                }
                 (false, None) => (0..airs.len()).collect(),
             };
             let mut chosen = None;

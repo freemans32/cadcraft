@@ -470,12 +470,12 @@ fn ducts_left_on_auto_take_the_direction_of_the_terminals_they_serve() {
     assert_eq!(d.entity(duct.0).unwrap().common.layer, DUCT_EXTRACT_LAYER);
     assert_eq!(ahu_of(d.model.iter().find(|e| ahu_of(e).is_some()).unwrap()).unwrap().extract_flow_m3h, Some(250.0));
     let _ = t;
-    // The collar names the direction: a terminal that says otherwise does not turn the network round.
+    // The collar is tried first, but a terminal that says otherwise still turns the network round.
     let (mut tp, ..) = (air_terminal_of(d.model.iter().find(|e| air_terminal_of(e).is_some()).unwrap()).unwrap(), 0);
     tp.air = AirDirection::Supply;
     let h = d.model.iter().find(|e| air_terminal_of(e).is_some()).unwrap().handle;
     d.regenerate_air_terminal(h, &tp).unwrap();
-    assert_eq!(d.duct_networks().unwrap()[0].air, AirDirection::Extract);
+    assert_eq!(d.duct_networks().unwrap()[0].air, AirDirection::Supply);
 }
 
 #[test]
@@ -1067,12 +1067,12 @@ fn a_duct_on_a_collar_takes_the_direction_of_that_collar_and_the_roles_can_be_ch
     for layer in [AIR_SUPPLY_LAYER, AIR_EXTRACT_LAYER, AIR_FRESH_LAYER, AIR_EXHAUST_LAYER] {
         assert!(marks.iter().any(|p| p.layer == layer && matches!(p.kind, EntityKind::Text(_))), "{layer}");
     }
-    // Turning the top right collar into an extract one: both ducts there are now extract ones.
+    // Turning the top right collar into an extract one: its supply terminal still wins, so nothing is left unread.
     let mut p = d.model.iter().find_map(|e| ahu_of(e)).unwrap();
     p.ports = vec![AirDirection::Fresh, AirDirection::Exhaust, AirDirection::Extract, AirDirection::Extract];
     let h = d.model.iter().find(|e| ahu_of(e).is_some()).unwrap().handle;
     d.regenerate_ahu(h, &p).unwrap();
-    assert_eq!(airs(&d), [AirDirection::Extract, AirDirection::Fresh]);
+    assert_eq!(airs(&d), [AirDirection::Supply, AirDirection::Extract, AirDirection::Fresh]);
     // A unit takes as many roles as it has collars.
     assert!(AhuParams { ports: vec![AirDirection::Supply], ..ahu() }.validate().is_err());
 }
