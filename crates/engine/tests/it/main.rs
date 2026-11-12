@@ -73,6 +73,7 @@ mod hatch_numeric_validation;
 mod hatch_options;
 mod helix;
 mod hvac;
+mod hidden_grip_targets;
 mod inquiry_keywords;
 mod inquiry_variables;
 mod inquiry_z;
