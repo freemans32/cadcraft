@@ -11,6 +11,7 @@ fn office(outline: &[(f64, f64)], occupants: u32) -> SpaceParams {
         occupants,
         collective: true,
         flow_m3h: None,
+        void_height_mm: None,
         outline: outline.iter().map(|&(x, y)| Vec2::new(x, y)).collect(),
         label_height_mm: 200.0,
         units: HvacUnits::default(),

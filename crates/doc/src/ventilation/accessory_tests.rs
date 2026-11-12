@@ -77,6 +77,8 @@ fn unit() -> AhuParams {
         pressure_pa: None,
         extract_flow_m3h: None,
         extract_pressure_pa: None,
+        void_height_mm: None,
+        margin_mm: 100.0,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     }
@@ -95,6 +97,9 @@ fn ducted(accessory_at: Option<(AccessoryKind, f64, f64)>) -> (Drawing, Option<H
         air_set: false,
         flow_m3h: None,
         velocity: None,
+        shape: DuctShape::Round,
+        width_mm: 0.0,
+        height_mm: 0.0,
         flexible: false,
         reducer: None,
         label_height_mm: 100.0,

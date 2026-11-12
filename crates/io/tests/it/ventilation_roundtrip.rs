@@ -3,7 +3,7 @@
 
 use cadcraft_doc::{
     ACCESSORY_APP, AHU_APP, AIR_TERMINAL_APP, AccessoryKind, AccessoryParams, AhuParams, AirDirection, Common, DUCT_APP, Drawing, DuctKind,
-    DuctParams, HvacUnits, SPACE_APP, Space, SpaceParams, TerminalParams, air_terminal_of, space_of, standard_air_terminal_models,
+    DuctParams, DuctShape, HvacUnits, SPACE_APP, Space, SpaceParams, TerminalParams, air_terminal_of, space_of, standard_air_terminal_models,
 };
 use cadcraft_geom::Vec2;
 use cadcraft_hvac::RoomUse;
@@ -20,6 +20,7 @@ fn drawing() -> (Drawing, SpaceParams, TerminalParams) {
         occupants: 12,
         collective: true,
         flow_m3h: None,
+        void_height_mm: Some(350.0),
         outline: vec![Vec2::new(0.0, 0.0), Vec2::new(8000.0, 0.0), Vec2::new(8000.0, 5000.0), Vec2::new(0.0, 5000.0)],
         label_height_mm: 200.0,
         units: HvacUnits::of(&d),
@@ -67,6 +68,8 @@ fn ducted() -> Drawing {
         pressure_pa: Some(120.0),
         extract_flow_m3h: Some(450.0),
         extract_pressure_pa: Some(90.0),
+        void_height_mm: None,
+        margin_mm: 100.0,
         label_height_mm: 100.0,
         units,
     };
@@ -80,6 +83,9 @@ fn ducted() -> Drawing {
         air_set: true,
         flow_m3h: Some(500.0),
         velocity: Some(3.5),
+        shape: DuctShape::Round,
+        width_mm: 0.0,
+        height_mm: 0.0,
         flexible: false,
         reducer: None,
         label_height_mm: 100.0,

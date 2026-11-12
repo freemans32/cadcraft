@@ -1121,6 +1121,13 @@
 	Rigid	Rigide
 	Flexible	Souple
 	Enter duct material	Entrez le matériau de la gaine
+	Size set by	Taille fixée par
+	Section	Section
+	Width (mm)	Largeur (mm)
+	Height available (mm)	Hauteur disponible (mm)
+	Margin (mm)	Marge (mm)
+	Edit Air Handling Unit	Modifier la centrale de traitement d'air
+	Enter duct diameter (mm), width x height (mm) or [Auto]	Entrez le diamètre de la gaine (mm), largeur x hauteur (mm) ou [Auto]
 	Duct Accessory	Accessoire de gaine
 	Edit Duct Accessory	Modifier l'accessoire de gaine
 	Duct Accessories	Accessoires de gaine

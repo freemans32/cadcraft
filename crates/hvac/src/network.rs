@@ -6,7 +6,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Air, Fitting, FittingCoefficients, HvacError, ROUND_DIAMETERS_MM, Result, checked, pressure_gradient, velocity};
+use crate::{
+    Air, Fitting, FittingCoefficients, HvacError, ROUND_DIAMETERS_MM, Result, checked, equivalent_diameter_mm, pressure_gradient, rect_area_m2,
+    velocity,
+};
 
 /// Most segments in one network.
 pub const MAX_SEGMENTS: usize = 10_000;
@@ -68,6 +71,13 @@ pub struct Segment {
     /// than spiral steel).
     #[serde(default)]
     pub roughness_mm: Option<f64>,
+    /// The tallest the duct may be, mm, where it runs (the space above a false ceiling less a
+    /// margin). A run whose round size would not fit is made rectangular, as tall as this.
+    #[serde(default)]
+    pub max_height_mm: Option<f64>,
+    /// A rectangular section the user imposes: width and height, mm.
+    #[serde(default)]
+    pub rect_mm: Option<(f64, f64)>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -90,6 +100,13 @@ pub struct DesignCriteria {
     pub air: Air,
     /// Diameters to choose from, mm, smallest first.
     pub diameters_mm: Vec<f64>,
+    /// Rectangular ducts are made in widths and heights that are multiples of this, mm.
+    pub side_step_mm: f64,
+    /// Smallest and largest side of a rectangular duct, mm.
+    pub min_side_mm: f64,
+    pub max_side_mm: f64,
+    /// Largest ratio of a rectangular duct's width to its height.
+    pub max_aspect: f64,
 }
 
 impl Default for DesignCriteria {
@@ -103,6 +120,10 @@ impl Default for DesignCriteria {
             fittings: FittingCoefficients::default(),
             air: Air::default(),
             diameters_mm: ROUND_DIAMETERS_MM.to_vec(),
+            side_step_mm: 50.0,
+            min_side_mm: 100.0,
+            max_side_mm: 2000.0,
+            max_aspect: 4.0,
         }
     }
 }
@@ -114,6 +135,10 @@ impl DesignCriteria {
         checked("connection velocity (m/s)", self.max_velocity_connection, 0.1, 50.0)?;
         checked("friction limit (Pa/m)", self.max_gradient_pa_m, 0.01, 100.0)?;
         checked("roughness (mm)", self.roughness_mm, 0.0, 10.0)?;
+        checked("rectangular side step (mm)", self.side_step_mm, 1.0, 1000.0)?;
+        checked("smallest side (mm)", self.min_side_mm, 20.0, 10_000.0)?;
+        checked("largest side (mm)", self.max_side_mm, self.min_side_mm, 10_000.0)?;
+        checked("largest aspect ratio", self.max_aspect, 1.0, 50.0)?;
         self.fittings.checked()?;
         self.air.checked()?;
         if self.diameters_mm.is_empty() || self.diameters_mm.len() > 1000 {
@@ -138,6 +163,15 @@ impl DesignCriteria {
     }
 }
 
+/// The shape of a duct's section.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Section {
+    #[default]
+    Round,
+    Rectangular,
+}
+
 /// What set a segment's diameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -157,7 +191,14 @@ pub enum Governing {
 #[serde(rename_all = "camelCase")]
 pub struct SegmentResult {
     pub flow_m3h: f64,
+    /// Round or rectangular.
+    pub section: Section,
+    /// The diameter of a round duct; for a rectangular one, the equivalent diameter that loses the
+    /// same pressure per metre.
     pub diameter_mm: f64,
+    /// The sides of the section, mm: both the diameter for a round duct.
+    pub width_mm: f64,
+    pub height_mm: f64,
     pub governing: Governing,
     pub velocity: f64,
     pub gradient_pa_m: f64,
@@ -275,29 +316,93 @@ fn choose_diameter(flow: f64, kind: SegmentKind, roughness_mm: f64, c: &DesignCr
     Ok((largest, Governing::Largest))
 }
 
+/// A size chosen for a run: round (its diameter) or rectangular (width, height).
+#[derive(Clone, Copy, Debug)]
+enum Chosen {
+    Round(f64),
+    Rect(f64, f64),
+}
+
+/// The smallest rectangular section as tall as `height_mm` (to the step) within the limits for `flow`,
+/// preferring a width not below its height; the largest allowed if none meets them.
+fn choose_rect(flow: f64, kind: SegmentKind, roughness_mm: f64, height_mm: f64, c: &DesignCriteria) -> Result<(Chosen, Governing)> {
+    let step = c.side_step_mm;
+    let h = (height_mm / step).floor() * step;
+    if h < c.min_side_mm {
+        return Err(HvacError::BadValue(format!(
+            "the height available, {height_mm:.0} mm, is below the smallest duct side, {:.0} mm",
+            c.min_side_mm
+        )));
+    }
+    let vmax = c.max_velocity(kind);
+    let widest = c.max_side_mm.min((h * c.max_aspect / step).floor() * step);
+    let mut w = h;
+    let mut by_velocity = false;
+    while w <= widest {
+        let v_ok = flow / 3600.0 / rect_area_m2(w, h) <= vmax;
+        if v_ok && !by_velocity {
+            by_velocity = true;
+            if pressure_gradient(flow, equivalent_diameter_mm(w, h), roughness_mm, &c.air)? <= c.max_gradient_pa_m {
+                return Ok((Chosen::Rect(w, h), Governing::Velocity));
+            }
+        } else if v_ok && pressure_gradient(flow, equivalent_diameter_mm(w, h), roughness_mm, &c.air)? <= c.max_gradient_pa_m {
+            return Ok((Chosen::Rect(w, h), Governing::Friction));
+        }
+        w += step;
+    }
+    Ok((Chosen::Rect(widest.max(h), h), Governing::Largest))
+}
+
 fn size_segment(i: usize, s: &Segment, flow: f64, c: &DesignCriteria, warnings: &mut Vec<String>) -> Result<SegmentResult> {
     let roughness_mm = checked(&format!("roughness of segment {i} (mm)"), s.roughness_mm.unwrap_or(c.roughness_mm), 0.0, 10.0)?;
-    let (diameter_mm, governing) = match s.diameter_mm {
-        Some(d) => (checked(&format!("imposed diameter of segment {i} (mm)"), d, 1.0, 10_000.0)?, Governing::Imposed),
-        None => choose_diameter(flow, s.kind, roughness_mm, c)?,
+    let (chosen, governing) = match (s.rect_mm, s.diameter_mm) {
+        (Some((w, h)), _) => (
+            Chosen::Rect(
+                checked(&format!("imposed width of segment {i} (mm)"), w, 1.0, 10_000.0)?,
+                checked(&format!("imposed height of segment {i} (mm)"), h, 1.0, 10_000.0)?,
+            ),
+            Governing::Imposed,
+        ),
+        (None, Some(d)) => (Chosen::Round(checked(&format!("imposed diameter of segment {i} (mm)"), d, 1.0, 10_000.0)?), Governing::Imposed),
+        (None, None) => {
+            let (d, g) = choose_diameter(flow, s.kind, roughness_mm, c)?;
+            match s.max_height_mm {
+                Some(h) if d > checked(&format!("available height of segment {i} (mm)"), h, 1.0, 10_000.0)? => {
+                    choose_rect(flow, s.kind, roughness_mm, h, c)?
+                }
+                _ => (Chosen::Round(d), g),
+            }
+        }
     };
-    let v = velocity(flow, diameter_mm);
+    let (section, diameter_mm, width_mm, height_mm, area) = match chosen {
+        Chosen::Round(d) => (Section::Round, d, d, d, crate::round_area_m2(d)),
+        Chosen::Rect(w, h) => (Section::Rectangular, equivalent_diameter_mm(w, h), w, h, rect_area_m2(w, h)),
+    };
+    let v = flow / 3600.0 / area;
+    // The friction of a rectangular duct is that of its equivalent round one at the same flow.
     let gradient_pa_m = pressure_gradient(flow, diameter_mm, roughness_mm, &c.air)?;
     let mut zeta = 0.0;
     for &f in &s.fittings {
         zeta += c.fittings.zeta(f)?;
     }
+    let size = match section {
+        Section::Round => format!("Ø{diameter_mm:.0}"),
+        Section::Rectangular => format!("{width_mm:.0}×{height_mm:.0}"),
+    };
     if governing == Governing::Largest {
-        warnings.push(format!("segment {i}: {flow:.0} m³/h exceeds the limits even at Ø{diameter_mm:.0}"));
+        warnings.push(format!("segment {i}: {flow:.0} m³/h exceeds the limits even at {size}"));
     } else if v > c.max_velocity(s.kind) {
-        warnings.push(format!("segment {i}: {v:.1} m/s at the imposed Ø{diameter_mm:.0} is above the limit"));
+        warnings.push(format!("segment {i}: {v:.1} m/s at the imposed {size} is above the limit"));
     }
     let friction_pa = gradient_pa_m * s.length_m;
     let fittings_pa = zeta * c.air.dynamic_pressure(v) + s.fixed_pa;
     let terminal_pa = s.terminal.map(|t| t.pressure_drop_pa).unwrap_or(0.0);
     Ok(SegmentResult {
         flow_m3h: flow,
+        section,
         diameter_mm,
+        width_mm,
+        height_mm,
         governing,
         velocity: v,
         gradient_pa_m,

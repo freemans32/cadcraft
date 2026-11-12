@@ -21,9 +21,9 @@ mod sizes;
 pub use air::Air;
 pub use fittings::{Fitting, FittingCoefficients};
 pub use friction::{friction_factor, pressure_gradient, reynolds, velocity};
-pub use network::{DesignCriteria, Governing, Network, NetworkReport, Segment, SegmentKind, SegmentResult, Terminal, size_network};
+pub use network::{DesignCriteria, Governing, Network, NetworkReport, Section, Segment, SegmentKind, SegmentResult, Terminal, size_network};
 pub use rates::{RoomUse, fresh_air_rate};
-pub use sizes::{ROUND_DIAMETERS_MM, round_area_m2};
+pub use sizes::{ROUND_DIAMETERS_MM, equivalent_diameter_mm, rect_area_m2, round_area_m2};
 
 /// What a calculation refuses, with the reason in words a user can act on.
 #[derive(Clone, Debug, PartialEq)]

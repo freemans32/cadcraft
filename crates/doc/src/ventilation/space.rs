@@ -46,6 +46,10 @@ pub struct SpaceParams {
     /// The closed outline in the block's coordinates (drawing units), without repeating the
     /// first point.
     pub outline: Vec<Vec2>,
+    /// The height available above the space's false ceiling for ducts, mm; where it is not set, the
+    /// air handling unit's applies.
+    #[serde(default)]
+    pub void_height_mm: Option<f64>,
     #[serde(default = "default_label_mm")]
     pub label_height_mm: f64,
     #[serde(default)]
@@ -58,6 +62,9 @@ impl SpaceParams {
         check_name("space", &self.name)?;
         check_label_height(self.label_height_mm)?;
         self.units.validate()?;
+        if self.void_height_mm.is_some_and(|h| !(h.is_finite() && (20.0..=super::MAX_VOID_MM).contains(&h))) {
+            return Err(invalid(format!("The height available is 20 to {} mm.", super::MAX_VOID_MM)));
+        }
         if self.occupants > MAX_OCCUPANTS {
             return Err(invalid(format!("A space has at most {MAX_OCCUPANTS} occupants.")));
         }

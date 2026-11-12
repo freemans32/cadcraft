@@ -72,7 +72,7 @@ fn on_duct(
     let p = AccessoryParams {
         kind,
         length_mm: length.unwrap_or_else(|| kind.default_length_mm()),
-        diameter_mm: dp.diameter_mm,
+        diameter_mm: dp.plan_width_mm(),
         zeta,
         pressure_drop_pa: pa,
         label_height_mm: label_mm,

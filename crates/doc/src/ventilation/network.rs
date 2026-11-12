@@ -2,11 +2,11 @@
 //! nothing about it is stored, so moving or erasing a duct changes it at the next reading.
 
 use cadcraft_geom::Vec2;
-use cadcraft_hvac::{Fitting, Network, NetworkReport, Segment, SegmentKind, Terminal};
+use cadcraft_hvac::{Fitting, Network, NetworkReport, Section, Segment, SegmentKind, Terminal};
 
 use super::duct::{AXIS_REACH, interior_cut};
 use super::{
-    AccessoryParams, AhuParams, AirDirection, DuctKind, DuctParams, DuctReducer, HvacUnits, Loss, TerminalParams, accessory_of, ahu_of,
+    AccessoryParams, AhuParams, AirDirection, DuctKind, DuctParams, DuctReducer, DuctShape, HvacUnits, Loss, TerminalParams, accessory_of, ahu_of,
     air_terminal_of, invalid,
 };
 use crate::{EntityKind, Handle, Result};
@@ -109,11 +109,28 @@ impl crate::Drawing {
                 accessories.push((e.handle, p, Vec2::new(i.insert.x, i.insert.y)));
             }
         }
-        let mut scan =
-            Scan { ducts: &ducts, terminals: &terminals, units, tol, taken: vec![false; ducts.len()], touched: vec![false; terminals.len()] };
+        // The spaces that say how much height there is above their false ceiling.
+        let voids: Vec<(Vec<Vec2>, f64)> = self
+            .model
+            .iter()
+            .filter_map(|e| self.space_outline(e.handle))
+            .filter_map(|(sp, outline)| sp.void_height_mm.map(|h| (outline, h)))
+            .collect();
+        let mut scan = Scan {
+            ducts: &ducts,
+            terminals: &terminals,
+            units,
+            tol,
+            taken: vec![false; ducts.len()],
+            touched: vec![false; terminals.len()],
+            voids,
+            unit_void: None,
+            margin_mm: 0.0,
+        };
         let mut out = Vec::new();
         let unit_tol = units.to_units(UNIT_MEET_MM);
         for (handle, p, at, rotation) in &ahus {
+            (scan.unit_void, scan.margin_mm) = (p.void_height_mm, p.margin_mm);
             let half = p.half();
             // A duct end within a radius of the unit's face is on it (snapping lands on a line's edge).
             let inside = |q: Vec2, diameter_mm: f64| {
@@ -149,7 +166,7 @@ impl crate::Drawing {
                 if ducts.len() >= MAX_DUCTS {
                     return Err(invalid(format!("The drawing has more than {MAX_DUCTS} ducts.")));
                 }
-                ducts.push((e.handle, a, b, p.units.to_units(p.diameter_mm)));
+                ducts.push((e.handle, a, b, p.units.to_units(p.plan_width_mm())));
                 points.extend([a, b]);
             } else if let (Some(_), EntityKind::Insert(i)) = (air_terminal_of(e), &e.kind) {
                 points.push(Vec2::new(i.insert.x, i.insert.y));
@@ -187,7 +204,8 @@ impl crate::Drawing {
         for (i, (h, r)) in net.ducts.iter().zip(&report.segments).enumerate() {
             let Some((mut p, ..)) = self.duct_ends(*h) else { continue };
             if !p.imposed {
-                p.diameter_mm = r.diameter_mm;
+                (p.shape, p.diameter_mm) = (if r.section == Section::Rectangular { DuctShape::Rectangular } else { DuctShape::Round }, r.diameter_mm);
+                (p.width_mm, p.height_mm) = if r.section == Section::Rectangular { (r.width_mm, r.height_mm) } else { (0.0, 0.0) };
             }
             p.flow_m3h = Some(r.flow_m3h);
             p.velocity = Some(r.velocity);
@@ -196,10 +214,11 @@ impl crate::Drawing {
                 p.air = net.air;
             }
             // A reducer where the run joins one of another diameter.
+            // (the width a plan shows: the diameter of a round duct, the width of a rectangular one)
             let parent = net.network.segments.get(i).and_then(|s| s.parent).and_then(|k| report.segments.get(k));
             p.reducer = parent
-                .filter(|q| (q.diameter_mm - r.diameter_mm).abs() > 0.5)
-                .map(|q| DuctReducer { from_mm: q.diameter_mm, at_end: net.entered_at_end.get(i).copied().unwrap_or(false) });
+                .filter(|q| (q.width_mm - r.width_mm).abs() > 0.5)
+                .map(|q| DuctReducer { from_mm: q.width_mm, at_end: net.entered_at_end.get(i).copied().unwrap_or(false) });
             self.regenerate_duct(*h, &p)?;
         }
         let e = self.entity(net.ahu).ok_or(crate::DocError::NoEntity(net.ahu))?;
@@ -225,7 +244,7 @@ fn place_accessories(ducts: &[Duct], accessories: &[(Handle, AccessoryParams, Ve
             let along = (d.b - d.a).normalized();
             let t = (*at - d.a).dot(along);
             let across = (*at - d.a).cross(along).abs();
-            let reach = units.to_units(MEET_MM).max(AXIS_REACH * d.params.units.to_units(d.params.diameter_mm));
+            let reach = units.to_units(MEET_MM).max(AXIS_REACH * d.params.units.to_units(d.params.plan_width_mm()));
             if across <= reach && t >= 0.0 && t <= d.a.dist(d.b) && best.is_none_or(|x| across < x.0) {
                 best = Some((across, d.handle));
             }
@@ -257,9 +276,21 @@ struct Scan<'a> {
     tol: f64,
     taken: Vec<bool>,
     touched: Vec<bool>,
+    /// The spaces with a height available above their false ceiling: outline and height, mm.
+    voids: Vec<(Vec<Vec2>, f64)>,
+    /// The height available where no space says, and the margin kept from it, mm: the unit's.
+    unit_void: Option<f64>,
+    margin_mm: f64,
 }
 
 impl Scan<'_> {
+    /// The tallest a duct may be at `at`, mm: the height available there (a space's, else the
+    /// unit's) less the margin.
+    fn height_available(&self, at: Vec2) -> Option<f64> {
+        let void = self.voids.iter().find(|(outline, _)| cadcraft_geom::point_in_polygon(outline, at)).map(|v| v.1).or(self.unit_void);
+        void.map(|h| h - self.margin_mm)
+    }
+
     fn is_free(&self, i: usize, air: AirDirection) -> bool {
         !self.taken.get(i).copied().unwrap_or(true) && self.ducts.get(i).is_some_and(|d| d.params.air == air || !d.params.air_set)
     }
@@ -279,9 +310,9 @@ impl Scan<'_> {
         let mut by_air: [Vec<Node>; 2] = [Vec::new(), Vec::new()];
         for i in 0..self.ducts.len() {
             let Some(d) = self.ducts.get(i).filter(|_| !self.taken.get(i).copied().unwrap_or(true)) else { continue };
-            let (from, to) = if inside(d.a, d.params.diameter_mm) {
+            let (from, to) = if inside(d.a, d.params.plan_width_mm()) {
                 (d.a, d.b)
-            } else if inside(d.b, d.params.diameter_mm) {
+            } else if inside(d.b, d.params.plan_width_mm()) {
                 (d.b, d.a)
             } else {
                 continue;
@@ -334,12 +365,12 @@ impl Scan<'_> {
         let mut next = 0;
         while let Some(n) = nodes.get(next) {
             let (to, from) = (n.to, n.from);
-            let parent_diameter = self.ducts.get(n.duct).map_or(0.0, |d| d.params.diameter_mm);
+            let parent_diameter = self.ducts.get(n.duct).map_or(0.0, |d| d.params.plan_width_mm());
             let mut children: Vec<(usize, Vec2, Vec2)> = Vec::new();
             for i in 0..self.ducts.len() {
                 let Some(d) = self.ducts.get(i).filter(|_| self.is_free(i, air)) else { continue };
                 // Ends meet within a radius of the wider duct: snapping lands on a line's edge.
-                let meet = self.tol.max(self.units.to_units(AXIS_REACH * d.params.diameter_mm.max(parent_diameter)));
+                let meet = self.tol.max(self.units.to_units(AXIS_REACH * d.params.plan_width_mm().max(parent_diameter)));
                 let (f, t) = if d.a.near(to, meet) {
                     (d.a, d.b)
                 } else if d.b.near(to, meet) {
@@ -366,7 +397,7 @@ impl Scan<'_> {
     /// The terminal of `air` at each run's far end.
     fn attach_terminals(&mut self, nodes: &mut [Node], air: AirDirection) {
         for n in nodes {
-            let diameter = self.ducts.get(n.duct).map_or(0.0, |d| d.params.diameter_mm);
+            let diameter = self.ducts.get(n.duct).map_or(0.0, |d| d.params.plan_width_mm());
             let reach = self.tol.max(self.units.to_units(AXIS_REACH * diameter));
             for (ti, t) in self.terminals.iter().enumerate() {
                 if t.params.air == air && !self.touched.get(ti).copied().unwrap_or(true) && t.is_reached(n.to, reach) {
@@ -406,7 +437,9 @@ impl Scan<'_> {
                 kind: segment_kind(d.params.kind, n.terminals_below, on_trunk),
                 fittings: n.fittings.clone(),
                 terminal: n.terminal.map(|(_, flow, pa)| Terminal { flow_m3h: flow, pressure_drop_pa: pa }),
-                diameter_mm: d.params.imposed.then_some(d.params.diameter_mm),
+                diameter_mm: (d.params.imposed && d.params.shape == DuctShape::Round).then_some(d.params.diameter_mm),
+                rect_mm: (d.params.imposed && d.params.shape == DuctShape::Rectangular).then_some((d.params.width_mm, d.params.height_mm)),
+                max_height_mm: self.height_available(d.a.mid(d.b)),
                 fixed_pa: 0.0,
                 roughness_mm: d.params.flexible.then_some(FLEX_ROUGHNESS_MM),
             });

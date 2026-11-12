@@ -492,3 +492,122 @@ fn ductsize_works_on_extract_terminals_with_ducts_nobody_set() {
     let r = s.execute("ductsize", &json!({})).unwrap();
     assert_eq!(r["networks"][0]["totalFlow"], 1200.0, "back on auto, it works again: {r}");
 }
+
+fn sections(s: &Session) -> Vec<(cadcraft_doc::DuctShape, f64, f64)> {
+    s.doc().unwrap().model.iter().filter_map(|e| duct_of(e)).map(|p| (p.shape, p.width_mm, p.height_mm)).collect()
+}
+
+/// A unit with `void` mm available, a trunk to four diffusers of 300 m³/h each by connections.
+fn hall(s: &mut Session, void: Option<f64>) -> Value {
+    let mut unit = json!({"at": [0, 0]});
+    if let Some(v) = void {
+        unit["voidHeight"] = json!(v);
+    }
+    let unit = s.execute("ahuadd", &unit).unwrap();
+    let mut from = 500;
+    for x in [2000, 4000, 6000, 8000] {
+        s.execute("ductadd", &json!({"points": [[from, 0], [x, 0]]})).unwrap();
+        s.execute("ductadd", &json!({"points": [[x, 0], [x, -1500]]})).unwrap();
+        s.execute("airterminaladd", &json!({"at": [x, -1500], "flow": 300})).unwrap();
+        from = x;
+    }
+    unit
+}
+
+#[test]
+fn ductsize_makes_the_trunk_rectangular_where_the_height_available_is_too_small_for_a_round_one() {
+    let mut s = metric();
+    let unit = hall(&mut s, Some(350.0));
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    assert!(r["networks"][0]["warnings"].as_array().unwrap().is_empty(), "{r}");
+    let segs = r["networks"][0]["segments"].as_array().unwrap();
+    let rect: Vec<_> = segs.iter().filter(|g| g["section"] == "rectangular").collect();
+    assert!(!rect.is_empty() && rect.len() < segs.len(), "some rectangular, some round: {r}");
+    assert!(rect.iter().all(|g| g["height"] == 250.0 && g["width"].as_f64().unwrap() % 50.0 == 0.0), "{r}");
+    assert!(segs.iter().filter(|g| g["section"] == "round").all(|g| g["diameter"].as_f64().unwrap() <= 250.0));
+    assert!(sections(&s).iter().any(|x| x.0 == cadcraft_doc::DuctShape::Rectangular));
+    // Without the height, all round, as before; a looser limit on the aspect ratio makes it narrower to fit.
+    s.execute("ahuedit", &json!({"handle": unit["handle"], "voidHeight": null})).unwrap();
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    assert!(r["networks"][0]["segments"].as_array().unwrap().iter().all(|g| g["section"] == "round"), "{r}");
+    assert!(sections(&s).iter().all(|x| x.0 == cadcraft_doc::DuctShape::Round), "the rectangle goes back to round");
+    // A margin larger than the height available is refused, a height too small says so.
+    assert!(s.execute("ahuedit", &json!({"handle": unit["handle"], "voidHeight": 10})).is_err());
+    s.execute("ahuedit", &json!({"handle": unit["handle"], "voidHeight": 180})).unwrap();
+    let e = s.execute("ductsize", &json!({})).unwrap_err().to_string();
+    assert!(e.contains("below the smallest duct side"), "{e}");
+}
+
+#[test]
+fn a_space_with_its_own_height_decides_for_the_ducts_that_run_in_it() {
+    let mut s = metric();
+    hall(&mut s, Some(350.0));
+    // A room over the whole trunk, with only 250 mm available: 150 after the margin.
+    let sp = s.execute("spaceadd", &json!({"points": [[-500, -2000], [9000, -2000], [9000, 500], [-500, 500]], "voidHeight": 250})).unwrap();
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    let heights: Vec<f64> = r["networks"][0]["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|g| g["section"] == "rectangular")
+        .map(|g| g["height"].as_f64().unwrap())
+        .collect();
+    assert!(!heights.is_empty() && heights.iter().all(|h| *h == 150.0), "{r}");
+    // Back to the unit's by clearing the space's.
+    s.execute("spaceedit", &json!({"handle": sp["handle"], "voidHeight": null})).unwrap();
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    assert!(r["networks"][0]["segments"].as_array().unwrap().iter().filter(|g| g["section"] == "rectangular").all(|g| g["height"] == 250.0), "{r}");
+    assert!(s.execute("spaceedit", &json!({"handle": sp["handle"], "voidHeight": -3})).is_err());
+}
+
+#[test]
+fn a_rectangular_section_can_be_imposed_when_drawing_editing_or_typing_it() {
+    let mut s = metric();
+    let r = s.execute("ductadd", &json!({"points": [[0, 0], [3000, 0]], "width": 400, "height": 250})).unwrap();
+    let h = r["handles"][0].clone();
+    let p = duct_of(s.doc().unwrap().entity(hd(&h)).unwrap()).unwrap();
+    assert_eq!((p.shape, p.width_mm, p.height_mm, p.imposed), (cadcraft_doc::DuctShape::Rectangular, 400.0, 250.0, true));
+    assert!((p.diameter_mm - 343.3).abs() < 0.1, "the equivalent diameter: {}", p.diameter_mm);
+    assert!(s.execute("ductadd", &json!({"points": [[0, 0], [3000, 0]], "width": 400})).is_err());
+    // Editing: a round diameter replaces it, width and height bring it back, auto gives it to sizing.
+    s.execute("ductedit", &json!({"handle": h, "diameter": 315})).unwrap();
+    let p = duct_of(s.doc().unwrap().entity(hd(&h)).unwrap()).unwrap();
+    assert_eq!((p.shape, p.diameter_mm, p.width_mm), (cadcraft_doc::DuctShape::Round, 315.0, 0.0));
+    s.execute("ductedit", &json!({"handle": h, "width": 600, "height": 200})).unwrap();
+    assert_eq!(sections(&s), [(cadcraft_doc::DuctShape::Rectangular, 600.0, 200.0)]);
+    assert!(s.execute("ductedit", &json!({"handle": h, "height": 200})).is_err());
+    assert!(s.execute("ductedit", &json!({"handle": h, "width": 3, "height": 200})).is_err());
+    s.execute("ductedit", &json!({"handle": h, "diameter": "auto"})).unwrap();
+    assert!(!duct_of(s.doc().unwrap().entity(hd(&h)).unwrap()).unwrap().imposed);
+    // At the command line: 400x250 in the Diameter option.
+    for t in ["ductadd", "d", "500x300", "0,1000", "2000,1000", ""] {
+        s.cmdline(t).unwrap();
+    }
+    assert!(sections(&s).contains(&(cadcraft_doc::DuctShape::Rectangular, 500.0, 300.0)));
+    s.cmdline("ductadd").unwrap();
+    s.cmdline("d").unwrap();
+    assert!(s.cmdline("big").is_err() || s.running.is_some(), "a bad size is refused, the command goes on");
+}
+
+#[test]
+fn ductsize_keeps_an_imposed_rectangle_and_takes_its_aspect_limit_from_its_parameters() {
+    let mut s = metric();
+    hall(&mut s, Some(350.0));
+    let first = s.doc().unwrap().model.iter().find_map(|e| duct_of(e).map(|_| e.handle)).unwrap();
+    s.execute("ductedit", &json!({"handle": first.hex(), "width": 800, "height": 200})).unwrap();
+    s.execute("ductsize", &json!({})).unwrap();
+    let p = duct_of(s.doc().unwrap().entity(first).unwrap()).unwrap();
+    assert_eq!((p.width_mm, p.height_mm), (800.0, 200.0));
+    // A tighter aspect ratio makes the others taller... narrower: none wider than 3 times its height.
+    s.execute("ductedit", &json!({"handle": first.hex(), "diameter": "auto"})).unwrap();
+    let r = s.execute("ductsize", &json!({"maxAspect": 2.0, "sideStep": 25})).unwrap();
+    let ok = r["networks"][0]["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|g| g["section"] == "rectangular")
+        .all(|g| g["width"].as_f64().unwrap() <= 2.0 * g["height"].as_f64().unwrap() && g["width"].as_f64().unwrap() % 25.0 == 0.0);
+    assert!(ok, "{r}");
+    assert!(s.execute("ductsize", &json!({"maxAspect": 0})).is_err());
+    assert!(s.execute("ductsize", &json!({"sideStep": -5})).is_err());
+}

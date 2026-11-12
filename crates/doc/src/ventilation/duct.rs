@@ -22,6 +22,8 @@ pub const DUCT_EXTRACT_LAYER: &str = "M-HVAC-DUCT-EXTR";
 pub const MAX_AHU_SIZE_MM: f64 = 50_000.0;
 /// Smallest and largest duct diameter, mm.
 pub const DUCT_DIAMETER_MM: (f64, f64) = (20.0, 5_000.0);
+/// Largest height available above a false ceiling, mm.
+pub const MAX_VOID_MM: f64 = 5_000.0;
 /// Longest duct run, metres.
 pub const MAX_DUCT_LENGTH_M: f64 = 10_000.0;
 const AHU_FORMAT: &str = "AHU1";
@@ -51,10 +53,21 @@ pub struct AhuParams {
     pub extract_flow_m3h: Option<f64>,
     #[serde(default)]
     pub extract_pressure_pa: Option<f64>,
+    /// The height available above the false ceiling where its ducts run, mm: a duct too big for it
+    /// when round is made rectangular, as tall as it leaves room for. A space may say its own.
+    #[serde(default)]
+    pub void_height_mm: Option<f64>,
+    /// What is kept back from that height for hangers, insulation and tolerances, mm.
+    #[serde(default = "default_margin_mm")]
+    pub margin_mm: f64,
     #[serde(default = "default_label_mm")]
     pub label_height_mm: f64,
     #[serde(default)]
     pub units: HvacUnits,
+}
+
+fn default_margin_mm() -> f64 {
+    100.0
 }
 
 impl AhuParams {
@@ -65,6 +78,12 @@ impl AhuParams {
         let size = |v: f64| v.is_finite() && v > 0.0 && v <= MAX_AHU_SIZE_MM;
         if !size(self.width_mm) || !size(self.depth_mm) {
             return Err(invalid(format!("A unit's sizes are more than 0 and at most {MAX_AHU_SIZE_MM} mm.")));
+        }
+        if self.void_height_mm.is_some_and(|h| !(h.is_finite() && (DUCT_DIAMETER_MM.0..=MAX_VOID_MM).contains(&h))) {
+            return Err(invalid(format!("The height available is {} to {MAX_VOID_MM} mm.", DUCT_DIAMETER_MM.0)));
+        }
+        if !(self.margin_mm.is_finite() && (0.0..=MAX_VOID_MM).contains(&self.margin_mm)) {
+            return Err(invalid(format!("The margin is 0 to {MAX_VOID_MM} mm.")));
         }
         for v in [self.flow_m3h, self.pressure_pa, self.extract_flow_m3h, self.extract_pressure_pa].into_iter().flatten() {
             if !(v.is_finite() && (0.0..=1e9).contains(&v)) {
@@ -187,8 +206,17 @@ impl DuctKind {
 pub struct DuctParams {
     /// Length, in drawing units.
     pub length: f64,
+    /// The diameter of a round duct; for a rectangular one, the equivalent diameter that loses the
+    /// same pressure per metre (set by sizing, or from the sides).
     pub diameter_mm: f64,
-    /// Whether the user chose the diameter: sizing then leaves it.
+    #[serde(default)]
+    pub shape: DuctShape,
+    /// The sides of a rectangular duct, mm: the width is what a plan shows. Zero for a round duct.
+    #[serde(default)]
+    pub width_mm: f64,
+    #[serde(default)]
+    pub height_mm: f64,
+    /// Whether the user chose the size: sizing then leaves it.
     #[serde(default)]
     pub imposed: bool,
     #[serde(default)]
@@ -217,6 +245,31 @@ pub struct DuctParams {
     pub units: HvacUnits,
 }
 
+/// The shape of a duct's section.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DuctShape {
+    #[default]
+    Round,
+    Rectangular,
+}
+
+impl DuctShape {
+    pub fn parse(text: &str) -> Option<DuctShape> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "round" | "circular" | "r" | "ronde" => Some(DuctShape::Round),
+            "rectangular" | "rect" | "rectangle" | "rectangulaire" => Some(DuctShape::Rectangular),
+            _ => None,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            DuctShape::Round => "round",
+            DuctShape::Rectangular => "rectangular",
+        }
+    }
+}
+
 /// The cone where a duct run joins a larger or smaller one.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -243,12 +296,34 @@ impl DuctParams {
         if !(self.diameter_mm.is_finite() && (DUCT_DIAMETER_MM.0..=DUCT_DIAMETER_MM.1).contains(&self.diameter_mm)) {
             return Err(invalid(format!("A duct's diameter is {} to {} mm.", DUCT_DIAMETER_MM.0, DUCT_DIAMETER_MM.1)));
         }
+        if self.shape == DuctShape::Rectangular {
+            let side = |v: f64| v.is_finite() && (DUCT_DIAMETER_MM.0..=DUCT_DIAMETER_MM.1).contains(&v);
+            if !(side(self.width_mm) && side(self.height_mm)) {
+                return Err(invalid(format!("A rectangular duct's sides are {} to {} mm.", DUCT_DIAMETER_MM.0, DUCT_DIAMETER_MM.1)));
+            }
+        }
         for v in [self.flow_m3h, self.velocity].into_iter().flatten() {
             if !(v.is_finite() && (0.0..=1e9).contains(&v)) {
                 return Err(invalid("A duct's flow and velocity are 0 or more."));
             }
         }
         Ok(())
+    }
+
+    /// The width a plan shows, mm: the diameter, or the width of a rectangular duct.
+    pub fn plan_width_mm(&self) -> f64 {
+        match self.shape {
+            DuctShape::Round => self.diameter_mm,
+            DuctShape::Rectangular => self.width_mm,
+        }
+    }
+
+    /// The size as written on the plan: "Ø200" or "400×250".
+    pub fn size_label(&self) -> String {
+        match self.shape {
+            DuctShape::Round => format!("Ø{:.0}", self.diameter_mm),
+            DuctShape::Rectangular => format!("{:.0}×{:.0}", self.width_mm, self.height_mm),
+        }
     }
 
     /// The layer of the run: supply and extract ducts have their own, in their own colours.
@@ -268,7 +343,7 @@ impl DuctParams {
     /// turns the label half a turn, so it reads upright on a run drawn leftwards.
     pub fn generate(&self, flip_label: bool) -> Result<Vec<HvacPiece>> {
         self.validate()?;
-        let r = self.units.to_units(self.diameter_mm) / 2.0;
+        let r = self.units.to_units(self.plan_width_mm()) / 2.0;
         let layer = self.layer();
         let mut pieces = Vec::new();
         // The cone at the junction, if there is one; the straight part runs between x0 and x1.
@@ -307,7 +382,7 @@ impl DuctParams {
             let x = if at_end { self.length - len } else { len };
             pieces.push(HvacPiece { layer, kind: EntityKind::Line(Line { a: v3(Vec2::new(x, -r)), b: v3(Vec2::new(x, r)) }) });
         }
-        let mut text = format!("Ø{:.0}", self.diameter_mm);
+        let mut text = self.size_label();
         if let Some(f) = self.flow_m3h {
             text.push_str(&format!(" {f:.0} m³/h"));
         }
@@ -446,7 +521,7 @@ impl crate::Drawing {
     /// duct's interior (see [`interior_cut`]).
     pub fn split_duct_at(&mut self, space: &crate::Space, h: crate::Handle, at: Vec2, tol: f64) -> Result<Option<crate::Handle>> {
         let Some((p, a, b)) = self.duct_ends(h) else { return Ok(None) };
-        let Some(cut) = interior_cut(a, b, p.units.to_units(p.diameter_mm), at, tol) else { return Ok(None) };
+        let Some(cut) = interior_cut(a, b, p.units.to_units(p.plan_width_mm()), at, tol) else { return Ok(None) };
         let common = self.entity(h).ok_or(crate::DocError::NoEntity(h))?.common.clone();
         let first = DuctParams { length: a.dist(cut), ..p.clone() };
         self.regenerate_duct(h, &first)?;

@@ -2,8 +2,8 @@
 //! check the iteration here as well as the arithmetic around it.
 
 use crate::{
-    Air, DesignCriteria, Fitting, Governing, HvacError, Network, RoomUse, Segment, SegmentKind, Terminal, fresh_air_rate, friction_factor,
-    pressure_gradient, reynolds, size_network, velocity,
+    Air, DesignCriteria, Fitting, Governing, HvacError, Network, RoomUse, Section, Segment, SegmentKind, SegmentResult, Terminal,
+    equivalent_diameter_mm, fresh_air_rate, friction_factor, pressure_gradient, reynolds, size_network, velocity,
 };
 
 fn close(a: f64, b: f64, rel: f64) -> bool {
@@ -67,6 +67,8 @@ fn seg(parent: Option<usize>, length_m: f64, kind: SegmentKind, fittings: &[Fitt
         diameter_mm: None,
         fixed_pa: 0.0,
         roughness_mm: None,
+        max_height_mm: None,
+        rect_mm: None,
     }
 }
 
@@ -221,4 +223,81 @@ fn a_rougher_run_loses_more_and_may_need_a_larger_size() {
     assert_eq!(rough.segments[0], plain.segments[0], "the other runs are not affected");
     net.segments[last].roughness_mm = Some(-1.0);
     assert!(size_network(&net, &DesignCriteria::default()).is_err());
+}
+
+fn one(flow: f64, tweak: impl Fn(&mut Segment)) -> (SegmentResult, Vec<String>) {
+    let mut s = seg(None, 10.0, SegmentKind::Main, &[], Some(flow));
+    tweak(&mut s);
+    let r = size_network(&Network { segments: vec![s] }, &DesignCriteria::default()).unwrap();
+    (r.segments[0].clone(), r.warnings)
+}
+
+#[test]
+fn the_equivalent_diameter_of_a_rectangular_duct_matches_the_published_formula() {
+    // Values computed apart from the published formula 1.3 · (a·b)^0.625 / (a+b)^0.25.
+    assert!((equivalent_diameter_mm(400.0, 250.0) - 343.33).abs() < 0.01);
+    assert!((equivalent_diameter_mm(300.0, 300.0) - 327.95).abs() < 0.01);
+    assert!((equivalent_diameter_mm(1000.0, 100.0) - 301.02).abs() < 0.01, "a flat duct 1 m wide loses like a Ø301 round one");
+}
+
+#[test]
+fn a_run_stays_round_when_it_fits_the_height_and_turns_rectangular_when_it_does_not() {
+    // 150 m³/h in a connection: Ø100 or so, well under 250 mm.
+    let (small, _) = one(150.0, |s| {
+        s.kind = SegmentKind::Connection;
+        s.max_height_mm = Some(250.0)
+    });
+    assert_eq!(small.section, Section::Round);
+    assert!(small.diameter_mm <= 250.0 && small.width_mm == small.height_mm);
+    // 1800 m³/h needs about Ø355 round: it does not fit 250 mm.
+    let free = one(1800.0, |_| {}).0;
+    assert!(free.diameter_mm > 250.0 && free.section == Section::Round);
+    let (rect, warnings) = one(1800.0, |s| s.max_height_mm = Some(250.0));
+    assert_eq!(rect.section, Section::Rectangular);
+    assert_eq!(rect.height_mm, 250.0, "as tall as the space allows");
+    assert!(rect.width_mm >= rect.height_mm && rect.width_mm % 50.0 == 0.0 && rect.width_mm / rect.height_mm <= 4.0);
+    assert!(rect.velocity <= 6.0 + 1e-9 && rect.gradient_pa_m <= 1.0 + 1e-9, "{rect:?}");
+    assert!(warnings.is_empty(), "{warnings:?}");
+    // It is the narrowest that does: 50 mm less breaks a limit.
+    let narrower = (rect.width_mm - 50.0).max(250.0);
+    let v = 1800.0 / 3600.0 / (narrower / 1000.0 * 0.25);
+    let g = pressure_gradient(1800.0, equivalent_diameter_mm(narrower, 250.0), 0.15, &Air::default()).unwrap();
+    assert!(narrower == rect.width_mm || v > 6.0 || g > 1.0, "{narrower}: {v} m/s, {g} Pa/m");
+    // The velocity is the real one (flow over the section), the friction the equivalent diameter's.
+    assert!((rect.velocity - 1800.0 / 3600.0 / (rect.width_mm * rect.height_mm / 1e6)).abs() < 1e-9);
+    assert!((rect.diameter_mm - equivalent_diameter_mm(rect.width_mm, rect.height_mm)).abs() < 1e-9);
+}
+
+#[test]
+fn a_section_the_user_imposes_is_kept_and_a_height_too_small_is_refused() {
+    let (r, _) = one(600.0, |s| s.rect_mm = Some((500.0, 200.0)));
+    assert_eq!((r.section, r.width_mm, r.height_mm, r.governing), (Section::Rectangular, 500.0, 200.0, Governing::Imposed));
+    assert!((r.velocity - 600.0 / 3600.0 / 0.1).abs() < 1e-9);
+    // A rectangular section wins over a diameter.
+    let (r, _) = one(600.0, |s| {
+        s.rect_mm = Some((500.0, 200.0));
+        s.diameter_mm = Some(200.0)
+    });
+    assert_eq!(r.section, Section::Rectangular);
+    let mut s = seg(None, 10.0, SegmentKind::Main, &[], Some(1800.0));
+    s.max_height_mm = Some(60.0);
+    assert!(size_network(&Network { segments: vec![s] }, &DesignCriteria::default()).is_err(), "below the smallest side");
+}
+
+#[test]
+fn the_aspect_ratio_limits_the_width_and_a_warning_says_when_it_is_not_enough() {
+    // 100 mm tall allows 400 mm wide: far too small for 5000 m³/h.
+    let (r, warnings) = one(5000.0, |s| s.max_height_mm = Some(100.0));
+    assert_eq!((r.width_mm, r.height_mm, r.governing), (400.0, 100.0, Governing::Largest));
+    assert!(warnings.iter().any(|w| w.contains("exceeds the limits even at 400×100")), "{warnings:?}");
+    // With a looser limit it can be wider.
+    let c = DesignCriteria { max_aspect: 20.0, ..DesignCriteria::default() };
+    let mut s = seg(None, 10.0, SegmentKind::Main, &[], Some(5000.0));
+    s.max_height_mm = Some(100.0);
+    let r = size_network(&Network { segments: vec![s] }, &c).unwrap();
+    assert!(r.segments[0].width_mm > 400.0);
+    assert!(
+        size_network(&Network { segments: vec![seg(None, 1.0, SegmentKind::Main, &[], Some(100.0))] }, &DesignCriteria { side_step_mm: 0.0, ..c })
+            .is_err()
+    );
 }

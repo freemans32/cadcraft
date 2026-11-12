@@ -3,8 +3,8 @@
 //! command so the object is regenerated, as the command line would.
 
 use cadcraft_doc::{
-    AccessoryKind, AccessoryParams, AirDirection, Drawing, DuctKind, DuctParams, Handle, SpaceParams, TerminalKind, TerminalParams,
-    WallJustification, accessory_of, air_terminal_of, duct_of, space_of, wall_of,
+    AccessoryKind, AccessoryParams, AhuParams, AirDirection, Drawing, DuctKind, DuctParams, DuctShape, Handle, SpaceParams, TerminalKind,
+    TerminalParams, WallJustification, accessory_of, ahu_of, air_terminal_of, duct_of, space_of, wall_of,
 };
 use cadcraft_hvac::RoomUse;
 use egui::{Sense, pos2, vec2};
@@ -45,6 +45,10 @@ pub(super) fn section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], len: &dyn 
     let terminals: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| air_terminal_of(e))).collect();
     if !terminals.is_empty() && terminals.len() == sel.len() {
         return terminal_section(ui, d, sel, &terminals, bad);
+    }
+    let units: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| ahu_of(e))).collect();
+    if !units.is_empty() && units.len() == sel.len() {
+        return ahu_section(ui, sel, &units, bad);
     }
     let accessories: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| accessory_of(e))).collect();
     if !accessories.is_empty() && accessories.len() == sel.len() {
@@ -256,6 +260,18 @@ fn space_section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], spaces: &[Space
             }
         }
     });
+    // The height available above the false ceiling for ducts: empty or 0 leaves it to the unit's.
+    let void = shared(&spaces.iter().map(|p| p.void_height_mm.map(|v| format!("{v:.0}")).unwrap_or_default()).collect::<Vec<_>>())
+        .unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Height available (mm)", |ui| {
+        if let Some(t) = edit_field(ui, ui.scope_id().with(("space_void", &ids)), void) {
+            if t.trim().is_empty() || t.trim() == "0" {
+                action = edit("voidHeight", Value::Null);
+            } else if let Some(v) = number(Some(t), bad) {
+                action = edit("voidHeight", json!(v));
+            }
+        }
+    });
     let origin = shared(&spaces.iter().map(|p| p.flow_m3h.is_some()).collect::<Vec<_>>());
     let origin = origin.map_or(VARIES, |set| if set { "Set by hand" } else { "Labour code" });
     prop_row(ui, "Flow from", |ui| read_only(ui, origin));
@@ -339,6 +355,52 @@ fn terminal_section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], ts: &[Termin
 }
 
 // =====================================================================================
+// Air handling units
+// =====================================================================================
+
+fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams], bad: &mut Option<String>) -> Action {
+    let ids = handles(sel);
+    let mut action: Action = None;
+    let edit = |key: &str, value: Value| Some(("ahuedit", json!({ "handles": ids, key: value })));
+    group(ui, "Air Handling Unit");
+    let name = shared(&units.iter().map(|p| p.name.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Name", |ui| {
+        if let Some(n) = edit_field(ui, ui.scope_id().with(("ahu_name", &ids)), name).filter(|n| !n.trim().is_empty() && n != VARIES) {
+            action = edit("name", json!(n));
+        }
+    });
+    // The height available above the false ceiling for its ducts: empty or 0 means round ducts only.
+    // A space may say its own.
+    let void = shared(&units.iter().map(|p| p.void_height_mm.map(|v| format!("{v:.0}")).unwrap_or_default()).collect::<Vec<_>>())
+        .unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Height available (mm)", |ui| {
+        if let Some(t) = edit_field(ui, ui.scope_id().with(("ahu_void", &ids)), void) {
+            if t.trim().is_empty() || t.trim() == "0" {
+                action = edit("voidHeight", Value::Null);
+            } else if let Some(v) = number(Some(t), bad) {
+                action = edit("voidHeight", json!(v));
+            }
+        }
+    });
+    let margin = shared(&units.iter().map(|p| format!("{:.0}", p.margin_mm)).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Margin (mm)", |ui| {
+        if let Some(m) = number(edit_field(ui, ui.scope_id().with(("ahu_margin", &ids)), margin), bad) {
+            action = edit("margin", json!(m));
+        }
+    });
+    if let [u] = units {
+        let flows = |f: Option<f64>, p: Option<f64>| match (f, p) {
+            (Some(f), Some(p)) => format!("{f:.0} m³/h, {p:.0} Pa"),
+            (Some(f), None) => format!("{f:.0} m³/h"),
+            _ => "—".to_string(),
+        };
+        prop_row(ui, "Supply", |ui| read_only(ui, &flows(u.flow_m3h, u.pressure_pa)));
+        prop_row(ui, "Extract", |ui| read_only(ui, &flows(u.extract_flow_m3h, u.extract_pressure_pa)));
+    }
+    action
+}
+
+// =====================================================================================
 // Ducts
 // =====================================================================================
 
@@ -357,21 +419,48 @@ fn duct_section(ui: &mut egui::Ui, sel: &[Handle], ds: &[DuctParams], len: &dyn 
     let edit = |key: &str, value: Value| Some(("ductedit", json!({ "handles": ids, key: value })));
     group(ui, "Duct");
     let imposed = shared(&ds.iter().map(|p| p.imposed).collect::<Vec<_>>());
-    prop_row(ui, "Diameter set by", |ui| {
+    prop_row(ui, "Size set by", |ui| {
         let shown = imposed.map_or(VARIES, |i| if i { "User" } else { "Sizing" });
-        // Giving the diameter back to sizing keeps the size until the next DUCTSIZE.
+        // Giving the size back to sizing keeps it until the next DUCTSIZE.
         if let Some(c) = choice(ui, shown, &[("auto", "Sizing"), ("keep", "User")]) {
             if c == "auto" {
                 action = edit("diameter", json!("auto"));
-            } else if let Some(mm) = shared(&ds.iter().map(|p| p.diameter_mm.to_bits()).collect::<Vec<_>>()).map(f64::from_bits) {
-                action = edit("diameter", json!(mm));
+            } else if let [p] = ds {
+                action = match p.shape {
+                    DuctShape::Round => edit("diameter", json!(p.diameter_mm)),
+                    DuctShape::Rectangular => Some(("ductedit", json!({ "handles": ids, "width": p.width_mm, "height": p.height_mm }))),
+                };
             }
         }
     });
-    let diameter = shared(&ds.iter().map(|p| format!("{:.0}", p.diameter_mm)).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    if let [p] = ds {
+        prop_row(ui, "Section", |ui| read_only(ui, &p.size_label()));
+    }
+    // A diameter typed makes the duct round, a width or a height rectangular (the missing side is
+    // the other one, else the diameter).
+    let diameter =
+        shared(&ds.iter().map(|p| if p.shape == DuctShape::Round { format!("{:.0}", p.diameter_mm) } else { String::new() }).collect::<Vec<_>>())
+            .unwrap_or_else(|| VARIES.into());
     prop_row(ui, "Diameter (mm)", |ui| {
         if let Some(mm) = number(edit_field(ui, ui.scope_id().with(("duct_diameter", &ids)), diameter), bad) {
             action = edit("diameter", json!(mm));
+        }
+    });
+    let side = |f: fn(&DuctParams) -> f64| {
+        shared(&ds.iter().map(|p| if p.shape == DuctShape::Rectangular { format!("{:.0}", f(p)) } else { String::new() }).collect::<Vec<_>>())
+            .unwrap_or_else(|| VARIES.into())
+    };
+    let (width, height) = (side(|p| p.width_mm), side(|p| p.height_mm));
+    prop_row(ui, "Width (mm)", |ui| {
+        if let (Some(w), [p]) = (number(edit_field(ui, ui.scope_id().with(("duct_width", &ids)), width), bad), ds) {
+            let h = if p.height_mm > 0.0 { p.height_mm } else { p.diameter_mm };
+            action = Some(("ductedit", json!({ "handles": ids, "width": w, "height": h })));
+        }
+    });
+    prop_row(ui, "Height (mm)", |ui| {
+        if let (Some(h), [p]) = (number(edit_field(ui, ui.scope_id().with(("duct_height", &ids)), height), bad), ds) {
+            let w = if p.width_mm > 0.0 { p.width_mm } else { p.diameter_mm };
+            action = Some(("ductedit", json!({ "handles": ids, "width": w, "height": h })));
         }
     });
     let kind = shared(&ds.iter().map(|p| p.kind).collect::<Vec<_>>());
@@ -610,5 +699,24 @@ mod hvac_tests {
         let a = cadcraft_doc::accessory_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
         assert_eq!(a.length_mm, 1200.0);
         assert_eq!(a.loss(), cadcraft_doc::Loss::Pascals(45.0));
+    }
+
+    #[test]
+    fn a_selected_unit_takes_the_margin_typed_in_the_palette() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        let r = app.run("ahuadd", json!({ "at": [0, 0], "voidHeight": 350 })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+        app.session.set_selection(vec![h]);
+        let mut hn = palette(app);
+        // The height available shows its value, and the margin 100 mm by default.
+        assert!(hn.get_all_by_value("350").next().is_some());
+        type_into(&mut hn, "100", "60");
+        let a = cadcraft_doc::ahu_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!((a.margin_mm, a.void_height_mm), (60.0, Some(350.0)));
+        // A height typed gives the unit's ducts room: 350 becomes 400.
+        type_into(&mut hn, "350", "400");
+        let a = cadcraft_doc::ahu_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!(a.void_height_mm, Some(400.0));
     }
 }

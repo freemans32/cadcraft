@@ -3,7 +3,7 @@
 //! changes runs already drawn and DUCTSIZE sizes every network from its terminals back to its unit.
 //! The network is read from the drawing each time (`Drawing::duct_networks`), never stored.
 
-use cadcraft_doc::{AhuParams, AirDirection, Drawing, DuctKind, DuctParams, EntityKind, Handle, HvacUnits, MAX_DUCTS};
+use cadcraft_doc::{AhuParams, AirDirection, Drawing, DuctKind, DuctParams, DuctShape, EntityKind, Handle, HvacUnits, MAX_DUCTS};
 use cadcraft_geom::Vec2;
 use cadcraft_hvac::{DesignCriteria, Governing, size_network};
 use serde_json::{Value, json};
@@ -16,23 +16,29 @@ pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("ahuadd", "Air Handling Unit", run_ahuadd)
             .menu(&["Draw", "HVAC", "Air Handling Unit"])
-            .params("{at, name?, width? (mm), depth? (mm), rotation? (degrees), labelHeight? (mm)} → {handle, name} (a double-flux unit: its ducts and terminals say supply or extract)")
+            .params(
+                "{at, name?, width? (mm), depth? (mm), voidHeight? (mm available above the false ceiling for its ducts), margin? (mm kept from it, \
+                 default 100), rotation? (degrees), labelHeight? (mm)} → {handle, name} (a double-flux unit: its ducts and terminals say supply or extract)",
+            )
             .interactive(|s| Ok(Box::new(AhuAddM::new(s)))),
+        CommandSpec::new("ahuedit", "Edit Air Handling Unit", run_ahuedit)
+            .params("{handle | handles, name?, width? (mm), depth? (mm), voidHeight? (mm, or null for none), margin? (mm)} → {changed}"),
         CommandSpec::new("ductadd", "Duct", run_ductadd)
             .menu(&["Draw", "HVAC", "Duct"])
             .params(
                 "{points (2 or more; one round duct per segment), diameter? (mm), kind?: auto|main|branch|connection, \
-                 air?: auto|supply|extract (auto: from the terminals it serves), flexible? (true: a flexible duct), labelHeight? (mm)} → {handles}",
+                 width? + height? (mm; a rectangular duct), air?: auto|supply|extract (auto: from the terminals it serves), flexible? (true: a flexible duct), labelHeight? (mm)} → {handles}",
             )
             .interactive(|s| Ok(Box::new(DuctAddM::new(s)))),
         CommandSpec::new("ductedit", "Edit Duct", run_ductedit)
-            .params("{handle | handles, diameter? (mm, or auto: sizing chooses it), kind?, air?, flexible? (true or false)} → {changed}"),
+            .params("{handle | handles, diameter? (mm, or auto: sizing chooses the size) | width? + height? (mm; a rectangular section), kind?, air?, flexible? (true or false)} → {changed}"),
         CommandSpec::new("ductconnect", "Connect Terminals", run_ductconnect).menu(&["Draw", "HVAC", "Connect Terminals"]).params(
             "{terminals? (handles; default every terminal no duct reaches), maxDistance? (mm, default 3000)} → {created (flexible ducts), skipped}",
         ),
         CommandSpec::new("ductsize", "Size Ducts", run_ductsize).menu(&["Draw", "HVAC", "Size Ducts"]).params(
             "{ahu? (handle; default every unit), maxVelocityMain? (m/s), maxVelocityBranch?, maxVelocityConnection?, \
-             maxGradient? (Pa/m)} → {networks: [{ahu, totalFlow (m³/h), requiredPressure (Pa), criticalPath, segments, warnings}]}",
+             maxGradient? (Pa/m), maxAspect? (width / height of a rectangular duct, default 4), sideStep? (mm, default 50), \
+             minSide? (mm, default 100), maxSide? (mm, default 2000)} → {networks: [{ahu, totalFlow (m³/h), requiredPressure (Pa), criticalPath, segments, warnings}]}",
         ),
     ]
 }
@@ -60,6 +66,40 @@ pub struct DuctLastUsed {
     pub flexible: bool,
 }
 
+/// A size the user gives a duct: a diameter, or width and height.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Imposed {
+    Round(f64),
+    Rect(f64, f64),
+}
+
+impl Imposed {
+    /// Reads `250` as a diameter and `400x250` (or `400×250`, `400*250`) as width and height, mm.
+    fn parse(text: &str) -> Option<Imposed> {
+        let ok = |v: f64| v.is_finite() && (cadcraft_doc::DUCT_DIAMETER_MM.0..=cadcraft_doc::DUCT_DIAMETER_MM.1).contains(&v);
+        match text.trim().split_once(['x', 'X', '×', '*']) {
+            Some((w, h)) => {
+                let (w, h) = (w.trim().parse::<f64>().ok()?, h.trim().parse::<f64>().ok()?);
+                (ok(w) && ok(h)).then_some(Imposed::Rect(w, h))
+            }
+            None => text.trim().parse::<f64>().ok().filter(|d| ok(*d)).map(Imposed::Round),
+        }
+    }
+
+    /// `params` with this size, kept by sizing.
+    fn apply(self, p: &mut DuctParams) {
+        p.imposed = true;
+        match self {
+            Imposed::Round(d) => (p.shape, p.diameter_mm, p.width_mm, p.height_mm) = (DuctShape::Round, d, 0.0, 0.0),
+            Imposed::Rect(w, h) => {
+                let equivalent =
+                    cadcraft_hvac::equivalent_diameter_mm(w, h).clamp(cadcraft_doc::DUCT_DIAMETER_MM.0, cadcraft_doc::DUCT_DIAMETER_MM.1);
+                (p.shape, p.diameter_mm, p.width_mm, p.height_mm) = (DuctShape::Rectangular, equivalent, w, h);
+            }
+        }
+    }
+}
+
 impl Default for DuctLastUsed {
     fn default() -> Self {
         DuctLastUsed { diameter_mm: 200.0, kind: DuctKind::Auto, air: None, flexible: false }
@@ -81,6 +121,15 @@ fn positive(cmd: &str, p: &Value, key: &str) -> Result<Option<f64>> {
     match p.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(v) => v.as_f64().filter(|x| x.is_finite() && *x > 0.0).map(Some).ok_or_else(|| bad(cmd, format!("`{key}` must be a positive number"))),
+    }
+}
+
+fn non_negative(cmd: &str, p: &Value, key: &str) -> Result<Option<f64>> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => {
+            v.as_f64().filter(|x| x.is_finite() && *x >= 0.0).map(Some).ok_or_else(|| bad(cmd, format!("`{key}` must be a number, 0 or more")))
+        }
     }
 }
 
@@ -139,11 +188,49 @@ fn run_ahuadd(s: &mut Session, p: &Value) -> Result<Value> {
         pressure_pa: None,
         extract_flow_m3h: None,
         extract_pressure_pa: None,
+        void_height_mm: positive(CMD, p, "voidHeight")?,
+        margin_mm: non_negative(CMD, p, "margin")?.unwrap_or(100.0),
         label_height_mm: positive(CMD, p, "labelHeight")?.unwrap_or(100.0),
         units: units_of(s)?,
     };
     let h = add_ahu(s, &params, at, f64_or(p, "rotation", 0.0).to_radians())?;
     Ok(json!({ "handle": h.hex(), "name": params.name }))
+}
+
+fn run_ahuedit(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "ahuedit";
+    let hs = super::arch::handles_param(CMD, p)?;
+    if hs.is_empty() || hs.len() > MAX_EDITED {
+        return Err(bad(CMD, format!("select 1 to {MAX_EDITED} units")));
+    }
+    let (width, depth, margin) = (positive(CMD, p, "width")?, positive(CMD, p, "depth")?, non_negative(CMD, p, "margin")?);
+    // A null height available clears it: the ducts are round again.
+    let void = match p.get("voidHeight") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(_) => Some(positive(CMD, p, "voidHeight")?),
+    };
+    let d = s.doc()?;
+    let mut next = Vec::with_capacity(hs.len());
+    for h in &hs {
+        let mut a = d.entity(*h).and_then(|e| cadcraft_doc::ahu_of(e)).ok_or_else(|| other("Select air handling units only."))?;
+        if let Some(n) = str_param(p, "name") {
+            a.name = n.to_string();
+        }
+        a.width_mm = width.unwrap_or(a.width_mm);
+        a.depth_mm = depth.unwrap_or(a.depth_mm);
+        a.margin_mm = margin.unwrap_or(a.margin_mm);
+        if let Some(v) = void {
+            a.void_height_mm = v;
+        }
+        a.validate().map_err(doc_err)?;
+        next.push((*h, a));
+    }
+    let d = s.doc_mut()?;
+    for (h, a) in &next {
+        d.regenerate_ahu(*h, a).map_err(doc_err)?;
+    }
+    Ok(json!({ "changed": next.len() }))
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -199,6 +286,8 @@ impl AhuAddM {
                     pressure_pa: None,
                     extract_flow_m3h: None,
                     extract_pressure_pa: None,
+                    void_height_mm: None,
+                    margin_mm: 100.0,
                     label_height_mm: 100.0,
                     units: units_of(s)?,
                 };
@@ -267,6 +356,8 @@ impl Interactive for AhuAddM {
             pressure_pa: None,
             extract_flow_m3h: None,
             extract_pressure_pa: None,
+            void_height_mm: None,
+            margin_mm: 100.0,
             label_height_mm: 100.0,
             units,
         };
@@ -318,6 +409,9 @@ fn duct_params(s: &Session, last: &DuctLastUsed, label_mm: f64) -> Result<DuctPa
         air_set: last.air.is_some(),
         flow_m3h: None,
         velocity: None,
+        shape: DuctShape::Round,
+        width_mm: 0.0,
+        height_mm: 0.0,
         flexible: last.flexible,
         reducer: None,
         label_height_mm: label_mm,
@@ -340,6 +434,12 @@ fn run_ductadd(s: &mut Session, p: &Value) -> Result<Value> {
     last.flexible = bool_param(CMD, p, "flexible")?.unwrap_or(last.flexible);
     let mut params = duct_params(s, &last, positive(CMD, p, "labelHeight")?.unwrap_or(100.0))?;
     params.imposed = p.get("diameter").is_some_and(|v| !v.is_null());
+    // Width and height together give a rectangular duct; one alone is a mistake.
+    match (positive(CMD, p, "width")?, positive(CMD, p, "height")?) {
+        (Some(w), Some(h)) => Imposed::Rect(w, h).apply(&mut params),
+        (None, None) => {}
+        _ => return Err(bad(CMD, "`width` and `height` go together")),
+    }
     let mut handles = Vec::new();
     for w in pts.windows(2) {
         if let [a, b] = w {
@@ -360,8 +460,8 @@ enum DuctAsk {
 
 struct DuctAddM {
     last: DuctLastUsed,
-    /// Whether the user typed the diameter: sizing then leaves it.
-    imposed: bool,
+    /// The size the user typed, if any: sizing then leaves it.
+    imposed: Option<Imposed>,
     pts: Vec<Vec2>,
     handles: Vec<Handle>,
     ask: DuctAsk,
@@ -369,10 +469,10 @@ struct DuctAddM {
 
 impl DuctAddM {
     fn new(s: &Session) -> Self {
-        DuctAddM { last: s.last_used.duct.clone(), imposed: false, pts: Vec::new(), handles: Vec::new(), ask: DuctAsk::Point }
+        DuctAddM { last: s.last_used.duct.clone(), imposed: None, pts: Vec::new(), handles: Vec::new(), ask: DuctAsk::Point }
     }
     fn settings(&self, s: &mut Session) {
-        let d = if self.imposed { format!("{}", self.last.diameter_mm) } else { "Auto".to_string() };
+        let d = self.imposed_text();
         let material = if self.last.flexible { "Flexible" } else { "Rigid" };
         s.echo(format!(
             "Current settings: Diameter = {d}, Kind = {}, Air = {}, Material = {material}",
@@ -380,9 +480,19 @@ impl DuctAddM {
             self.last.air.map_or("auto", AirDirection::name)
         ));
     }
+    /// The size to show: what was typed, or Auto.
+    fn imposed_text(&self) -> String {
+        match self.imposed {
+            Some(Imposed::Round(d)) => format!("{d}"),
+            Some(Imposed::Rect(w, h)) => format!("{w}x{h}"),
+            None => "Auto".to_string(),
+        }
+    }
     fn params(&self, s: &Session) -> Result<DuctParams> {
         let mut p = duct_params(s, &self.last, 100.0)?;
-        p.imposed = self.imposed;
+        if let Some(size) = self.imposed {
+            size.apply(&mut p);
+        }
         Ok(p)
     }
     fn point(&mut self, s: &mut Session, p: Vec2) -> Result<Step> {
@@ -429,14 +539,13 @@ impl DuctAddM {
             _ => None,
         };
         match (self.ask, text.as_deref()) {
-            (DuctAsk::Diameter, Some(t)) if t.eq_ignore_ascii_case("auto") => self.imposed = false,
+            (DuctAsk::Diameter, Some(t)) if t.eq_ignore_ascii_case("auto") => self.imposed = None,
             (DuctAsk::Diameter, Some(t)) => {
-                self.last.diameter_mm = t
-                    .parse::<f64>()
-                    .ok()
-                    .filter(|d| d.is_finite() && (cadcraft_doc::DUCT_DIAMETER_MM.0..=cadcraft_doc::DUCT_DIAMETER_MM.1).contains(d))
-                    .ok_or_else(|| other("Requires a diameter in millimetres, or Auto."))?;
-                self.imposed = true;
+                let size = Imposed::parse(t).ok_or_else(|| other("Requires a diameter in millimetres, a size such as 400x250, or Auto."))?;
+                if let Imposed::Round(d) = size {
+                    self.last.diameter_mm = d;
+                }
+                self.imposed = Some(size);
             }
             (DuctAsk::Kind, Some(t)) => self.last.kind = DuctKind::parse(t).ok_or_else(|| other("Enter Auto, Main, Branch or Connection."))?,
             (DuctAsk::Air, Some(t)) if t.eq_ignore_ascii_case("auto") => self.last.air = None,
@@ -466,11 +575,7 @@ impl Interactive for DuctAddM {
     }
     fn prompt(&self, _s: &Session) -> Prompt {
         match self.ask {
-            DuctAsk::Diameter => Prompt::new("Enter duct diameter (mm) or [Auto]", Accept::TEXT).default(if self.imposed {
-                format!("{}", self.last.diameter_mm)
-            } else {
-                "Auto".to_string()
-            }),
+            DuctAsk::Diameter => Prompt::new("Enter duct diameter (mm), width x height (mm) or [Auto]", Accept::TEXT).default(self.imposed_text()),
             DuctAsk::Kind => {
                 Prompt::new("Enter duct kind", super::curves::KW).kw(&["Auto", "Main", "Branch", "Connection"]).default(self.last.kind.name())
             }
@@ -521,11 +626,16 @@ fn run_ductedit(s: &mut Session, p: &Value) -> Result<Value> {
     if hs.is_empty() || hs.len() > MAX_EDITED {
         return Err(bad(CMD, format!("select 1 to {MAX_EDITED} ducts")));
     }
-    // A number imposes the diameter; "auto" gives it back to sizing.
-    let diameter: Option<Option<f64>> = match p.get("diameter") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(t)) if t.trim().eq_ignore_ascii_case("auto") => Some(None),
-        Some(v) => Some(Some(v.as_f64().filter(|d| d.is_finite()).ok_or_else(|| bad(CMD, "`diameter` must be a number of millimetres or auto"))?)),
+    // A number imposes the diameter, `width` and `height` together a rectangular section; "auto" gives
+    // the size back to sizing.
+    let size: Option<Option<Imposed>> = match (p.get("diameter"), positive(CMD, p, "width")?, positive(CMD, p, "height")?) {
+        (_, Some(w), Some(h)) => Some(Some(Imposed::Rect(w, h))),
+        (_, Some(_), None) | (_, None, Some(_)) => return Err(bad(CMD, "`width` and `height` go together")),
+        (None | Some(Value::Null), None, None) => None,
+        (Some(Value::String(t)), None, None) if t.trim().eq_ignore_ascii_case("auto") => Some(None),
+        (Some(v), None, None) => Some(Some(Imposed::Round(
+            v.as_f64().filter(|d| d.is_finite()).ok_or_else(|| bad(CMD, "`diameter` must be a number of millimetres or auto"))?,
+        ))),
     };
     let (kind, air) = (kind_param(CMD, p)?, duct_air_param(CMD, p)?);
     let flexible = bool_param(CMD, p, "flexible")?;
@@ -533,11 +643,8 @@ fn run_ductedit(s: &mut Session, p: &Value) -> Result<Value> {
     let mut next = Vec::with_capacity(hs.len());
     for h in &hs {
         let (mut dp, ..) = d.duct_ends(*h).ok_or_else(|| other("Select ducts only."))?;
-        match diameter {
-            Some(Some(mm)) => {
-                dp.diameter_mm = mm;
-                dp.imposed = true;
-            }
+        match size {
+            Some(Some(imposed)) => imposed.apply(&mut dp),
             Some(None) => dp.imposed = false,
             None => {}
         }
@@ -643,6 +750,9 @@ fn run_ductconnect(s: &mut Session, p: &Value) -> Result<Value> {
             air_set: true,
             flow_m3h: None,
             velocity: None,
+            shape: DuctShape::Round,
+            width_mm: 0.0,
+            height_mm: 0.0,
             flexible: true,
             reducer: None,
             label_height_mm: 100.0,
@@ -656,6 +766,13 @@ fn run_ductconnect(s: &mut Session, p: &Value) -> Result<Value> {
 // =====================================================================================
 // DUCTSIZE
 // =====================================================================================
+
+fn section_name(s: cadcraft_hvac::Section) -> &'static str {
+    match s {
+        cadcraft_hvac::Section::Round => "round",
+        cadcraft_hvac::Section::Rectangular => "rectangular",
+    }
+}
 
 fn governing_name(g: Governing) -> &'static str {
     match g {
@@ -678,7 +795,7 @@ fn size_with_reducers(
     for (i, seg) in with.segments.iter_mut().enumerate() {
         let parent = seg.parent.and_then(|p| first.segments.get(p));
         if let (Some(parent), Some(own)) = (parent, first.segments.get(i))
-            && (parent.diameter_mm - own.diameter_mm).abs() > 0.5
+            && (parent.width_mm - own.width_mm).abs() > 0.5
         {
             seg.fittings.push(cadcraft_hvac::Fitting::Reducer);
         }
@@ -770,6 +887,10 @@ fn criteria(p: &Value) -> Result<DesignCriteria> {
         ("maxVelocityBranch", &mut c.max_velocity_branch),
         ("maxVelocityConnection", &mut c.max_velocity_connection),
         ("maxGradient", &mut c.max_gradient_pa_m),
+        ("maxAspect", &mut c.max_aspect),
+        ("sideStep", &mut c.side_step_mm),
+        ("minSide", &mut c.min_side_mm),
+        ("maxSide", &mut c.max_side_mm),
     ] {
         if let Some(v) = positive(CMD, p, key)? {
             *slot = v;
@@ -826,7 +947,8 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
             .zip(&report.segments)
             .map(|(h, r)| {
                 json!({
-                    "handle": h.hex(), "flow": r.flow_m3h, "diameter": r.diameter_mm, "velocity": r.velocity,
+                    "handle": h.hex(), "flow": r.flow_m3h, "diameter": r.diameter_mm, "section": section_name(r.section),
+                    "width": r.width_mm, "height": r.height_mm, "velocity": r.velocity,
                     "gradient": r.gradient_pa_m, "totalPa": r.total_pa, "governing": governing_name(r.governing),
                 })
             })

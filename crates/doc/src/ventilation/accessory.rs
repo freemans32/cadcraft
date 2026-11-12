@@ -257,7 +257,7 @@ impl crate::Drawing {
             let along = (b - a).normalized();
             let t = (at - a).dot(along);
             let across = (at - a).cross(along).abs();
-            let reach = units.to_units(10.0).max(super::AXIS_REACH * p.units.to_units(p.diameter_mm));
+            let reach = units.to_units(10.0).max(super::AXIS_REACH * p.units.to_units(p.plan_width_mm()));
             if across <= reach && t >= 0.0 && t <= a.dist(b) && best.as_ref().is_none_or(|x| across < x.0) {
                 best = Some((across, e.handle, a + along * t, (b - a).angle()));
             }

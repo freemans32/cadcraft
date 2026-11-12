@@ -13,6 +13,8 @@ fn ahu() -> AhuParams {
         pressure_pa: None,
         extract_flow_m3h: None,
         extract_pressure_pa: None,
+        void_height_mm: None,
+        margin_mm: 100.0,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     }
@@ -28,6 +30,9 @@ fn duct(diameter_mm: f64) -> DuctParams {
         air_set: false,
         flow_m3h: None,
         velocity: None,
+        shape: DuctShape::Round,
+        width_mm: 0.0,
+        height_mm: 0.0,
         flexible: false,
         reducer: None,
         label_height_mm: 100.0,
@@ -473,4 +478,154 @@ fn a_double_flux_unit_with_both_trees_on_auto_keeps_them_apart() {
     assert!(nets.iter().all(|n| n.network.segments.len() == 1 && n.unconnected.is_empty()));
     assert_eq!(nets[0].network.segments[0].terminal.map(|x| x.flow_m3h), Some(300.0));
     assert_eq!(nets[1].network.segments[0].terminal.map(|x| x.flow_m3h), Some(250.0));
+}
+
+fn rect_duct(w: f64, h: f64) -> DuctParams {
+    DuctParams { shape: DuctShape::Rectangular, width_mm: w, height_mm: h, diameter_mm: 343.0, ..duct(200.0) }
+}
+
+#[test]
+fn a_rectangular_duct_is_drawn_as_wide_as_its_width_and_labelled_with_its_sides() {
+    let p = DuctParams { length: 1000.0, ..rect_duct(400.0, 250.0) };
+    assert_eq!((p.plan_width_mm(), p.size_label().as_str()), (400.0, "400×250"));
+    let pieces = p.generate(false).unwrap();
+    let sides = polylines(&pieces);
+    assert_eq!((sides[0][0].y, sides[1][0].y), (200.0, -200.0), "400 mm wide in plan");
+    assert!(text_of(&pieces).value.starts_with("400×250"));
+    assert!(DuctParams { width_mm: 5.0, ..p.clone() }.validate().is_err());
+    assert!(DuctParams { height_mm: f64::NAN, ..p.clone() }.validate().is_err());
+    // A round duct is unchanged.
+    assert_eq!(DuctParams { length: 1000.0, ..duct(200.0) }.size_label(), "Ø200");
+    // And the shape survives its data.
+    assert_eq!(DuctParams::from_xdata(&p.to_xdata().unwrap()), Some(p));
+}
+
+/// A unit with `void` mm available above the false ceiling, a trunk of `flow` m³/h reaching
+/// four 300 m³/h diffusers by connections.
+fn hall(void: Option<f64>) -> Drawing {
+    let mut d = Drawing::new_metric();
+    let unit = AhuParams { void_height_mm: void, ..ahu() };
+    d.add_ahu(&Space::Model, Common::default(), &unit, Vec2::ZERO, 0.0).unwrap();
+    let mut from = 500.0;
+    for x in [2000.0, 4000.0, 6000.0, 8000.0] {
+        add_duct(&mut d, (from, 0.0), (x, 0.0));
+        add_duct(&mut d, (x, 0.0), (x, -1500.0));
+        add_terminal(&mut d, (x, -1500.0), 300.0);
+        from = x;
+    }
+    d
+}
+
+fn size_all(d: &mut Drawing) -> cadcraft_hvac::NetworkReport {
+    let net = d.duct_networks().unwrap().remove(0);
+    let report = size_network(&net.network, &DesignCriteria::default()).unwrap();
+    d.apply_duct_report(&net, &report).unwrap();
+    report
+}
+
+#[test]
+fn the_height_available_less_the_margin_goes_to_every_run_of_the_network() {
+    let d = hall(Some(350.0));
+    let net = d.duct_networks().unwrap().remove(0);
+    assert!(net.network.segments.iter().all(|s| s.max_height_mm == Some(250.0)), "350 less the 100 mm margin");
+    assert!(hall(None).duct_networks().unwrap()[0].network.segments.iter().all(|s| s.max_height_mm.is_none()));
+    let unit = AhuParams { void_height_mm: Some(350.0), margin_mm: 50.0, ..ahu() };
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &unit, Vec2::ZERO, 0.0).unwrap();
+    add_duct(&mut d, (500.0, 0.0), (3000.0, 0.0));
+    add_terminal(&mut d, (3000.0, 0.0), 100.0);
+    assert_eq!(d.duct_networks().unwrap()[0].network.segments[0].max_height_mm, Some(300.0));
+}
+
+#[test]
+fn a_space_with_its_own_height_wins_over_the_units_where_the_duct_runs_in_it() {
+    let mut d = hall(Some(350.0));
+    // A room of 1.5 m below the trunk's left half only (x from 0 to 3000, y from -500 to 500), 200 mm available.
+    let room = SpaceParams {
+        name: "Local bas".into(),
+        room: cadcraft_hvac::RoomUse::Office,
+        occupants: 1,
+        collective: true,
+        flow_m3h: None,
+        void_height_mm: Some(200.0),
+        outline: vec![Vec2::new(0.0, 0.0), Vec2::new(3000.0, 0.0), Vec2::new(3000.0, 1000.0), Vec2::new(0.0, 1000.0)],
+        label_height_mm: 100.0,
+        units: HvacUnits::default(),
+    };
+    // Block coordinates start at the first point: it sits at (0, -500).
+    d.add_space(&Space::Model, Common::default(), SpaceParams { ..room }).unwrap();
+    let net = d.duct_networks().unwrap().remove(0);
+    let heights: Vec<_> = net.network.segments.iter().map(|s| s.max_height_mm).collect();
+    // The first trunk piece (midpoint x = 1250) is inside; its neighbours are not.
+    assert_eq!(heights[0], Some(100.0), "200 less the margin, in the room");
+    assert!(heights[1..].contains(&Some(250.0)), "{heights:?}");
+}
+
+#[test]
+fn a_network_is_sized_round_where_it_fits_and_rectangular_where_it_does_not() {
+    let mut d = hall(Some(350.0));
+    let report = size_all(&mut d);
+    let sizes: Vec<_> = d
+        .duct_networks()
+        .unwrap()
+        .remove(0)
+        .ducts
+        .iter()
+        .map(|h| {
+            let (p, ..) = d.duct_ends(*h).unwrap();
+            (p.shape, p.width_mm, p.height_mm, p.size_label())
+        })
+        .collect();
+    // The trunk starts with 1200 m³/h: too big to be round in 250 mm; the connections are round.
+    let trunk = &sizes[0];
+    assert_eq!(trunk.0, DuctShape::Rectangular, "{sizes:?}");
+    assert_eq!(trunk.2, 250.0);
+    assert!(trunk.1 % 50.0 == 0.0 && trunk.1 >= 250.0);
+    assert!(sizes.iter().filter(|s| s.0 == DuctShape::Round).count() >= 3, "{sizes:?}");
+    assert!(sizes.iter().filter(|s| s.0 == DuctShape::Round).all(|s| s.1 == 0.0 && s.3.starts_with('Ø')));
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    // A drawing with no height available is all round, as before.
+    let mut d = hall(None);
+    size_all(&mut d);
+    assert!(d.model.iter().filter_map(|e| duct_of(e)).all(|p| p.shape == DuctShape::Round));
+}
+
+#[test]
+fn a_reducer_is_drawn_where_a_round_run_meets_a_rectangular_one() {
+    let mut d = hall(Some(350.0));
+    size_all(&mut d);
+    let net = d.duct_networks().unwrap().remove(0);
+    let reducers: Vec<_> = net.ducts.iter().filter_map(|h| d.duct_ends(*h)).filter_map(|(p, ..)| p.reducer.map(|r| (p.shape, r.from_mm))).collect();
+    // A round connection leaves the rectangular trunk: it starts from the trunk's width.
+    assert!(reducers.iter().any(|(shape, from)| *shape == DuctShape::Round && *from >= 250.0), "{reducers:?}");
+}
+
+#[test]
+fn a_section_the_user_imposed_is_kept_and_a_round_one_too() {
+    let mut d = hall(Some(350.0));
+    let trunk = d.duct_networks().unwrap()[0].ducts[0];
+    let (mut p, ..) = d.duct_ends(trunk).unwrap();
+    (p.shape, p.width_mm, p.height_mm, p.imposed) = (DuctShape::Rectangular, 500.0, 200.0, true);
+    d.regenerate_duct(trunk, &p).unwrap();
+    assert_eq!(d.duct_networks().unwrap()[0].network.segments[0].rect_mm, Some((500.0, 200.0)));
+    size_all(&mut d);
+    let (after, ..) = d.duct_ends(trunk).unwrap();
+    assert_eq!((after.shape, after.width_mm, after.height_mm), (DuctShape::Rectangular, 500.0, 200.0));
+    // Imposed round: no rectangle for the segment.
+    let (mut q, ..) = d.duct_ends(trunk).unwrap();
+    (q.shape, q.width_mm, q.height_mm, q.diameter_mm) = (DuctShape::Round, 0.0, 0.0, 315.0);
+    d.regenerate_duct(trunk, &q).unwrap();
+    let seg = d.duct_networks().unwrap()[0].network.segments[0].clone();
+    assert_eq!((seg.diameter_mm, seg.rect_mm), (Some(315.0), None));
+}
+
+#[test]
+fn a_height_too_small_for_any_duct_is_an_error_not_a_panic() {
+    let d = hall(Some(150.0));
+    let net = d.duct_networks().unwrap().remove(0);
+    assert_eq!(net.network.segments[0].max_height_mm, Some(50.0));
+    // 50 mm is below the smallest side, but only when a round duct would not fit it: sizing says so.
+    assert!(size_network(&net.network, &DesignCriteria::default()).is_err());
+    assert!(AhuParams { void_height_mm: Some(10.0), ..ahu() }.validate().is_err());
+    assert!(AhuParams { margin_mm: -1.0, ..ahu() }.validate().is_err());
 }

@@ -21,7 +21,8 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["Draw", "HVAC", "Space"])
             .params(
                 "{points | handle (closed polyline), name?, use?: office|meeting|lightWorkshop|workshop|toilet|shower|\
-                 showerToilet|sanitary|washbasins, occupants?, fixtures?, collective?, flow? (m³/h), labelHeight? (mm)} \
+                 showerToilet|sanitary|washbasins, occupants?, fixtures?, collective?, flow? (m³/h), voidHeight? (mm available above the false ceiling \
+                 for ducts), labelHeight? (mm)} \
                  → {handle, area (m²), flow (m³/h)}",
             )
             .interactive(|s| Ok(Box::new(SpaceAddM::new(s)))),
@@ -35,7 +36,8 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|s| Ok(Box::new(TerminalAddM::new(s)))),
         CommandSpec::new("spaceedit", "Edit Space", run_spaceedit)
             .params(
-                "{handle | handles, name?, use?, occupants?, fixtures?, collective?, flow? (m³/h; null: the labour code's)} \
+                "{handle | handles, name?, use?, occupants?, fixtures?, collective?, flow? (m³/h; null: the labour code's), \
+                 voidHeight? (mm available above the false ceiling for ducts; null: the unit's)} \
                  → {regenerated, flow}",
             )
             .interactive(|s| Ok(Box::new(SpaceEditM::new(s)))),
@@ -186,6 +188,7 @@ fn run_spaceadd(s: &mut Session, p: &Value) -> Result<Value> {
         occupants: u32_param(CMD, p, "occupants", 1)?,
         collective: bool_or(p, "collective", true),
         flow_m3h: positive_param(CMD, p, "flow")?,
+        void_height_mm: positive_param(CMD, p, "voidHeight")?,
         outline,
         label_height_mm: positive_param(CMD, p, "labelHeight")?.unwrap_or(200.0),
         units: HvacUnits::of(d),
@@ -227,6 +230,7 @@ impl SpaceAddM {
             occupants: self.occupants,
             collective: true,
             flow_m3h: self.flow,
+            void_height_mm: None,
             outline,
             label_height_mm: 200.0,
             units: HvacUnits::of(s.doc()?),
@@ -740,6 +744,8 @@ struct SpaceChange {
     collective: Option<bool>,
     /// `Some(None)` goes back to the labour code's flow.
     flow: Option<Option<f64>>,
+    /// The height available above the false ceiling, mm; `Some(None)` leaves it to the unit's.
+    void_height: Option<Option<f64>>,
 }
 
 /// Most objects one edit changes.
@@ -770,6 +776,9 @@ fn edit_spaces(s: &mut Session, hs: &[Handle], c: &SpaceChange) -> Result<Vec<f6
         }
         if let Some(f) = c.flow {
             p.flow_m3h = f;
+        }
+        if let Some(v) = c.void_height {
+            p.void_height_mm = v;
         }
         p.validate().map_err(doc_err)?;
         next.push((h, p));
@@ -802,6 +811,11 @@ fn run_spaceedit(s: &mut Session, p: &Value) -> Result<Value> {
             None => None,
             Some(Value::Null) => Some(None),
             Some(_) => Some(positive_param(CMD, p, "flow")?),
+        },
+        void_height: match p.get("voidHeight") {
+            None => None,
+            Some(Value::Null) => Some(None),
+            Some(_) => Some(positive_param(CMD, p, "voidHeight")?),
         },
     };
     // `fixtures` alone changes the count of the spaces' grouped sanitary rooms or washbasins.

@@ -57,7 +57,7 @@ Remotes : `origin` = ce fork, `upstream` = `storytold/cadcraft`. Ne pousse jamai
 
 Cette section sert à reprendre le travail dans une nouvelle conversation, avec n'importe quelle IA. Elle est mise à jour en continu (règle n° 2) : date, ce qui est fait, ce qui reste.
 
-*Dernière mise à jour : 12 novembre 2026 (flèches de sens, aperçu à la pose, gaine souple, raccord des bouches, réducteurs, sens des gaines déduit).*
+*Dernière mise à jour : 12 novembre 2026 (gaines rectangulaires et hauteur disponible dans le faux-plafond).*
 
 ### Fait
 
@@ -183,8 +183,16 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
      - **Réducteurs dessinés** : `DUCTSIZE` pose un cône de 15° (`DuctReducer`) au raccord de chaque tronçon dont le diamètre diffère de son parent, et l'enlève quand les diamètres redeviennent égaux.
      - **Sens des gaines déduit** : cause du « le dimensionnement ne marche toujours pas » (message : « the terminal … is reached by no duct of its air direction (the nearest duct end is 0 mm away, a supply duct) ») : les bouches étaient en extraction, les gaines en soufflage par défaut. Une gaine a maintenant un sens **fixé à la main ou « Auto »** (`DuctParams.air_set`, défaut Auto) : en Auto, la lecture du réseau prend le sens des bouches que l'arbre de gaines dessert, arbre par arbre depuis chaque départ de la CTA (une CTA double flux garde ses deux arbres séparés), et `DUCTSIZE` écrit le sens trouvé (couleur et calque). Une bouche déjà prise par un arbre ne l'est pas par un second. Messages de `DUCTSIZE` : gaines non reliées à une CTA avec la distance à l'extrémité la plus proche, « gaines reliées : n sur total ».
      - Tests : `doc` (≈ 12 nouveaux), `hvac` (1), moteur (≈ 10, dont le montage de la salle de sport mesuré sur capture), palette. Vérifié : fmt, clippy -D warnings, `cargo test --workspace` en debug, layers, assets, captures du CLI. Pas vérifié : wasm, interface graphique.
+   - **Gaines rectangulaires, 12 novembre** (plan validé par Guillaume : hauteur disponible dans le faux-plafond, marge de sécurité, rond si ça tient sinon rectangulaire, sections mélangées dans un même réseau). Sur `perso`.
+     - **Hauteur disponible** : `AhuParams.void_height_mm` (défaut du réseau de la CTA) et `margin_mm` (100 mm par défaut), `SpaceParams.void_height_mm` (le local où passe la gaine, au milieu de son tronçon, l'emporte). La hauteur maximale d'une gaine est la hauteur disponible moins la marge. Sans hauteur disponible, tout est rond comme avant.
+     - **Calcul** (`cadcraft-hvac`) : `Section` (Round / Rectangular), `Segment.max_height_mm` et `rect_mm`, `DesignCriteria` (`side_step_mm` 50, `min_side_mm` 100, `max_side_mm` 2000, `max_aspect` 4). Un tronçon dont le diamètre calculé ne tient pas dans la hauteur devient rectangulaire, aussi haut que possible (au pas), avec la plus petite largeur qui respecte vitesse et Pa/m et un rapport largeur/hauteur borné ; la perte de charge utilise le **diamètre équivalent à même débit** (formule publique de Huebscher 1,3·(a·b)^0,625/(a+b)^0,25), la vitesse est la vraie (débit / section). Hauteur disponible sous 100 mm : erreur claire. Coefficients des coudes et tés : ceux des gaines rondes, pour l'instant.
+     - **Objets** : `DuctParams.shape`, `width_mm`, `height_mm` ; dessin à la largeur, étiquette « 400×250 » ; cône de réduction à la largeur ; `DUCTSIZE` écrit la section trouvée (jamais celle que tu as fixée) et remet une gaine ronde si la hauteur disponible disparaît.
+     - **Commandes** : `DUCTADD` (JSON `width` + `height` ; à la ligne de commande, l'option Diameter accepte `400x250`), `DUCTEDIT` (`width` + `height`, `diameter`, `"auto"`), `DUCTSIZE` (`maxAspect`, `sideStep`, `minSide`, `maxSide`, et `section`, `width`, `height` par tronçon dans le rapport), `AHUADD` (`voidHeight`, `margin`), nouvelle `AHUEDIT`, `SPACEADD` et `SPACEEDIT` (`voidHeight`).
+     - **Interface** : Propriétés d'une gaine (« Taille fixée par », Section, Diamètre, Largeur, Hauteur), d'une CTA (nom, hauteur disponible, marge, débits calculés), d'un local (hauteur disponible).
+     - Tests : `hvac` (4 nouveaux, valeurs de référence calculées à part), `doc` (8), moteur (4), palette (1). Vérifié : fmt, clippy -D warnings, `cargo test --workspace` en debug, layers, assets, capture du CLI. Pas vérifié : wasm, interface graphique.
+     - Limites : coudes et tés rectangulaires non dessinés et non spécifiques ; le cône de réduction ne montre que le changement de largeur, pas de hauteur ; pas de série de fabricant (pas régulier) ; `AHUEDIT` en JSON seulement.
    - **À étudier plus tard (demandé par Guillaume)** : convertir un dessin existant (comme sur sa capture : symboles de bouches, gaines souples, cônes, étiquettes de débit) en objets CADCraft (gaines, bouches, CTA). Pistes : reconnaître les blocs et les polylignes par calque, nom de bloc et dimensions, proposer la conversion avec aperçu et validation, ne jamais modifier le dessin d'origine.
-   - Ensuite : étape 4 (note de calcul et métré par local), puis étape 5.
+   - Ensuite : étape 4 (note de calcul et métré par local), puis les autres réseaux de l'étape 5 (frigo, condensats, eau glacée).
 5. **Export IFC** (BIM).
 6. Publier en amont, plus tard : une issue de cadrage chez `storytold/cadcraft`, puis les PR des murs une par une.
 
