@@ -32,7 +32,7 @@ use cadcraft_geom::Bounds2;
 use std::path::{Path, PathBuf};
 
 pub use cadcraft_doc::Format;
-pub use cadcraft_dxf::Version;
+pub use craft_dxf::Version;
 pub use dxf_read::entity_from_groups;
 pub use dxf_write::entity_groups;
 pub use pdf::{PdfOptions, pdf, plot};
@@ -163,10 +163,10 @@ pub fn write_with(d: &Drawing, name: impl AsRef<Path>, opts: &SaveOptions) -> Re
             // Before 2007 the text is in the code page the header declares.
             let code_page = dxf_write::code_page(d, version);
             Ok(match (opts.binary, version.utf8()) {
-                (true, true) => cadcraft_dxf::write_binary(&tags, true),
-                (true, false) => cadcraft_dxf::write_binary_in(&tags, &code_page),
-                (false, true) => cadcraft_dxf::write_ascii_as(&tags, true).into_bytes(),
-                (false, false) => cadcraft_dxf::write_ascii_in(&tags, &code_page),
+                (true, true) => craft_dxf::write_binary(&tags, true),
+                (true, false) => craft_dxf::write_binary_in(&tags, &code_page),
+                (false, true) => craft_dxf::write_ascii_as(&tags, true).into_bytes(),
+                (false, false) => craft_dxf::write_ascii_in(&tags, &code_page),
             })
         }
         // The DWG bridge reads our R2000 DXF and writes the DWG at the version asked for. Without
@@ -304,7 +304,7 @@ pub fn write_dxf(d: &Drawing) -> String {
 /// and groups after the `0` group. CADCraft keeps no handles for these: they are the handles the
 /// file gets, the same as long as the drawing doesn't change (AutoLISP's `handent`, `entget`,
 /// `tblobjname` and the dictionary functions use them).
-pub fn object_records(d: &Drawing) -> Vec<(cadcraft_doc::Handle, String, Vec<cadcraft_dxf::Tag>)> {
+pub fn object_records(d: &Drawing) -> Vec<(cadcraft_doc::Handle, String, Vec<craft_dxf::Tag>)> {
     dxf_raw::object_records(&dxf_write::tags(d, save_version(d)))
 }
 

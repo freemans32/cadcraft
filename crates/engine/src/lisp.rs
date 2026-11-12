@@ -43,7 +43,7 @@ impl LispError {
 }
 
 /// A drawing's non-graphic records as a save writes them: handle, type, groups.
-pub type ObjectRecords = Vec<(Handle, String, Vec<cadcraft_dxf::Tag>)>;
+pub type ObjectRecords = Vec<(Handle, String, Vec<craft_dxf::Tag>)>;
 
 /// One drawing's LISP environment.
 pub struct Env {
