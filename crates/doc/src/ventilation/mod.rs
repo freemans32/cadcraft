@@ -19,7 +19,7 @@ pub use accessory::*;
 pub use distribute::{Distribution, MAX_DISTRIBUTED, distribute_in_polygon};
 pub use duct::*;
 pub use library::standard_air_terminal_models;
-pub use network::{DuctNetwork, MAX_DUCTS};
+pub use network::{DuctNetwork, FLEX_ROUGHNESS_MM, MAX_DUCTS};
 pub use space::*;
 pub use terminal::*;
 
@@ -32,6 +32,41 @@ use crate::DocError;
 pub const MAX_HVAC_NAME_CHARS: usize = 64;
 /// Smallest and largest label height, millimetres.
 const LABEL_HEIGHT_MM: (f64, f64) = (1.0, 10_000.0);
+
+/// The layers of supply and extract arrows: blue and magenta, as a plan shows the two air flows.
+pub const AIR_SUPPLY_LAYER: &str = "M-HVAC-SUPPLY";
+pub const AIR_EXTRACT_LAYER: &str = "M-HVAC-EXTRACT";
+
+/// The colour a ventilation layer is created with, when it has one of its own: a bright blue and
+/// pink, readable on a dark background as on white paper.
+fn hvac_layer_color(name: &str) -> Option<cadcraft_color::Color> {
+    use cadcraft_color::{Color, Rgb};
+    match name {
+        AIR_SUPPLY_LAYER | DUCT_LAYER => Some(Color::True(Rgb(0x1e, 0x90, 0xff))),
+        AIR_EXTRACT_LAYER | DUCT_EXTRACT_LAYER => Some(Color::True(Rgb(0xff, 0x4d, 0xb8))),
+        _ => None,
+    }
+}
+
+/// The pieces of an object as preview entities, turned `rotation` radians and moved to `at`: what a
+/// command draws under the cursor before the object exists. Each carries its layer's colour, so it
+/// looks as it will even when the layer is not in the drawing yet.
+pub fn preview_entities(pieces: Vec<HvacPiece>, at: Vec2, rotation: f64) -> Vec<crate::Entity> {
+    let m = cadcraft_geom::Mat3::rotate(rotation).then(cadcraft_geom::Mat3::translate(at));
+    pieces
+        .into_iter()
+        .map(|p| {
+            let color = hvac_layer_color(p.layer).unwrap_or(cadcraft_color::Color::ByLayer);
+            let mut e = crate::Entity {
+                handle: crate::Handle(0),
+                common: crate::Common { layer: p.layer.into(), color, ..Default::default() },
+                kind: p.kind,
+            };
+            e.kind.transform(&m);
+            e
+        })
+        .collect()
+}
 
 /// How a ventilation object's millimetres become drawing units.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -167,6 +202,12 @@ impl crate::Drawing {
         let mut b = crate::Block::new(&name);
         b.anonymous = true;
         for piece in pieces {
+            if self.ensure_layer(piece.layer)
+                && let Some(c) = hvac_layer_color(piece.layer)
+                && let Some(l) = self.layers.iter_mut().find(|l| l.name == piece.layer)
+            {
+                l.color = c;
+            }
             let common = crate::Common { layer: piece.layer.into(), ..Default::default() };
             b.entities.push(crate::Entity { handle: self.new_handle(), common, kind: piece.kind });
         }

@@ -313,3 +313,182 @@ fn ductsize_reaches_a_terminal_by_the_edge_of_its_face() {
     assert_eq!(r["networks"][0]["totalFlow"], 300.0, "{r}");
     assert!(r["networks"][0]["warnings"].as_array().unwrap().is_empty(), "{r}");
 }
+
+fn bounds_x(es: &[cadcraft_doc::Entity]) -> (f64, f64) {
+    use cadcraft_doc::EntityKind;
+    let mut xs = Vec::new();
+    for e in es {
+        match &e.kind {
+            EntityKind::Line(l) => xs.extend([l.a.x, l.b.x]),
+            EntityKind::Circle(c) => xs.extend([c.center.x - c.radius, c.center.x + c.radius]),
+            EntityKind::LwPolyline(p) => xs.extend(p.vertices.iter().map(|v| v.p.x)),
+            _ => {}
+        }
+    }
+    (xs.iter().copied().fold(f64::MAX, f64::min), xs.iter().copied().fold(f64::MIN, f64::max))
+}
+
+#[test]
+fn a_terminal_is_seen_under_the_cursor_as_soon_as_its_type_is_chosen() {
+    let mut s = metric();
+    s.cmdline("airterminaladd").unwrap();
+    let at = cadcraft_geom::Vec2::new(5000.0, 3000.0);
+    // Before any click, with the default type: the 600 mm face is centred on the cursor.
+    let p = s.preview(at);
+    assert!(!p.is_empty(), "the terminal is drawn before the click");
+    let (lo, hi) = bounds_x(&p);
+    assert!(lo < 5000.0 - 300.0 && hi > 5000.0 + 300.0, "{lo} {hi}");
+    // Choosing another type changes it at once; the arrows are on the supply layer.
+    s.cmdline("t").unwrap();
+    s.cmdline("g").unwrap();
+    assert!(s.preview(at).iter().any(|e| e.common.layer == "M-HVAC-SUPPLY"));
+    // After the click it follows the cursor's direction: a grille, turned toward it, changes its width along x.
+    s.cmdline("5000,3000").unwrap();
+    let turned = s.preview(cadcraft_geom::Vec2::new(5000.0, 6000.0));
+    let straight = s.preview(cadcraft_geom::Vec2::new(8000.0, 3000.0));
+    assert_ne!(bounds_x(&turned), bounds_x(&straight));
+    s.cmdline("").unwrap();
+    s.cmdline("").unwrap();
+    assert!(s.preview(at).is_empty(), "nothing once the command ends");
+}
+
+#[test]
+fn the_unit_the_duct_and_the_accessory_are_seen_before_they_are_placed() {
+    let mut s = metric();
+    s.cmdline("ahuadd").unwrap();
+    assert!(!s.preview(cadcraft_geom::Vec2::new(0.0, 0.0)).is_empty(), "the unit");
+    s.cmdline("").unwrap();
+    s.cmdline("ductadd").unwrap();
+    assert!(s.preview(cadcraft_geom::Vec2::new(1000.0, 0.0)).is_empty(), "no start point yet");
+    s.cmdline("0,0").unwrap();
+    let p = s.preview(cadcraft_geom::Vec2::new(4000.0, 0.0));
+    assert!(p.iter().filter(|e| matches!(e.kind, cadcraft_doc::EntityKind::LwPolyline(_))).count() >= 2, "the two sides of the duct");
+    s.cmdline("4000,0").unwrap();
+    s.cmdline("").unwrap();
+    s.cmdline("ductaccessoryadd").unwrap();
+    assert!(!s.preview(cadcraft_geom::Vec2::new(2000.0, 90.0)).is_empty(), "on the duct");
+    assert!(s.preview(cadcraft_geom::Vec2::new(2000.0, 3000.0)).is_empty(), "off the duct");
+}
+
+#[test]
+fn ductadd_draws_a_flexible_duct_and_ductedit_changes_the_material() {
+    let mut s = metric();
+    let r = s.execute("ductadd", &json!({"points": [[0, 0], [1000, 0]], "diameter": 125, "flexible": true})).unwrap();
+    let h = r["handles"][0].clone();
+    assert!(duct_of(s.doc().unwrap().entity(hd(&h)).unwrap()).unwrap().flexible);
+    s.execute("ductedit", &json!({"handle": h, "flexible": false})).unwrap();
+    assert!(!duct_of(s.doc().unwrap().entity(hd(&h)).unwrap()).unwrap().flexible);
+    assert!(s.execute("ductadd", &json!({"points": [[0, 0], [1000, 0]], "flexible": "yes"})).is_err());
+    // At the command line: the Material keyword.
+    for t in ["ductadd", "m", "f", "0,500", "1000,500", ""] {
+        s.cmdline(t).unwrap();
+    }
+    assert!(s.doc().unwrap().model.iter().filter_map(|e| duct_of(e)).filter(|p| p.flexible).count() == 1);
+}
+
+#[test]
+fn ductedit_moves_a_duct_to_the_layer_of_its_air_direction() {
+    let mut s = metric();
+    let r = s.execute("ductadd", &json!({"points": [[0, 0], [1000, 0]]})).unwrap();
+    let h = hd(&r["handles"][0]);
+    assert_eq!(s.doc().unwrap().entity(h).unwrap().common.layer, "M-HVAC-DUCT");
+    s.execute("ductedit", &json!({"handle": r["handles"][0], "air": "extract"})).unwrap();
+    assert_eq!(s.doc().unwrap().entity(h).unwrap().common.layer, "M-HVAC-DUCT-EXTR");
+    assert!(s.doc().unwrap().layer("M-HVAC-DUCT-EXTR").is_some());
+}
+
+/// Three diffusers beside a trunk, each a few hundred millimetres from it; the middle one is on the
+/// other side and a fourth, of the other air direction, has no duct of its own.
+#[test]
+fn ductconnect_draws_flexible_ducts_from_the_trunk_to_the_terminals() {
+    let mut s = metric();
+    s.execute("ahuadd", &json!({"at": [0, 0]})).unwrap();
+    s.execute("ductadd", &json!({"points": [[500, 0], [8000, 0]], "diameter": 250})).unwrap();
+    for (x, y) in [(2000, 1500), (4000, -1200), (6000, 1500)] {
+        s.execute("airterminaladd", &json!({"at": [x, y], "flow": 150})).unwrap();
+    }
+    s.execute("airterminaladd", &json!({"at": [3000, 9000], "flow": 100, "air": "extract", "type": "squareCeiling"})).unwrap();
+    let r = s.execute("ductconnect", &json!({})).unwrap();
+    assert_eq!(r["created"].as_array().unwrap().len(), 3, "{r}");
+    assert_eq!(r["skipped"].as_array().unwrap().len(), 1, "the extract terminal has no duct near");
+    let flex: Vec<_> = s.doc().unwrap().model.iter().filter_map(|e| duct_of(e).filter(|p| p.flexible)).collect();
+    assert_eq!(flex.len(), 3);
+    // Each is as wide as a 600 mm diffuser's neck (160 mm), imposed, and about as long as the offset.
+    assert!(flex.iter().all(|p| p.diameter_mm == 160.0 && p.imposed && p.kind == DuctKind::Connection));
+    assert!(flex.iter().all(|p| p.length > 1000.0 && p.length < 1600.0), "{:?}", flex.iter().map(|p| p.length).collect::<Vec<_>>());
+    // The trunk was cut where each starts, and the whole network now sizes: three diffusers of 150.
+    let sized = s.execute("ductsize", &json!({})).unwrap();
+    assert_eq!(sized["networks"][0]["totalFlow"], 450.0, "{sized}");
+    // Nothing is left to connect.
+    let again = s.execute("ductconnect", &json!({})).unwrap();
+    assert_eq!(again["created"].as_array().unwrap().len(), 0);
+    // A distance limit and a bad handle.
+    assert!(s.execute("ductconnect", &json!({"terminals": ["ZZZ"]})).is_err());
+    assert!(s.execute("ductconnect", &json!({"maxDistance": -5})).is_err());
+}
+
+/// The sports hall as drawn (measured off a screenshot): a unit turned a quarter turn above a main
+/// of four runs, its duct dropping to the main's upper line, and four ducts leaving the main's
+/// LOWER line to the centres of four 600 mm diffusers.
+#[test]
+fn ductsize_sizes_the_sports_hall_as_drawn() {
+    let mut s = metric();
+    s.execute("spaceadd", &json!({"points": [[-500, -2500], [9000, -2500], [9000, 3500], [-500, 3500]], "name": "Salle de sport", "flow": 1200}))
+        .unwrap();
+    let unit = s.execute("ahuadd", &json!({"at": [4260, 1200], "rotation": 90})).unwrap();
+    s.execute("ductadd", &json!({"points": [[4260, 450], [4260, 100]]})).unwrap();
+    s.execute("ductadd", &json!({"points": [[0, 0], [2820, 0], [4260, 0], [5640, 0], [8490, 0]]})).unwrap();
+    for x in [0, 2820, 5640, 8490] {
+        s.execute("ductadd", &json!({"points": [[x, -100], [x, -570]]})).unwrap();
+        s.execute("airterminaladd", &json!({"at": [x, -570], "flow": 300, "model": "SQ600-200"})).unwrap();
+    }
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    let net = &r["networks"][0];
+    assert_eq!(net["ahu"], unit["handle"], "{r}");
+    assert_eq!(net["totalFlow"], 1200.0, "{r}");
+    assert!(net["warnings"].as_array().unwrap().is_empty(), "{r}");
+    assert_eq!(net["segments"].as_array().unwrap().len(), 9, "{r}");
+    assert!(r["spaces"].as_array().unwrap().is_empty(), "{r}");
+}
+
+#[test]
+fn ductsize_names_the_ducts_no_unit_reaches_and_how_far_the_nearest_end_is() {
+    let mut s = metric();
+    s.execute("ahuadd", &json!({"at": [0, 0]})).unwrap();
+    s.execute("ductadd", &json!({"points": [[500, 0], [3000, 0]]})).unwrap();
+    // A second run 400 mm past the first one's end: not touching it.
+    s.execute("ductadd", &json!({"points": [[3400, 0], [6000, 0]]})).unwrap();
+    s.execute("airterminaladd", &json!({"at": [3000, 0], "flow": 100})).unwrap();
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    assert_eq!((r["ducts"].as_u64(), r["reached"].as_u64()), (Some(2), Some(1)), "{r}");
+    let w: Vec<&str> = r["networks"][0]["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+    assert!(w.iter().any(|w| w.contains("is not connected to a unit") && w.contains("400 mm away")), "{w:?}");
+}
+
+/// The same hall, the terminals set to extract and the ducts left as they were drawn.
+#[test]
+fn ductsize_works_on_extract_terminals_with_ducts_nobody_set() {
+    let mut s = metric();
+    let unit = s.execute("ahuadd", &json!({"at": [4260, 1200], "rotation": 90})).unwrap();
+    s.execute("ductadd", &json!({"points": [[4260, 450], [4260, 100]]})).unwrap();
+    s.execute("ductadd", &json!({"points": [[0, 0], [2820, 0], [4260, 0], [5640, 0], [8490, 0]]})).unwrap();
+    for x in [0, 2820, 5640, 8490] {
+        s.execute("ductadd", &json!({"points": [[x, -100], [x, -570]]})).unwrap();
+        s.execute("airterminaladd", &json!({"at": [x, -570], "flow": 300, "air": "extract", "type": "squareCeiling"})).unwrap();
+    }
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    let net = &r["networks"][0];
+    assert_eq!((net["air"].as_str(), net["totalFlow"].as_f64()), (Some("extract"), Some(1200.0)), "{r}");
+    assert!(net["warnings"].as_array().unwrap().is_empty(), "{r}");
+    assert_eq!((r["ducts"].as_u64(), r["reached"].as_u64()), (Some(9), Some(9)));
+    let u = cadcraft_doc::ahu_of(s.doc().unwrap().entity(hd(&unit["handle"])).unwrap()).unwrap();
+    assert_eq!((u.flow_m3h, u.extract_flow_m3h), (None, Some(1200.0)));
+    // A duct whose direction was set by hand to supply is left alone, and the message says what to do.
+    let first = s.doc().unwrap().model.iter().find_map(|e| duct_of(e).map(|_| e.handle)).unwrap();
+    s.execute("ductedit", &json!({"handle": first.hex(), "air": "supply"})).unwrap();
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    assert!(r["networks"][0]["totalFlow"].as_f64().unwrap_or(0.0) < 1200.0, "{r}");
+    s.execute("ductedit", &json!({"handle": first.hex(), "air": "auto"})).unwrap();
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    assert_eq!(r["networks"][0]["totalFlow"], 1200.0, "back on auto, it works again: {r}");
+}

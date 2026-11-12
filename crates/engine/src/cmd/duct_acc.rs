@@ -57,18 +57,17 @@ fn number(cmd: &str, p: &Value, key: &str) -> Result<Option<f64>> {
     }
 }
 
-/// Places `kind` on the duct under `at`; returns the accessory and the duct.
-fn place(
-    s: &mut Session,
+/// The accessory of `kind` for the duct under `at`: its parameters, the duct, the foot of `at` on
+/// the duct's axis and the duct's direction. `loss` is (length, zeta, pressure drop, label height).
+fn on_duct(
+    s: &Session,
     kind: AccessoryKind,
     at: Vec2,
-    length: Option<f64>,
-    zeta: Option<f64>,
-    pa: Option<f64>,
-    label_mm: f64,
-) -> Result<(Handle, Handle)> {
-    let (duct, foot, angle) = s.doc()?.duct_under(at).ok_or_else(|| other("Place the accessory on a duct."))?;
+    loss: (Option<f64>, Option<f64>, Option<f64>, f64),
+) -> Result<(AccessoryParams, Handle, Vec2, f64)> {
+    let (length, zeta, pa, label_mm) = loss;
     let d = s.doc()?;
+    let (duct, foot, angle) = d.duct_under(at).ok_or_else(|| other("Place the accessory on a duct."))?;
     let (dp, ..) = d.duct_ends(duct).ok_or_else(|| other("Place the accessory on a duct."))?;
     let p = AccessoryParams {
         kind,
@@ -80,6 +79,12 @@ fn place(
         units: HvacUnits::of(d),
     };
     p.validate().map_err(doc_err)?;
+    Ok((p, duct, foot, angle))
+}
+
+/// Places `kind` on the duct under `at`; returns the accessory and the duct.
+fn place(s: &mut Session, kind: AccessoryKind, at: Vec2, loss: (Option<f64>, Option<f64>, Option<f64>, f64)) -> Result<(Handle, Handle)> {
+    let (p, duct, foot, angle) = on_duct(s, kind, at, loss)?;
     let space = s.space();
     let common = s.current_common();
     let h = s.doc_mut()?.add_accessory(&space, common, &p, foot, angle).map_err(doc_err)?;
@@ -91,7 +96,7 @@ fn run_add(s: &mut Session, p: &Value) -> Result<Value> {
     let at = super::point_req(CMD, p, "at")?;
     let kind = kind_param(CMD, p)?.unwrap_or_default();
     let label = number(CMD, p, "labelHeight")?.unwrap_or(100.0);
-    let (h, duct) = place(s, kind, at, number(CMD, p, "length")?, number(CMD, p, "zeta")?, number(CMD, p, "pressureDrop")?, label)?;
+    let (h, duct) = place(s, kind, at, (number(CMD, p, "length")?, number(CMD, p, "zeta")?, number(CMD, p, "pressureDrop")?, label))?;
     Ok(json!({ "handle": h.hex(), "duct": duct.hex(), "type": kind.name() }))
 }
 
@@ -199,7 +204,7 @@ impl Interactive for AccessoryAddM {
                 Ok(Step::Continue)
             }
             Input::Point(at) => {
-                match place(s, self.kind, at, self.length, None, None, 100.0) {
+                match place(s, self.kind, at, (self.length, None, None, 100.0)) {
                     Ok(_) => s.last_used.accessory = AccessoryLastUsed { kind: self.kind },
                     Err(e) => s.echo(e.to_string()),
                 }
@@ -211,5 +216,12 @@ impl Interactive for AccessoryAddM {
     }
     fn preview(&self, _s: &Session, _c: Vec2) -> Vec<EntityKind> {
         Vec::new()
+    }
+    fn preview_objects(&self, s: &Session, c: Vec2) -> Vec<cadcraft_doc::Entity> {
+        // On the duct under the cursor, across it, before the click.
+        match (self.ask, on_duct(s, self.kind, c, (self.length, None, None, 100.0))) {
+            (Ask::Location, Ok((p, _, foot, angle))) => p.preview(foot, angle),
+            _ => Vec::new(),
+        }
     }
 }

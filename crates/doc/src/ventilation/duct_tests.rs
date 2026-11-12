@@ -25,8 +25,11 @@ fn duct(diameter_mm: f64) -> DuctParams {
         imposed: false,
         kind: DuctKind::Auto,
         air: AirDirection::Supply,
+        air_set: false,
         flow_m3h: None,
         velocity: None,
+        flexible: false,
+        reducer: None,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     }
@@ -80,19 +83,102 @@ fn bad_ducts_and_units_are_refused() {
     assert!(d.model.is_empty(), "nothing was added");
 }
 
+fn text_of(pieces: &[HvacPiece]) -> crate::Text {
+    pieces.iter().find_map(|p| if let EntityKind::Text(t) = &p.kind { Some(t.clone()) } else { None }).expect("a label")
+}
+
+/// The vertices of each polyline of `pieces`.
+fn polylines(pieces: &[HvacPiece]) -> Vec<Vec<Vec2>> {
+    pieces
+        .iter()
+        .filter_map(|p| if let EntityKind::LwPolyline(l) = &p.kind { Some(l.vertices.iter().map(|v| v.p).collect()) } else { None })
+        .collect()
+}
+
 #[test]
 fn a_duct_label_reads_upright_whichever_way_it_runs() {
-    let rotation_of = |p: &HvacPiece| match &p.kind {
-        EntityKind::Text(t) => t.rotation,
-        _ => f64::NAN,
-    };
     let p = DuctParams { length: 1000.0, ..duct(200.0) };
-    assert_eq!(rotation_of(&p.generate(false).unwrap()[2]), 0.0);
-    assert!((rotation_of(&p.generate(true).unwrap()[2]) - std::f64::consts::PI).abs() < 1e-12);
+    assert_eq!(text_of(&p.generate(false).unwrap()).rotation, 0.0);
+    assert!((text_of(&p.generate(true).unwrap()).rotation - std::f64::consts::PI).abs() < 1e-12);
     // The two sides are a diameter apart.
+    let sides = polylines(&p.generate(false).unwrap());
+    assert_eq!(sides.len(), 2);
+    assert_eq!((sides[0][0].y, sides[1][0].y), (100.0, -100.0));
+    assert_eq!(sides[0].len(), 2, "a rigid side is a straight line");
+}
+
+#[test]
+fn a_flexible_duct_is_drawn_as_bellows_above_which_its_label_sits() {
+    let p = DuctParams { length: 1000.0, flexible: true, ..duct(125.0) };
     let pieces = p.generate(false).unwrap();
-    let ys: Vec<f64> = pieces.iter().filter_map(|x| if let EntityKind::Line(l) = &x.kind { Some(l.a.y) } else { None }).collect();
-    assert_eq!(ys, [100.0, -100.0]);
+    let sides = polylines(&pieces);
+    // Many teeth along each side, bulging outwards, within the run.
+    assert!(sides[0].len() > 8 && sides[0].len() == sides[1].len());
+    assert!(sides[0].iter().all(|v| v.y >= 62.5 - 1e-9 && v.y <= 62.5 * 1.3 + 1e-9), "bulges outwards only");
+    assert!(sides[0].iter().any(|v| v.y > 62.5) && sides[0].iter().any(|v| (v.y - 62.5).abs() < 1e-9));
+    assert!((sides[0][0].x).abs() < 1e-9 && (sides[0].last().unwrap().x - 1000.0).abs() < 1e-9);
+    assert!(text_of(&pieces).insert.y > 62.5, "the label is above the duct");
+    // A very long flexible duct keeps a bounded number of vertices.
+    let long = DuctParams { length: 9000.0, flexible: true, units: HvacUnits { mm_per_unit: 1000.0 }, ..duct(125.0) };
+    assert!(polylines(&long.generate(false).unwrap())[0].len() <= 2_001);
+}
+
+#[test]
+fn a_reducer_is_drawn_as_a_cone_where_the_run_joins_one_of_another_diameter() {
+    let at_start = DuctParams { length: 1000.0, reducer: Some(DuctReducer { from_mm: 250.0, at_end: false }), ..duct(160.0) };
+    let sides = polylines(&at_start.generate(false).unwrap());
+    // From the larger radius at the start to the run's own, 15° cone: (125 - 80) / tan 15° = 168 mm long.
+    assert_eq!(sides[0][0], Vec2::new(0.0, 125.0));
+    assert!((sides[0][1].x - 45.0 / 15f64.to_radians().tan()).abs() < 1e-6 && (sides[0][1].y - 80.0).abs() < 1e-9);
+    assert_eq!(sides[0].last().copied(), Some(Vec2::new(1000.0, 80.0)));
+    // At the far end it is the other way round.
+    let at_end = DuctParams { reducer: Some(DuctReducer { from_mm: 250.0, at_end: true }), ..at_start.clone() };
+    let sides = polylines(&at_end.generate(false).unwrap());
+    assert_eq!(sides[0].first().copied(), Some(Vec2::new(0.0, 80.0)));
+    assert_eq!(sides[0].last().copied(), Some(Vec2::new(1000.0, 125.0)));
+    // A short run keeps room for itself: the cone is at most 40 % of it.
+    let short = DuctParams { length: 100.0, reducer: Some(DuctReducer { from_mm: 630.0, at_end: false }), ..duct(160.0) };
+    assert!(polylines(&short.generate(false).unwrap())[0][1].x <= 40.0 + 1e-9);
+}
+
+#[test]
+fn sizing_draws_a_reducer_where_the_diameter_changes() {
+    let (mut d, [trunk, up, straight], _) = tee_and_elbow();
+    let net = d.duct_networks().unwrap().remove(0);
+    let report = size_network(&net.network, &DesignCriteria::default()).unwrap();
+    d.apply_duct_report(&net, &report).unwrap();
+    let diam = |h| d.duct_ends(h).unwrap().0.diameter_mm;
+    let red = |h| d.duct_ends(h).unwrap().0.reducer;
+    assert_eq!(red(trunk), None, "the run leaving the unit joins nothing");
+    for h in [up, straight] {
+        match (diam(h) != diam(trunk), red(h)) {
+            (true, Some(r)) => assert_eq!((r.from_mm, r.at_end), (diam(trunk), false), "the child starts at the trunk's end"),
+            (false, None) => {}
+            other => panic!("{other:?}"),
+        }
+    }
+    assert!([up, straight].iter().any(|h| red(*h).is_some()), "the trunk and a child differ in this network");
+    // Sizing again after the diameters are equal removes the reducer.
+    let (mut p, ..) = d.duct_ends(trunk).unwrap();
+    p.imposed = true;
+    p.diameter_mm = diam(up);
+    d.regenerate_duct(trunk, &p).unwrap();
+    let net = d.duct_networks().unwrap().remove(0);
+    let report = size_network(&net.network, &DesignCriteria::default()).unwrap();
+    d.apply_duct_report(&net, &report).unwrap();
+    assert_eq!(d.duct_ends(up).unwrap().0.reducer, None);
+}
+
+#[test]
+fn a_flexible_run_is_rougher_in_the_network() {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    add_duct(&mut d, (500.0, 0.0), (3000.0, 0.0));
+    let flex = DuctParams { flexible: true, ..duct(160.0) };
+    d.add_duct(&Space::Model, Common::default(), flex, Vec2::new(3000.0, 0.0), Vec2::new(3000.0, -1000.0)).unwrap();
+    add_terminal(&mut d, (3000.0, -1000.0), 150.0);
+    let net = d.duct_networks().unwrap().remove(0);
+    assert_eq!(net.network.segments.iter().map(|s| s.roughness_mm).collect::<Vec<_>>(), [None, Some(FLEX_ROUGHNESS_MM)]);
 }
 
 #[test]
@@ -249,7 +335,7 @@ fn a_terminal_in_the_middle_of_a_run_cuts_it() {
 }
 
 fn extract_duct(d: &mut Drawing, a: (f64, f64), b: (f64, f64)) -> Handle {
-    let p = DuctParams { air: AirDirection::Extract, ..duct(200.0) };
+    let p = DuctParams { air: AirDirection::Extract, air_set: true, ..duct(200.0) };
     d.add_duct(&Space::Model, Common::default(), p, Vec2::new(a.0, a.1), Vec2::new(b.0, b.1)).unwrap()
 }
 
@@ -301,7 +387,9 @@ fn each_network_gives_its_flow_to_the_unit_and_the_label_shows_both() {
 fn a_terminal_on_a_duct_of_the_other_air_direction_is_not_connected() {
     let mut d = Drawing::new_metric();
     d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
-    add_duct(&mut d, (500.0, 0.0), (4000.0, 0.0));
+    // A supply duct the user fixed by hand: a terminal of the other direction at its end is not reached.
+    let fixed = DuctParams { air_set: true, ..duct(200.0) };
+    d.add_duct(&Space::Model, Common::default(), fixed, Vec2::new(500.0, 0.0), Vec2::new(4000.0, 0.0)).unwrap();
     let wrong = extract_terminal(&mut d, (4000.0, 0.0), 250.0);
     let net = d.duct_networks().unwrap().remove(0);
     assert!(net.network.segments.is_empty(), "no supply terminal at the end");
@@ -343,4 +431,46 @@ fn a_duct_ending_on_the_face_of_a_turned_terminal_reaches_it() {
     // A 300 x 150 grille turned a quarter turn: 150 mm wide along x, 300 along y. Its near end is 150 mm off.
     d.add_air_terminal(&Space::Model, Common::default(), &t, Vec2::new(3140.0, 0.0), std::f64::consts::FRAC_PI_2).unwrap();
     assert!(d.duct_networks().unwrap()[0].unconnected.is_empty());
+}
+
+/// The sports hall's trap: extract terminals at the ends of ducts nobody gave a direction to.
+#[test]
+fn ducts_left_on_auto_take_the_direction_of_the_terminals_they_serve() {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    add_duct(&mut d, (500.0, 0.0), (4000.0, 0.0));
+    let t = extract_terminal(&mut d, (4000.0, 0.0), 250.0);
+    let net = d.duct_networks().unwrap().remove(0);
+    assert_eq!(net.air, AirDirection::Extract);
+    assert!(net.unconnected.is_empty(), "{:?}", net.unconnected);
+    assert_eq!(net.network.segments[0].terminal.map(|x| x.flow_m3h), Some(250.0));
+    let report = size_network(&net.network, &DesignCriteria::default()).unwrap();
+    d.apply_duct_report(&net, &report).unwrap();
+    let duct = d.model.iter().find_map(|e| duct_of(e).map(|p| (e.handle, p))).unwrap();
+    assert_eq!(duct.1.air, AirDirection::Extract, "the duct is now drawn as an extract duct");
+    assert!(!duct.1.air_set, "but it stays on auto");
+    assert_eq!(d.entity(duct.0).unwrap().common.layer, DUCT_EXTRACT_LAYER);
+    assert_eq!(ahu_of(d.model.iter().find(|e| ahu_of(e).is_some()).unwrap()).unwrap().extract_flow_m3h, Some(250.0));
+    let _ = t;
+    // Moving the terminal to a supply one and reading again flips it back.
+    let (mut tp, ..) = (air_terminal_of(d.model.iter().find(|e| air_terminal_of(e).is_some()).unwrap()).unwrap(), 0);
+    tp.air = AirDirection::Supply;
+    let h = d.model.iter().find(|e| air_terminal_of(e).is_some()).unwrap().handle;
+    d.regenerate_air_terminal(h, &tp).unwrap();
+    assert_eq!(d.duct_networks().unwrap()[0].air, AirDirection::Supply);
+}
+
+#[test]
+fn a_double_flux_unit_with_both_trees_on_auto_keeps_them_apart() {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    add_duct(&mut d, (500.0, 100.0), (4000.0, 100.0));
+    add_terminal(&mut d, (4000.0, 100.0), 300.0);
+    add_duct(&mut d, (500.0, -100.0), (4000.0, -100.0));
+    extract_terminal(&mut d, (4000.0, -100.0), 250.0);
+    let nets = d.duct_networks().unwrap();
+    assert_eq!(nets.iter().map(|n| n.air).collect::<Vec<_>>(), [AirDirection::Supply, AirDirection::Extract]);
+    assert!(nets.iter().all(|n| n.network.segments.len() == 1 && n.unconnected.is_empty()));
+    assert_eq!(nets[0].network.segments[0].terminal.map(|x| x.flow_m3h), Some(300.0));
+    assert_eq!(nets[1].network.segments[0].terminal.map(|x| x.flow_m3h), Some(250.0));
 }

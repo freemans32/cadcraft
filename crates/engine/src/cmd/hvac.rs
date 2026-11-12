@@ -638,6 +638,18 @@ impl Interactive for TerminalAddM {
     fn preview(&self, _s: &Session, _c: Vec2) -> Vec<EntityKind> {
         Vec::new()
     }
+    fn preview_objects(&self, s: &Session, c: Vec2) -> Vec<cadcraft_doc::Entity> {
+        // The terminal as chosen, under the cursor at once, then turned toward it once placed.
+        let Ok(d) = s.doc() else { return Vec::new() };
+        let Ok(model) = choose_model(d, &self.last.model, self.last.kind, self.last.flow_m3h) else { return Vec::new() };
+        let p = TerminalParams { model, flow_m3h: self.last.flow_m3h, air: self.last.air, label_height_mm: 100.0, units: HvacUnits::of(d) };
+        match self.ask {
+            TermAsk::Location => p.preview(c, 0.0),
+            TermAsk::Rotation(at) if !c.near(at, 1e-9) => p.preview(at, (c - at).angle()),
+            TermAsk::Rotation(at) => p.preview(at, 0.0),
+            _ => Vec::new(),
+        }
+    }
 }
 
 // =====================================================================================

@@ -231,6 +231,13 @@ impl AccessoryParams {
     }
 }
 
+impl AccessoryParams {
+    /// The accessory as it will look at `at`, turned `rotation`; empty when it can't be drawn.
+    pub fn preview(&self, at: Vec2, rotation: f64) -> Vec<crate::Entity> {
+        self.generate().map(|p| super::preview_entities(p, at, rotation)).unwrap_or_default()
+    }
+}
+
 /// The accessory an object is, when it is a block reference carrying usable accessory data.
 pub fn accessory_of(e: &crate::Entity) -> Option<AccessoryParams> {
     match &e.kind {

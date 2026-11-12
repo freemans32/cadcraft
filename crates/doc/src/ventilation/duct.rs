@@ -15,8 +15,9 @@ pub const AHU_APP: &str = "CADCRAFT_AHU";
 pub const AHU_LAYER: &str = "M-HVAC-AHU";
 /// The registered application name of a duct's extended data.
 pub const DUCT_APP: &str = "CADCRAFT_DUCT";
-/// The layer of the ducts.
+/// The layer of the supply ducts, and of the extract ducts.
 pub const DUCT_LAYER: &str = "M-HVAC-DUCT";
+pub const DUCT_EXTRACT_LAYER: &str = "M-HVAC-DUCT-EXTR";
 /// Largest side of a unit, mm.
 pub const MAX_AHU_SIZE_MM: f64 = 50_000.0;
 /// Smallest and largest duct diameter, mm.
@@ -123,6 +124,22 @@ impl AhuParams {
     }
 }
 
+impl AhuParams {
+    /// The unit as it will look at `at`, turned `rotation`; empty when it can't be drawn.
+    pub fn preview(&self, at: Vec2, rotation: f64) -> Vec<crate::Entity> {
+        self.generate().map(|p| super::preview_entities(p, at, rotation)).unwrap_or_default()
+    }
+}
+
+impl DuctParams {
+    /// The run from `a` to `b` as it will look; empty when it can't be drawn.
+    pub fn preview(&self, a: Vec2, b: Vec2) -> Vec<crate::Entity> {
+        let rotation = (b - a).angle();
+        let p = DuctParams { length: a.dist(b), ..self.clone() };
+        p.generate(reads_upside_down(rotation)).map(|pieces| super::preview_entities(pieces, a, rotation)).unwrap_or_default()
+    }
+}
+
 /// The air handling unit an object is, when it is a block reference carrying usable unit data.
 pub fn ahu_of(e: &crate::Entity) -> Option<AhuParams> {
     match &e.kind {
@@ -178,17 +195,42 @@ pub struct DuctParams {
     pub kind: DuctKind,
     #[serde(default)]
     pub air: AirDirection,
+    /// Whether the user fixed the air direction. When not, sizing sets it from the terminals the
+    /// run serves, so a duct to extract terminals is an extract duct without being told.
+    #[serde(default)]
+    pub air_set: bool,
     /// The flow the run carries, m³/h, once the network is sized.
     #[serde(default)]
     pub flow_m3h: Option<f64>,
     /// The air velocity in the run, m/s, once the network is sized.
     #[serde(default)]
     pub velocity: Option<f64>,
+    /// A flexible duct (gaine souple): drawn as bellows, with the roughness of one.
+    #[serde(default)]
+    pub flexible: bool,
+    /// A reducer where the run joins the one before it, drawn by sizing when the diameters differ.
+    #[serde(default)]
+    pub reducer: Option<DuctReducer>,
     #[serde(default = "default_label_mm")]
     pub label_height_mm: f64,
     #[serde(default)]
     pub units: HvacUnits,
 }
+
+/// The cone where a duct run joins a larger or smaller one.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuctReducer {
+    /// The diameter of the run it joins, mm.
+    pub from_mm: f64,
+    /// Whether the junction is at the run's far end (`false`: at its start, the block's origin).
+    pub at_end: bool,
+}
+
+/// Half the angle of a reducer's cone.
+const REDUCER_HALF_ANGLE_DEG: f64 = 15.0;
+/// Most vertices of a flexible duct's side.
+const MAX_BELLOWS_VERTICES: usize = 2_000;
 
 impl DuctParams {
     pub fn validate(&self) -> Result<()> {
@@ -209,6 +251,14 @@ impl DuctParams {
         Ok(())
     }
 
+    /// The layer of the run: supply and extract ducts have their own, in their own colours.
+    pub fn layer(&self) -> &'static str {
+        match self.air {
+            AirDirection::Supply => DUCT_LAYER,
+            AirDirection::Extract => DUCT_EXTRACT_LAYER,
+        }
+    }
+
     /// Length in metres.
     pub fn length_m(&self) -> f64 {
         self.length * self.units.mm_per_unit / 1000.0
@@ -219,17 +269,75 @@ impl DuctParams {
     pub fn generate(&self, flip_label: bool) -> Result<Vec<HvacPiece>> {
         self.validate()?;
         let r = self.units.to_units(self.diameter_mm) / 2.0;
-        let side =
-            |y: f64| HvacPiece { layer: DUCT_LAYER, kind: EntityKind::Line(Line { a: v3(Vec2::new(0.0, y)), b: v3(Vec2::new(self.length, y)) }) };
+        let layer = self.layer();
+        let mut pieces = Vec::new();
+        // The cone at the junction, if there is one; the straight part runs between x0 and x1.
+        let cone = self.reducer.map(|red| {
+            let r0 = self.units.to_units(red.from_mm) / 2.0;
+            let len = ((r0 - r).abs() / REDUCER_HALF_ANGLE_DEG.to_radians().tan()).min(0.4 * self.length);
+            (r0, len, red.at_end)
+        });
+        let (x0, x1) = match cone {
+            Some((_, len, false)) => (len, self.length),
+            Some((_, len, true)) => (0.0, self.length - len),
+            None => (0.0, self.length),
+        };
+        for sign in [1.0, -1.0] {
+            let mut pts = Vec::new();
+            if let Some((r0, _, false)) = cone {
+                pts.push(Vec2::new(0.0, sign * r0));
+            }
+            pts.extend(self.side_points(x0, x1, sign * r));
+            if let Some((r0, _, true)) = cone {
+                pts.push(Vec2::new(self.length, sign * r0));
+            }
+            pieces.push(HvacPiece {
+                layer,
+                kind: EntityKind::LwPolyline(LwPolyline {
+                    vertices: pts.into_iter().map(|p| PolyVertex { p, bulge: 0.0, start_width: 0.0, end_width: 0.0 }).collect(),
+                    closed: false,
+                    const_width: 0.0,
+                    elevation: 0.0,
+                    plinegen: false,
+                }),
+            });
+        }
+        // A line across where the cone meets the straight run.
+        if let Some((_, len, at_end)) = cone {
+            let x = if at_end { self.length - len } else { len };
+            pieces.push(HvacPiece { layer, kind: EntityKind::Line(Line { a: v3(Vec2::new(x, -r)), b: v3(Vec2::new(x, r)) }) });
+        }
         let mut text = format!("Ø{:.0}", self.diameter_mm);
         if let Some(f) = self.flow_m3h {
             text.push_str(&format!(" {f:.0} m³/h"));
         }
-        let mut t = label(Vec2::new(self.length / 2.0, 0.0), self.units.to_units(self.label_height_mm), text);
+        let h = self.units.to_units(self.label_height_mm);
+        // A flexible duct is narrow and its bellows busy: its label sits above it.
+        let (y, up) = if self.flexible { (r * 1.5 + 1.2 * h, if flip_label { -1.0 } else { 1.0 }) } else { (0.0, 1.0) };
+        let mut t = label(Vec2::new(self.length / 2.0, y * up), h, text);
         if let EntityKind::Text(x) = &mut t {
             x.rotation = if flip_label { std::f64::consts::PI } else { 0.0 };
         }
-        Ok(vec![side(r), side(-r), HvacPiece { layer: DUCT_LAYER, kind: t }])
+        pieces.push(HvacPiece { layer, kind: t });
+        Ok(pieces)
+    }
+
+    /// The vertices of one side of the straight part, from `x0` to `x1` at height `y`: two points
+    /// for a rigid duct, a zigzag for a flexible one.
+    fn side_points(&self, x0: f64, x1: f64, y: f64) -> Vec<Vec2> {
+        if !self.flexible || x1 <= x0 {
+            return vec![Vec2::new(x0, y), Vec2::new(x1, y)];
+        }
+        let d = self.units.to_units(self.diameter_mm);
+        // Folds a third of a diameter apart, each bulging 30 % of the radius outwards.
+        let teeth = (((x1 - x0) / (0.35 * d)).ceil() as usize).clamp(2, MAX_BELLOWS_VERTICES / 2) * 2;
+        let amp = 0.3 * (d / 2.0) * y.signum();
+        (0..=teeth)
+            .map(|i| {
+                let x = x0 + (x1 - x0) * i as f64 / teeth as f64;
+                Vec2::new(x, if i % 2 == 1 { y + amp } else { y })
+            })
+            .collect()
     }
 
     pub fn to_xdata(&self) -> Result<Vec<RawTag>> {
@@ -303,9 +411,9 @@ impl crate::Drawing {
         let rotation = (b - a).angle();
         let pieces = p.generate(reads_upside_down(rotation))?;
         common.xdata = xdata::replace(DUCT_APP, &common.xdata, p.to_xdata()?);
-        common.layer = DUCT_LAYER.into();
+        common.layer = p.layer().into();
         let block = self.hvac_block(pieces);
-        self.ensure_layer(DUCT_LAYER);
+        self.ensure_layer(p.layer());
         let insert = crate::Insert { block, insert: v3(a), rotation, ..Default::default() };
         self.add(space, common, EntityKind::Insert(insert))
     }
@@ -316,7 +424,11 @@ impl crate::Drawing {
         let EntityKind::Insert(i) = &e.kind else { return Err(invalid("The object is not a block reference.")) };
         let pieces = p.generate(reads_upside_down(i.rotation))?;
         let tags = xdata::replace(DUCT_APP, &e.common.xdata, p.to_xdata()?);
-        self.regenerate_hvac(h, pieces, tags)
+        self.regenerate_hvac(h, pieces, tags)?;
+        // The run's layer follows its air direction.
+        let layer = p.layer();
+        self.modify_entity(h, |e| e.common.layer = layer.into())?;
+        Ok(())
     }
 
     /// Duct `h` with its data and its two ends in drawing coordinates.

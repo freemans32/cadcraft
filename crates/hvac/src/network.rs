@@ -64,6 +64,10 @@ pub struct Segment {
     /// fittings' loss; the loss of an accessory given as a coefficient is a [`Fitting::Custom`].
     #[serde(default)]
     pub fixed_pa: f64,
+    /// This run's wall roughness, mm, when it is not the criteria's (a flexible duct is far rougher
+    /// than spiral steel).
+    #[serde(default)]
+    pub roughness_mm: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -254,7 +258,7 @@ fn flows(net: &Network, depth: &[usize]) -> Result<Vec<f64>> {
 }
 
 /// The smallest listed diameter within both limits for `flow` in a segment of `kind`.
-fn choose_diameter(flow: f64, kind: SegmentKind, c: &DesignCriteria) -> Result<(f64, Governing)> {
+fn choose_diameter(flow: f64, kind: SegmentKind, roughness_mm: f64, c: &DesignCriteria) -> Result<(f64, Governing)> {
     let vmax = c.max_velocity(kind);
     let mut by_velocity = None;
     for &d in &c.diameters_mm {
@@ -262,7 +266,7 @@ fn choose_diameter(flow: f64, kind: SegmentKind, c: &DesignCriteria) -> Result<(
         if v_ok && by_velocity.is_none() {
             by_velocity = Some(d);
         }
-        if v_ok && pressure_gradient(flow, d, c.roughness_mm, &c.air)? <= c.max_gradient_pa_m {
+        if v_ok && pressure_gradient(flow, d, roughness_mm, &c.air)? <= c.max_gradient_pa_m {
             let governing = if Some(d) == by_velocity { Governing::Velocity } else { Governing::Friction };
             return Ok((d, governing));
         }
@@ -272,12 +276,13 @@ fn choose_diameter(flow: f64, kind: SegmentKind, c: &DesignCriteria) -> Result<(
 }
 
 fn size_segment(i: usize, s: &Segment, flow: f64, c: &DesignCriteria, warnings: &mut Vec<String>) -> Result<SegmentResult> {
+    let roughness_mm = checked(&format!("roughness of segment {i} (mm)"), s.roughness_mm.unwrap_or(c.roughness_mm), 0.0, 10.0)?;
     let (diameter_mm, governing) = match s.diameter_mm {
         Some(d) => (checked(&format!("imposed diameter of segment {i} (mm)"), d, 1.0, 10_000.0)?, Governing::Imposed),
-        None => choose_diameter(flow, s.kind, c)?,
+        None => choose_diameter(flow, s.kind, roughness_mm, c)?,
     };
     let v = velocity(flow, diameter_mm);
-    let gradient_pa_m = pressure_gradient(flow, diameter_mm, c.roughness_mm, &c.air)?;
+    let gradient_pa_m = pressure_gradient(flow, diameter_mm, roughness_mm, &c.air)?;
     let mut zeta = 0.0;
     for &f in &s.fittings {
         zeta += c.fittings.zeta(f)?;

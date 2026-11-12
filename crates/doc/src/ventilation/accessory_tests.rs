@@ -92,8 +92,11 @@ fn ducted(accessory_at: Option<(AccessoryKind, f64, f64)>) -> (Drawing, Option<H
         imposed: true,
         kind: DuctKind::Auto,
         air: AirDirection::Supply,
+        air_set: false,
         flow_m3h: None,
         velocity: None,
+        flexible: false,
+        reducer: None,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     };

@@ -66,6 +66,7 @@ fn seg(parent: Option<usize>, length_m: f64, kind: SegmentKind, fittings: &[Fitt
         terminal: terminal.map(|flow_m3h| Terminal { flow_m3h, pressure_drop_pa: 15.0 }),
         diameter_mm: None,
         fixed_pa: 0.0,
+        roughness_mm: None,
     }
 }
 
@@ -205,4 +206,19 @@ fn an_accessory_given_in_pascals_adds_to_its_segments_losses() {
         net.segments[0].fixed_pa = bad;
         assert!(size_network(&net, &DesignCriteria::default()).is_err(), "{bad}");
     }
+}
+
+#[test]
+fn a_rougher_run_loses_more_and_may_need_a_larger_size() {
+    let mut net = three_offices();
+    let plain = size_network(&net, &DesignCriteria::default()).unwrap();
+    // The last connection in flexible duct (about 3 mm of roughness).
+    let last = net.segments.len() - 1;
+    net.segments[last].roughness_mm = Some(3.0);
+    let rough = size_network(&net, &DesignCriteria::default()).unwrap();
+    assert!(rough.segments[last].gradient_pa_m > plain.segments[last].gradient_pa_m);
+    assert!(rough.segments[last].diameter_mm >= plain.segments[last].diameter_mm);
+    assert_eq!(rough.segments[0], plain.segments[0], "the other runs are not affected");
+    net.segments[last].roughness_mm = Some(-1.0);
+    assert!(size_network(&net, &DesignCriteria::default()).is_err());
 }

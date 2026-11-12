@@ -6,7 +6,8 @@ use cadcraft_hvac::{Fitting, Network, NetworkReport, Segment, SegmentKind, Termi
 
 use super::duct::{AXIS_REACH, interior_cut};
 use super::{
-    AccessoryParams, AhuParams, AirDirection, DuctKind, DuctParams, HvacUnits, Loss, TerminalParams, accessory_of, ahu_of, air_terminal_of, invalid,
+    AccessoryParams, AhuParams, AirDirection, DuctKind, DuctParams, DuctReducer, HvacUnits, Loss, TerminalParams, accessory_of, ahu_of,
+    air_terminal_of, invalid,
 };
 use crate::{EntityKind, Handle, Result};
 
@@ -19,6 +20,8 @@ const UNIT_MEET_MM: f64 = 100.0;
 /// Turn, in degrees, from which a duct run needs a 45° elbow, and a 90° elbow.
 const ELBOW_45_DEG: f64 = 10.0;
 const ELBOW_90_DEG: f64 = 67.5;
+/// Wall roughness of a flexible duct, mm: far above spiral steel's 0.15. An indicative value.
+pub const FLEX_ROUGHNESS_MM: f64 = 3.0;
 
 /// One air handling unit's ducts of one air direction as a network ready to size. A double-flux
 /// unit has two: its supply ducts with the supply terminals, its extract ducts with the extract ones.
@@ -29,6 +32,8 @@ pub struct DuctNetwork {
     pub network: Network,
     /// The duct of each segment of `network`, in the same order.
     pub ducts: Vec<Handle>,
+    /// Whether each duct is entered by its far end (the air runs from its end to its origin).
+    pub entered_at_end: Vec<bool>,
     /// Ducts connected to the unit that lead to no terminal, so are left out of the sizing.
     pub dangling: Vec<Handle>,
     /// Terminals that no duct of their air direction reaches (set on the first network only).
@@ -37,6 +42,9 @@ pub struct DuctNetwork {
     pub accessories: Vec<Handle>,
     /// Accessories on no duct (set on the first network only).
     pub unplaced: Vec<Handle>,
+    /// Ducts no unit reaches (set on the first network only), and how many ducts the drawing has.
+    pub isolated: Vec<Handle>,
+    pub duct_count: usize,
 }
 
 struct Duct {
@@ -113,17 +121,7 @@ impl crate::Drawing {
                 let reach = unit_tol.max(units.to_units(AXIS_REACH * diameter_mm));
                 l.x.abs() <= half.x + reach && l.y.abs() <= half.y + reach
             };
-            let mut found = Vec::new();
-            for air in [AirDirection::Supply, AirDirection::Extract] {
-                let net = scan.read(*handle, air, &inside);
-                if !(net.ducts.is_empty() && net.dangling.is_empty()) {
-                    found.push(net);
-                }
-            }
-            // A unit none of whose ducts leave it still gets its (empty) supply network, to say so.
-            if found.is_empty() {
-                found.push(scan.read(*handle, AirDirection::Supply, &inside));
-            }
+            let found = scan.read_unit(*handle, &inside);
             out.extend(found);
         }
         // A terminal left unreached by every unit is reported on each network: say so once, on the first.
@@ -132,6 +130,8 @@ impl crate::Drawing {
         if let Some(first) = out.first_mut() {
             first.unconnected = lost;
             first.unplaced = unplaced;
+            first.isolated = ducts.iter().zip(&scan.taken).filter(|(_, t)| !**t).map(|(d, _)| d.handle).collect();
+            first.duct_count = ducts.len();
         }
         Ok(out)
     }
@@ -184,13 +184,22 @@ impl crate::Drawing {
         if report.segments.len() != net.ducts.len() {
             return Err(invalid("The report is not the network's."));
         }
-        for (h, r) in net.ducts.iter().zip(&report.segments) {
+        for (i, (h, r)) in net.ducts.iter().zip(&report.segments).enumerate() {
             let Some((mut p, ..)) = self.duct_ends(*h) else { continue };
             if !p.imposed {
                 p.diameter_mm = r.diameter_mm;
             }
             p.flow_m3h = Some(r.flow_m3h);
             p.velocity = Some(r.velocity);
+            // A duct whose direction was not fixed takes that of the network it serves.
+            if !p.air_set {
+                p.air = net.air;
+            }
+            // A reducer where the run joins one of another diameter.
+            let parent = net.network.segments.get(i).and_then(|s| s.parent).and_then(|k| report.segments.get(k));
+            p.reducer = parent
+                .filter(|q| (q.diameter_mm - r.diameter_mm).abs() > 0.5)
+                .map(|q| DuctReducer { from_mm: q.diameter_mm, at_end: net.entered_at_end.get(i).copied().unwrap_or(false) });
             self.regenerate_duct(*h, &p)?;
         }
         let e = self.entity(net.ahu).ok_or(crate::DocError::NoEntity(net.ahu))?;
@@ -252,7 +261,7 @@ struct Scan<'a> {
 
 impl Scan<'_> {
     fn is_free(&self, i: usize, air: AirDirection) -> bool {
-        !self.taken.get(i).copied().unwrap_or(true) && self.ducts.get(i).is_some_and(|d| d.params.air == air)
+        !self.taken.get(i).copied().unwrap_or(true) && self.ducts.get(i).is_some_and(|d| d.params.air == air || !d.params.air_set)
     }
 
     fn take(&mut self, i: usize) {
@@ -261,20 +270,15 @@ impl Scan<'_> {
         }
     }
 
-    /// The network of `air` leaving unit `ahu`, whose face `inside` tells (a point and a duct diameter).
-    fn read(&mut self, ahu: Handle, air: AirDirection, inside: &impl Fn(Vec2, f64) -> bool) -> DuctNetwork {
-        let mut nodes = self.roots(air, inside);
-        self.grow(&mut nodes, air);
-        self.attach_terminals(&mut nodes, air);
-        count_terminals(&mut nodes);
-        self.build(ahu, air, &nodes)
-    }
-
-    /// The ducts of `air` that leave the unit.
-    fn roots(&mut self, air: AirDirection, inside: &impl Fn(Vec2, f64) -> bool) -> Vec<Node> {
-        let mut nodes = Vec::new();
+    /// The networks leaving unit `ahu`, whose face `inside` tells (a point and a duct diameter): one
+    /// for each air direction that has a duct leading to a terminal. Each duct leaving the unit is
+    /// read with its own tree of runs: its direction is the one it was given, else the one of the
+    /// terminals the tree reaches, so a double-flux unit's supply and extract trees stay apart.
+    fn read_unit(&mut self, ahu: Handle, inside: &impl Fn(Vec2, f64) -> bool) -> Vec<DuctNetwork> {
+        let airs = [AirDirection::Supply, AirDirection::Extract];
+        let mut by_air: [Vec<Node>; 2] = [Vec::new(), Vec::new()];
         for i in 0..self.ducts.len() {
-            let Some(d) = self.ducts.get(i).filter(|_| self.is_free(i, air)) else { continue };
+            let Some(d) = self.ducts.get(i).filter(|_| !self.taken.get(i).copied().unwrap_or(true)) else { continue };
             let (from, to) = if inside(d.a, d.params.diameter_mm) {
                 (d.a, d.b)
             } else if inside(d.b, d.params.diameter_mm) {
@@ -282,9 +286,46 @@ impl Scan<'_> {
             } else {
                 continue;
             };
-            self.take(i);
-            nodes.push(Node { duct: i, parent: None, from, to, terminal: None, fittings: Vec::new(), terminals_below: 0 });
+            let candidates: Vec<usize> = match d.params.air_set {
+                true => vec![usize::from(d.params.air == AirDirection::Extract)],
+                false => vec![0, 1],
+            };
+            let mut chosen = None;
+            for &k in &candidates {
+                let before = (self.taken.clone(), self.touched.clone());
+                let tree = self.tree(i, from, to, airs[k]);
+                if tree.first().is_some_and(|n| n.terminals_below > 0) {
+                    chosen = Some((k, tree));
+                    break;
+                }
+                (self.taken, self.touched) = before;
+            }
+            // A tree that reaches no terminal is read once more, to name what leads nowhere.
+            let (k, tree) = chosen.unwrap_or_else(|| {
+                let k = candidates.first().copied().unwrap_or(0);
+                (k, self.tree(i, from, to, airs[k]))
+            });
+            if let Some(slot) = by_air.get_mut(k) {
+                append_tree(slot, tree);
+            }
         }
+        let mut nets: Vec<DuctNetwork> =
+            airs.iter().zip(&by_air).filter(|(_, nodes)| !nodes.is_empty()).map(|(air, nodes)| self.build(ahu, *air, nodes)).collect();
+        // A unit with no duct leaving it still gets its (empty) supply network, to say so.
+        if nets.is_empty() {
+            nets.push(self.build(ahu, AirDirection::Supply, &[]));
+        }
+        nets
+    }
+
+    /// The tree of runs starting with duct `root`, entered at `from`, as direction `air`, its
+    /// terminals attached and counted.
+    fn tree(&mut self, root: usize, from: Vec2, to: Vec2, air: AirDirection) -> Vec<Node> {
+        self.take(root);
+        let mut nodes = vec![Node { duct: root, parent: None, from, to, terminal: None, fittings: Vec::new(), terminals_below: 0 }];
+        self.grow(&mut nodes, air);
+        self.attach_terminals(&mut nodes, air);
+        count_terminals(&mut nodes);
         nodes
     }
 
@@ -328,7 +369,7 @@ impl Scan<'_> {
             let diameter = self.ducts.get(n.duct).map_or(0.0, |d| d.params.diameter_mm);
             let reach = self.tol.max(self.units.to_units(AXIS_REACH * diameter));
             for (ti, t) in self.terminals.iter().enumerate() {
-                if t.params.air == air && t.is_reached(n.to, reach) {
+                if t.params.air == air && !self.touched.get(ti).copied().unwrap_or(true) && t.is_reached(n.to, reach) {
                     n.terminal = Some((t.handle, t.params.flow_m3h, t.params.model.pressure_drop_pa));
                     if let Some(x) = self.touched.get_mut(ti) {
                         *x = true;
@@ -349,6 +390,7 @@ impl Scan<'_> {
         let index_of = |old: usize| kept.iter().position(|k| *k == old);
         let mut segments = Vec::with_capacity(kept.len());
         let mut handles = Vec::with_capacity(kept.len());
+        let mut entered_at_end = Vec::with_capacity(kept.len());
         let mut main_chain = vec![false; nodes.len()];
         for &old in &kept {
             let Some(n) = nodes.get(old) else { continue };
@@ -366,7 +408,9 @@ impl Scan<'_> {
                 terminal: n.terminal.map(|(_, flow, pa)| Terminal { flow_m3h: flow, pressure_drop_pa: pa }),
                 diameter_mm: d.params.imposed.then_some(d.params.diameter_mm),
                 fixed_pa: 0.0,
+                roughness_mm: d.params.flexible.then_some(FLEX_ROUGHNESS_MM),
             });
+            entered_at_end.push(n.from == d.b && d.a != d.b);
             handles.push(d.handle);
         }
         DuctNetwork {
@@ -374,12 +418,24 @@ impl Scan<'_> {
             air,
             network: Network { segments },
             ducts: handles,
+            entered_at_end,
             dangling,
             unconnected: Vec::new(),
             accessories: Vec::new(),
             unplaced: Vec::new(),
+            isolated: Vec::new(),
+            duct_count: 0,
         }
     }
+}
+
+/// Adds `tree` to `nodes`, its parent indices moved past the nodes already there.
+fn append_tree(nodes: &mut Vec<Node>, tree: Vec<Node>) {
+    let offset = nodes.len();
+    nodes.extend(tree.into_iter().map(|mut n| {
+        n.parent = n.parent.map(|p| p + offset);
+        n
+    }));
 }
 
 /// The fittings at the start of child `k` of a node, `many` when the node has several children and

@@ -381,10 +381,22 @@ fn duct_section(ui: &mut egui::Ui, sel: &[Handle], ds: &[DuctParams], len: &dyn 
             action = edit("kind", json!(k));
         }
     });
-    let air = shared(&ds.iter().map(|p| p.air).collect::<Vec<_>>());
+    let flexible = shared(&ds.iter().map(|p| p.flexible).collect::<Vec<_>>());
+    prop_row(ui, "Material", |ui| {
+        let shown = flexible.map_or(VARIES, |f| if f { "Flexible" } else { "Rigid" });
+        if let Some(m) = choice(ui, shown, &[("rigid", "Rigid"), ("flexible", "Flexible")]) {
+            action = edit("flexible", json!(m == "flexible"));
+        }
+    });
+    // The direction of a duct is its own when the user fixed it, else the one sizing found.
+    let air = shared(&ds.iter().map(|p| (p.air_set, p.air)).collect::<Vec<_>>());
     prop_row(ui, "Air", |ui| {
-        let shown = air.map_or(VARIES, |a| if a == AirDirection::Supply { "Supply" } else { "Extract" });
-        if let Some(a) = choice(ui, shown, &[("supply", "Supply"), ("extract", "Extract")]) {
+        let shown = air.map_or(VARIES, |(set, a)| match (set, a) {
+            (false, _) => "Auto",
+            (true, AirDirection::Supply) => "Supply",
+            (true, AirDirection::Extract) => "Extract",
+        });
+        if let Some(a) = choice(ui, shown, &[("auto", "Auto"), ("supply", "Supply"), ("extract", "Extract")]) {
             action = edit("air", json!(a));
         }
     });

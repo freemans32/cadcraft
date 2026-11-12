@@ -133,7 +133,10 @@ fn every_kind_of_terminal_is_drawn_to_scale_with_its_label() {
         let t = terminal(name, 50.0);
         let pieces = t.generate().unwrap();
         assert_eq!(texts(&pieces), [format!("{name} 50 m³/h")]);
-        assert!(pieces.iter().all(|p| p.layer == AIR_TERMINAL_LAYER));
+        assert!(
+            pieces.iter().all(|p| p.layer == AIR_TERMINAL_LAYER || p.layer == AIR_SUPPLY_LAYER),
+            "{name}: the face, and supply arrows on their own layer"
+        );
     }
     // The square diffuser: 600 mm face, Ø160 neck, four lines to the corners.
     let pieces = terminal("SQ600-160", 200.0).generate().unwrap();
@@ -245,4 +248,52 @@ fn spaces_and_terminals_are_redrawn_in_place() {
     })
     .unwrap();
     assert!(d.regenerate_air_terminal(th, &t).is_err());
+}
+
+fn arrow_lines(t: &TerminalParams, layer: &str) -> Vec<(cadcraft_geom::Vec2, cadcraft_geom::Vec2)> {
+    t.generate()
+        .unwrap()
+        .into_iter()
+        .filter(|p| p.layer == layer)
+        .filter_map(|p| if let EntityKind::Line(l) = p.kind { Some((l.a.xy(), l.b.xy())) } else { None })
+        .collect()
+}
+
+#[test]
+fn supply_arrows_leave_the_face_and_extract_arrows_come_back_to_it() {
+    // Four sides, three lines each (the shaft and the two sides of the head).
+    let supply = terminal("SQ600-160", 200.0);
+    let out = arrow_lines(&supply, AIR_SUPPLY_LAYER);
+    assert_eq!(out.len(), 12);
+    // The shaft on the right side runs from outside the face (x = 300) to farther out.
+    let (a, b) = out.iter().find(|(a, b)| a.y == 0.0 && b.y == 0.0 && a.x > 300.0).copied().expect("the right arrow");
+    assert!(b.x > a.x && a.x > 300.0, "{a:?} {b:?}");
+    // The head of a supply arrow is at the far end: its two lines meet at the tip.
+    assert!(out.iter().any(|(tip, _)| (tip.x - b.x).abs() < 1e-9 && tip.y == 0.0 && tip != &a));
+
+    let mut extract = terminal("SQ600-160", 200.0);
+    extract.air = AirDirection::Extract;
+    assert!(arrow_lines(&extract, AIR_SUPPLY_LAYER).is_empty(), "extract arrows are not on the supply layer");
+    let inn = arrow_lines(&extract, AIR_EXTRACT_LAYER);
+    assert_eq!(inn.len(), 12);
+    // Its head is at the end nearest the face (the shaft's start): the head lines start there.
+    let (a, _) = inn.iter().find(|(a, b)| a.y == 0.0 && b.y == 0.0 && a.x > 300.0).copied().expect("the right arrow");
+    assert!(inn.iter().filter(|(p, _)| (p.x - a.x).abs() < 1e-9 && p.y == 0.0).count() >= 3, "the head is at the face end");
+
+    // A grille has one arrow, on its own side.
+    assert_eq!(arrow_lines(&terminal("RG300x150", 100.0), AIR_SUPPLY_LAYER).len(), 3);
+}
+
+#[test]
+fn the_arrow_and_duct_layers_get_their_colours() {
+    let mut d = Drawing::new_metric();
+    let t = terminal("RD200", 80.0);
+    d.add_air_terminal(&Space::Model, Common::default(), &t, Vec2::ZERO, 0.0).unwrap();
+    let mut e = terminal("RD200", 80.0);
+    e.air = AirDirection::Extract;
+    d.add_air_terminal(&Space::Model, Common::default(), &e, Vec2::new(1000.0, 0.0), 0.0).unwrap();
+    let color = |n: &str| d.layer(n).map(|l| l.color);
+    use cadcraft_color::{Color, Rgb};
+    assert_eq!(color(AIR_SUPPLY_LAYER), Some(Color::True(Rgb(0x1e, 0x90, 0xff))));
+    assert_eq!(color(AIR_EXTRACT_LAYER), Some(Color::True(Rgb(0xff, 0x4d, 0xb8))));
 }

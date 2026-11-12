@@ -22,11 +22,14 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["Draw", "HVAC", "Duct"])
             .params(
                 "{points (2 or more; one round duct per segment), diameter? (mm), kind?: auto|main|branch|connection, \
-                 air?: supply|extract, labelHeight? (mm)} → {handles}",
+                 air?: auto|supply|extract (auto: from the terminals it serves), flexible? (true: a flexible duct), labelHeight? (mm)} → {handles}",
             )
             .interactive(|s| Ok(Box::new(DuctAddM::new(s)))),
         CommandSpec::new("ductedit", "Edit Duct", run_ductedit)
-            .params("{handle | handles, diameter? (mm, or auto: sizing chooses it), kind?, air?} → {changed}"),
+            .params("{handle | handles, diameter? (mm, or auto: sizing chooses it), kind?, air?, flexible? (true or false)} → {changed}"),
+        CommandSpec::new("ductconnect", "Connect Terminals", run_ductconnect).menu(&["Draw", "HVAC", "Connect Terminals"]).params(
+            "{terminals? (handles; default every terminal no duct reaches), maxDistance? (mm, default 3000)} → {created (flexible ducts), skipped}",
+        ),
         CommandSpec::new("ductsize", "Size Ducts", run_ductsize).menu(&["Draw", "HVAC", "Size Ducts"]).params(
             "{ahu? (handle; default every unit), maxVelocityMain? (m/s), maxVelocityBranch?, maxVelocityConnection?, \
              maxGradient? (Pa/m)} → {networks: [{ahu, totalFlow (m³/h), requiredPressure (Pa), criticalPath, segments, warnings}]}",
@@ -52,12 +55,14 @@ impl Default for AhuLastUsed {
 pub struct DuctLastUsed {
     pub diameter_mm: f64,
     pub kind: DuctKind,
-    pub air: AirDirection,
+    /// `None`: not fixed, sizing takes it from the terminals the duct serves.
+    pub air: Option<AirDirection>,
+    pub flexible: bool,
 }
 
 impl Default for DuctLastUsed {
     fn default() -> Self {
-        DuctLastUsed { diameter_mm: 200.0, kind: DuctKind::Auto, air: AirDirection::Supply }
+        DuctLastUsed { diameter_mm: 200.0, kind: DuctKind::Auto, air: None, flexible: false }
     }
 }
 
@@ -79,10 +84,19 @@ fn positive(cmd: &str, p: &Value, key: &str) -> Result<Option<f64>> {
     }
 }
 
-fn air_param(cmd: &str, p: &Value) -> Result<Option<AirDirection>> {
+/// A duct's `air`: absent leaves it, `"auto"` lets sizing decide, else supply or extract.
+fn duct_air_param(cmd: &str, p: &Value) -> Result<Option<Option<AirDirection>>> {
     match str_param(p, "air") {
-        Some(t) => AirDirection::parse(t).map(Some).ok_or_else(|| bad(cmd, "`air` must be supply or extract")),
         None => Ok(None),
+        Some(t) if t.trim().eq_ignore_ascii_case("auto") => Ok(Some(None)),
+        Some(t) => AirDirection::parse(t).map(|a| Some(Some(a))).ok_or_else(|| bad(cmd, "`air` must be auto, supply or extract")),
+    }
+}
+
+fn bool_param(cmd: &str, p: &Value, key: &str) -> Result<Option<bool>> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v.as_bool().map(Some).ok_or_else(|| bad(cmd, format!("`{key}` must be true or false"))),
     }
 }
 
@@ -243,6 +257,26 @@ impl Interactive for AhuAddM {
     fn preview(&self, _s: &Session, _c: Vec2) -> Vec<EntityKind> {
         Vec::new()
     }
+    fn preview_objects(&self, s: &Session, c: Vec2) -> Vec<cadcraft_doc::Entity> {
+        let Ok(units) = units_of(s) else { return Vec::new() };
+        let p = AhuParams {
+            name: self.name.clone(),
+            width_mm: self.last.width_mm,
+            depth_mm: self.last.depth_mm,
+            flow_m3h: None,
+            pressure_pa: None,
+            extract_flow_m3h: None,
+            extract_pressure_pa: None,
+            label_height_mm: 100.0,
+            units,
+        };
+        match self.ask {
+            AhuAsk::Location => p.preview(c, 0.0),
+            AhuAsk::Rotation(at) if !c.near(at, 1e-9) => p.preview(at, (c - at).angle()),
+            AhuAsk::Rotation(at) => p.preview(at, 0.0),
+            _ => Vec::new(),
+        }
+    }
 }
 
 // =====================================================================================
@@ -280,9 +314,12 @@ fn duct_params(s: &Session, last: &DuctLastUsed, label_mm: f64) -> Result<DuctPa
         diameter_mm: last.diameter_mm,
         imposed: false,
         kind: last.kind,
-        air: last.air,
+        air: last.air.unwrap_or_default(),
+        air_set: last.air.is_some(),
         flow_m3h: None,
         velocity: None,
+        flexible: last.flexible,
+        reducer: None,
         label_height_mm: label_mm,
         units: units_of(s)?,
     })
@@ -299,7 +336,8 @@ fn run_ductadd(s: &mut Session, p: &Value) -> Result<Value> {
         last.diameter_mm = d;
     }
     last.kind = kind_param(CMD, p)?.unwrap_or(last.kind);
-    last.air = air_param(CMD, p)?.unwrap_or(last.air);
+    last.air = duct_air_param(CMD, p)?.unwrap_or(last.air);
+    last.flexible = bool_param(CMD, p, "flexible")?.unwrap_or(last.flexible);
     let mut params = duct_params(s, &last, positive(CMD, p, "labelHeight")?.unwrap_or(100.0))?;
     params.imposed = p.get("diameter").is_some_and(|v| !v.is_null());
     let mut handles = Vec::new();
@@ -317,6 +355,7 @@ enum DuctAsk {
     Diameter,
     Kind,
     Air,
+    Material,
 }
 
 struct DuctAddM {
@@ -334,7 +373,12 @@ impl DuctAddM {
     }
     fn settings(&self, s: &mut Session) {
         let d = if self.imposed { format!("{}", self.last.diameter_mm) } else { "Auto".to_string() };
-        s.echo(format!("Current settings: Diameter = {d}, Kind = {}, Air = {}", self.last.kind.name(), self.last.air.name()));
+        let material = if self.last.flexible { "Flexible" } else { "Rigid" };
+        s.echo(format!(
+            "Current settings: Diameter = {d}, Kind = {}, Air = {}, Material = {material}",
+            self.last.kind.name(),
+            self.last.air.map_or("auto", AirDirection::name)
+        ));
     }
     fn params(&self, s: &Session) -> Result<DuctParams> {
         let mut p = duct_params(s, &self.last, 100.0)?;
@@ -366,6 +410,7 @@ impl DuctAddM {
             "Diameter" => self.ask = DuctAsk::Diameter,
             "Kind" => self.ask = DuctAsk::Kind,
             "Air" => self.ask = DuctAsk::Air,
+            "Material" => self.ask = DuctAsk::Material,
             "Undo" => {
                 if self.pts.len() >= 2
                     && let Some(h) = self.handles.pop()
@@ -394,7 +439,15 @@ impl DuctAddM {
                 self.imposed = true;
             }
             (DuctAsk::Kind, Some(t)) => self.last.kind = DuctKind::parse(t).ok_or_else(|| other("Enter Auto, Main, Branch or Connection."))?,
-            (DuctAsk::Air, Some(t)) => self.last.air = AirDirection::parse(t).ok_or_else(|| other("Enter Supply or Extract."))?,
+            (DuctAsk::Air, Some(t)) if t.eq_ignore_ascii_case("auto") => self.last.air = None,
+            (DuctAsk::Air, Some(t)) => self.last.air = Some(AirDirection::parse(t).ok_or_else(|| other("Enter Auto, Supply or Extract."))?),
+            (DuctAsk::Material, Some(t)) => {
+                self.last.flexible = match t.to_ascii_lowercase().as_str() {
+                    "rigid" | "r" => false,
+                    "flexible" | "flex" | "f" => true,
+                    _ => return Err(other("Enter Rigid or Flexible.")),
+                }
+            }
             _ => {}
         }
         self.ask = DuctAsk::Point;
@@ -421,9 +474,16 @@ impl Interactive for DuctAddM {
             DuctAsk::Kind => {
                 Prompt::new("Enter duct kind", super::curves::KW).kw(&["Auto", "Main", "Branch", "Connection"]).default(self.last.kind.name())
             }
-            DuctAsk::Air => Prompt::new("Enter air direction", super::curves::KW).kw(&["Supply", "Extract"]).default(self.last.air.name()),
+            DuctAsk::Air => Prompt::new("Enter air direction", super::curves::KW)
+                .kw(&["Auto", "Supply", "Extract"])
+                .default(self.last.air.map_or("auto", AirDirection::name)),
+            DuctAsk::Material => Prompt::new("Enter duct material", super::curves::KW).kw(&["Rigid", "Flexible"]).default(if self.last.flexible {
+                "Flexible"
+            } else {
+                "Rigid"
+            }),
             DuctAsk::Point => match self.pts.last().copied() {
-                None => Prompt::new("Specify start point of duct", Accept::POINT).kw(&["Diameter", "Kind", "Air"]),
+                None => Prompt::new("Specify start point of duct", Accept::POINT).kw(&["Diameter", "Kind", "Air", "Material"]),
                 last => Prompt::new("Specify next point", Accept::POINT).kw(&["Undo"]).base_opt(last),
             },
         }
@@ -441,6 +501,13 @@ impl Interactive for DuctAddM {
     }
     fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
         self.pts.last().map(|l| vec![EntityKind::Line(cadcraft_doc::Line { a: l.to3(0.0), b: c.to3(0.0) })]).unwrap_or_default()
+    }
+    fn preview_objects(&self, s: &Session, c: Vec2) -> Vec<cadcraft_doc::Entity> {
+        // The run under way, as wide as it will be.
+        match (self.ask, self.pts.last().copied(), self.params(s)) {
+            (DuctAsk::Point, Some(last), Ok(p)) if !last.near(c, 1e-9) => p.preview(last, c),
+            _ => Vec::new(),
+        }
     }
 }
 
@@ -460,7 +527,8 @@ fn run_ductedit(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::String(t)) if t.trim().eq_ignore_ascii_case("auto") => Some(None),
         Some(v) => Some(Some(v.as_f64().filter(|d| d.is_finite()).ok_or_else(|| bad(CMD, "`diameter` must be a number of millimetres or auto"))?)),
     };
-    let (kind, air) = (kind_param(CMD, p)?, air_param(CMD, p)?);
+    let (kind, air) = (kind_param(CMD, p)?, duct_air_param(CMD, p)?);
+    let flexible = bool_param(CMD, p, "flexible")?;
     let d = s.doc()?;
     let mut next = Vec::with_capacity(hs.len());
     for h in &hs {
@@ -474,7 +542,12 @@ fn run_ductedit(s: &mut Session, p: &Value) -> Result<Value> {
             None => {}
         }
         dp.kind = kind.unwrap_or(dp.kind);
-        dp.air = air.unwrap_or(dp.air);
+        match air {
+            Some(Some(a)) => (dp.air, dp.air_set) = (a, true),
+            Some(None) => dp.air_set = false,
+            None => {}
+        }
+        dp.flexible = flexible.unwrap_or(dp.flexible);
         dp.validate().map_err(doc_err)?;
         next.push((*h, dp));
     }
@@ -483,6 +556,101 @@ fn run_ductedit(s: &mut Session, p: &Value) -> Result<Value> {
         d.regenerate_duct(*h, dp).map_err(doc_err)?;
     }
     Ok(json!({ "changed": next.len() }))
+}
+
+// =====================================================================================
+// DUCTCONNECT
+// =====================================================================================
+
+/// Most terminals one DUCTCONNECT connects.
+const MAX_CONNECTED: usize = 2_000;
+/// How far, in millimetres, DUCTCONNECT looks for a rigid duct.
+const CONNECT_REACH_MM: f64 = 3_000.0;
+
+/// The terminals a DUCTCONNECT works on: the ones named, else every one no duct reaches.
+fn terminals_to_connect(d: &Drawing, only: Option<&[Handle]>) -> Result<Vec<(Handle, cadcraft_doc::TerminalParams, Vec2)>> {
+    let all: Vec<_> = d
+        .model
+        .iter()
+        .filter_map(|e| match (&e.kind, cadcraft_doc::air_terminal_of(e)) {
+            (EntityKind::Insert(i), Some(t)) => Some((e.handle, t, Vec2::new(i.insert.x, i.insert.y))),
+            _ => None,
+        })
+        .collect();
+    let wanted: Vec<Handle> = match only {
+        Some(hs) => {
+            if let Some(h) = hs.iter().find(|h| !all.iter().any(|t| t.0 == **h)) {
+                return Err(other(format!("{} is not an air terminal.", h.hex())));
+            }
+            hs.to_vec()
+        }
+        None => {
+            let nets = d.duct_networks().map_err(doc_err)?;
+            match nets.first() {
+                Some(first) => first.unconnected.clone(),
+                None => all.iter().map(|t| t.0).collect(),
+            }
+        }
+    };
+    let mut out: Vec<_> = all.into_iter().filter(|t| wanted.contains(&t.0)).collect();
+    out.truncate(MAX_CONNECTED);
+    Ok(out)
+}
+
+/// The nearest rigid duct of `air` to `at`: its foot on the axis and the distance, in drawing units.
+fn nearest_rigid(d: &Drawing, air: AirDirection, at: Vec2) -> Option<(Vec2, f64)> {
+    d.model
+        .iter()
+        .filter_map(|e| d.duct_ends(e.handle))
+        .filter(|(p, ..)| !p.flexible && (!p.air_set || p.air == air))
+        .map(|(_, a, b)| {
+            let along = (b - a).normalized();
+            let foot = a + along * (at - a).dot(along).clamp(0.0, a.dist(b));
+            (foot, foot.dist(at))
+        })
+        .min_by(|x, y| x.1.total_cmp(&y.1))
+}
+
+fn run_ductconnect(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "ductconnect";
+    let reach_mm = positive(CMD, p, "maxDistance")?.unwrap_or(CONNECT_REACH_MM);
+    let only: Option<Vec<Handle>> = match p.get("terminals") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(a)) => Some(
+            a.iter().map(|v| v.as_str().and_then(Handle::parse_hex).ok_or_else(|| bad(CMD, "`terminals` must be handles"))).collect::<Result<_>>()?,
+        ),
+        Some(_) => return Err(bad(CMD, "`terminals` must be a list of handles")),
+    };
+    let terminals = terminals_to_connect(s.doc()?, only.as_deref())?;
+    let mm = units_of(s)?.mm_per_unit;
+    let (mut created, mut skipped) = (Vec::new(), Vec::new());
+    for (h, t, at) in terminals {
+        let Some((foot, dist)) = nearest_rigid(s.doc()?, t.air, at).filter(|(_, dist)| dist * mm <= reach_mm) else {
+            skipped.push(json!({ "terminal": h.hex(), "reason": "no rigid duct of its air direction within reach" }));
+            continue;
+        };
+        if dist * mm < 1.0 {
+            skipped.push(json!({ "terminal": h.hex(), "reason": "already on a duct" }));
+            continue;
+        }
+        // A flexible duct as wide as the terminal's neck, from the rigid duct's axis to the terminal.
+        let params = DuctParams {
+            length: 1.0,
+            diameter_mm: t.model.neck_mm,
+            imposed: true,
+            kind: DuctKind::Connection,
+            air: t.air,
+            air_set: true,
+            flow_m3h: None,
+            velocity: None,
+            flexible: true,
+            reducer: None,
+            label_height_mm: 100.0,
+            units: units_of(s)?,
+        };
+        created.push(add_run(s, &params, foot, at)?.hex());
+    }
+    Ok(json!({ "created": created, "skipped": skipped }))
 }
 
 // =====================================================================================
@@ -529,11 +697,34 @@ fn nearest_end(d: &Drawing, h: Handle) -> String {
         .model
         .iter()
         .filter_map(|e| d.duct_ends(e.handle))
-        .flat_map(|(p, a, b)| [(p.air, a), (p.air, b)])
-        .map(|(air, end)| (end.dist(at) * mm, air))
+        .flat_map(|(p, a, b)| [(p.air, p.air_set, a), (p.air, p.air_set, b)])
+        .map(|(air, set, end)| (end.dist(at) * mm, air, set))
         .min_by(|x, y| x.0.total_cmp(&y.0));
     match nearest {
-        Some((dist, air)) if dist <= 5000.0 => format!(" (the nearest duct end is {dist:.0} mm away, a {} duct)", air.name()),
+        Some((dist, air, fixed)) if dist <= 5000.0 => {
+            let hint = if fixed { ", whose air direction was set by hand: set its Air to Auto" } else { "" };
+            format!(" (the nearest duct end is {dist:.0} mm away, a {} duct{hint})", air.name())
+        }
+        _ => String::new(),
+    }
+}
+
+/// For a message about duct `h` no unit reaches: how far the nearest end of another duct is from
+/// either of its ends, when under a metre (the ends probably should meet).
+fn nearest_duct_end(d: &Drawing, h: Handle) -> String {
+    let Some((_, a, b)) = d.duct_ends(h) else { return String::new() };
+    let mm = HvacUnits::of(d).mm_per_unit;
+    let nearest = d
+        .model
+        .iter()
+        .filter(|e| e.handle != h)
+        .filter_map(|e| d.duct_ends(e.handle))
+        .flat_map(|(_, c, e)| [c, e])
+        .flat_map(|end| [a, b].map(|mine| end.dist(mine) * mm))
+        .filter(|dist| *dist > 1.0)
+        .min_by(f64::total_cmp);
+    match nearest {
+        Some(dist) if dist <= 1000.0 => format!(" (the nearest end of another duct is {dist:.0} mm away)"),
         _ => String::new(),
     }
 }
@@ -613,6 +804,13 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
                 .map(|h| format!("the terminal at {} is reached by no duct of its air direction{}", place(d, *h), nearest_end(d, *h))),
         );
         warnings.extend(net.unplaced.iter().map(|h| format!("the accessory at {} is on no duct", place(d, *h))));
+        // Ducts no unit reaches: where the chain from the unit breaks. A few are named, the rest counted.
+        warnings.extend(
+            net.isolated.iter().take(8).map(|h| format!("the duct at {} is not connected to a unit{}", place(d, *h), nearest_duct_end(d, *h))),
+        );
+        if net.isolated.len() > 8 {
+            warnings.push(format!("{} more ducts are not connected to a unit", net.isolated.len() - 8));
+        }
         if net.network.segments.is_empty() {
             warnings.push("no duct leads from this unit to a terminal: a duct must start on the unit, and the ducts meet end to end".into());
             out.push(
@@ -645,5 +843,7 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
     for (net, report) in &sized {
         d.apply_duct_report(net, report).map_err(doc_err)?;
     }
-    Ok(json!({ "networks": out, "cuts": cuts, "spaces": mismatches }))
+    let ducts = nets.first().map_or(0, |n| n.duct_count);
+    let isolated = nets.first().map_or(0, |n| n.isolated.len());
+    Ok(json!({ "networks": out, "cuts": cuts, "spaces": mismatches, "ducts": ducts, "reached": ducts - isolated }))
 }

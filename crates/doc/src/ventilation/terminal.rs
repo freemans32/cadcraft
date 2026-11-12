@@ -6,7 +6,7 @@ use std::f64::consts::FRAC_1_SQRT_2;
 use cadcraft_geom::{PolyVertex, Vec2};
 use serde::{Deserialize, Serialize};
 
-use super::{HvacPiece, HvacUnits, check_label_height, check_name, invalid, label, v3, xdata};
+use super::{AIR_EXTRACT_LAYER, AIR_SUPPLY_LAYER, HvacPiece, HvacUnits, check_label_height, check_name, invalid, label, v3, xdata};
 use crate::{Circle, EntityKind, Line, LwPolyline, RawTag, Result};
 
 /// The registered application name of an air terminal's extended data.
@@ -174,15 +174,38 @@ fn circle(radius: f64) -> HvacPiece {
     HvacPiece { layer: AIR_TERMINAL_LAYER, kind: EntityKind::Circle(Circle { center: v3(Vec2::ZERO), radius }) }
 }
 
-/// An arrow of length `len` along +y from `from`, pointing away (supply) or back (extract).
-fn arrow(from: Vec2, len: f64, air: AirDirection) -> Vec<HvacPiece> {
-    let to = from + Vec2::new(0.0, len);
-    let (tip, back) = match air {
-        AirDirection::Supply => (to, -1.0),
-        AirDirection::Extract => (from, 1.0),
+/// The layer of the arrows (and the ducts) of an air direction: blue for supply, magenta for extract.
+fn air_layer(air: AirDirection) -> &'static str {
+    match air {
+        AirDirection::Supply => AIR_SUPPLY_LAYER,
+        AirDirection::Extract => AIR_EXTRACT_LAYER,
+    }
+}
+
+/// An arrow of length `len` from `from` along `dir`: supply air leaves the face, so the head is
+/// at the far end; extract air comes back to it, so the head is at `from`.
+fn arrow_at(from: Vec2, dir: Vec2, len: f64, air: AirDirection) -> Vec<HvacPiece> {
+    let to = from + dir * len;
+    let (tip, toward_tail) = match air {
+        AirDirection::Supply => (to, -dir),
+        AirDirection::Extract => (from, dir),
     };
     let head = len * 0.35;
-    vec![line(from, to), line(tip, tip + Vec2::new(-head * 0.6, back * head)), line(tip, tip + Vec2::new(head * 0.6, back * head))]
+    let side = dir.perp() * (head * 0.6);
+    let l = |a: Vec2, b: Vec2| HvacPiece { layer: air_layer(air), kind: EntityKind::Line(Line { a: v3(a), b: v3(b) }) };
+    vec![l(from, to), l(tip, tip + toward_tail * head + side), l(tip, tip + toward_tail * head - side)]
+}
+
+/// One arrow outside each of the four sides of a face of half sizes `half`.
+fn side_arrows(half: Vec2, air: AirDirection) -> Vec<HvacPiece> {
+    let face = half.x.max(half.y) * 2.0;
+    let (gap, len) = (0.12 * face, 0.35 * face);
+    let mut v = Vec::new();
+    for dir in [Vec2::new(1.0, 0.0), Vec2::new(-1.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(0.0, -1.0)] {
+        let edge = if dir.x != 0.0 { half.x } else { half.y };
+        v.extend(arrow_at(dir * (edge + gap), dir, len, air));
+    }
+    v
 }
 
 impl TerminalParams {
@@ -218,19 +241,26 @@ impl TerminalParams {
                     let from = Vec2::new(sx, sy) * (neck * FRAC_1_SQRT_2);
                     v.push(line(from, corner));
                 }
+                v.extend(side_arrows(half, self.air));
                 v
             }
-            TerminalKind::Round => vec![circle(half.x), circle(neck)],
+            TerminalKind::Round => {
+                let mut v = vec![circle(half.x), circle(neck)];
+                v.extend(side_arrows(half, self.air));
+                v
+            }
             TerminalKind::Extract => {
                 let r = half.x * FRAC_1_SQRT_2;
-                vec![circle(half.x), line(Vec2::new(-r, -r), Vec2::new(r, r)), line(Vec2::new(-r, r), Vec2::new(r, -r))]
+                let mut v = vec![circle(half.x), line(Vec2::new(-r, -r), Vec2::new(r, r)), line(Vec2::new(-r, r), Vec2::new(r, -r))];
+                v.extend(side_arrows(half, self.air));
+                v
             }
             TerminalKind::Rectangular => {
                 let mut v = vec![rect(half)];
                 for k in [-0.5, 0.0, 0.5] {
                     v.push(line(Vec2::new(-half.x * 0.9, half.y * k), Vec2::new(half.x * 0.9, half.y * k)));
                 }
-                v.extend(arrow(Vec2::new(0.0, half.y), half.y.max(half.x * 0.25), self.air));
+                v.extend(arrow_at(Vec2::new(0.0, half.y), Vec2::new(0.0, 1.0), half.y.max(half.x * 0.25), self.air));
                 v
             }
             TerminalKind::Linear => {
@@ -240,7 +270,7 @@ impl TerminalParams {
                     let y = -half.y + 2.0 * half.y * f64::from(k) / n;
                     v.push(line(Vec2::new(-half.x, y), Vec2::new(half.x, y)));
                 }
-                v.extend(arrow(Vec2::new(0.0, half.y), (half.x * 0.15).max(half.y), self.air));
+                v.extend(arrow_at(Vec2::new(0.0, half.y), Vec2::new(0.0, 1.0), (half.x * 0.15).max(half.y), self.air));
                 v
             }
         }
@@ -251,7 +281,14 @@ impl TerminalParams {
         self.validate()?;
         let h = self.units.to_units(self.label_height_mm);
         let mut v = self.face();
-        let at = Vec2::new(0.0, -self.half().y - 1.2 * h);
+        let below = match self.model.kind {
+            // The arrow under the face takes room.
+            TerminalKind::SquareCeiling | TerminalKind::Round | TerminalKind::Extract => {
+                0.12 * 2.0 * self.half().x.max(self.half().y) + 0.35 * 2.0 * self.half().x.max(self.half().y)
+            }
+            _ => 0.0,
+        };
+        let at = Vec2::new(0.0, -self.half().y - below - 1.2 * h);
         v.push(HvacPiece { layer: AIR_TERMINAL_LAYER, kind: label(at, h, format!("{} {:.0} m³/h", self.model.name, self.flow_m3h)) });
         Ok(v)
     }
@@ -263,6 +300,13 @@ impl TerminalParams {
     pub fn from_xdata(tags: &[RawTag]) -> Option<TerminalParams> {
         let p: TerminalParams = xdata::from_xdata(AIR_TERMINAL_APP, XDATA_FORMAT, tags)?;
         p.validate().is_ok().then_some(p)
+    }
+}
+
+impl TerminalParams {
+    /// The terminal as it will look at `at`, turned `rotation`; empty when it can't be drawn.
+    pub fn preview(&self, at: Vec2, rotation: f64) -> Vec<crate::Entity> {
+        self.generate().map(|p| super::preview_entities(p, at, rotation)).unwrap_or_default()
     }
 }
 

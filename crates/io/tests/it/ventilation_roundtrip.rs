@@ -77,8 +77,11 @@ fn ducted() -> Drawing {
         imposed: false,
         kind: DuctKind::Auto,
         air: AirDirection::Supply,
+        air_set: true,
         flow_m3h: Some(500.0),
         velocity: Some(3.5),
+        flexible: false,
+        reducer: None,
         label_height_mm: 100.0,
         units,
     };

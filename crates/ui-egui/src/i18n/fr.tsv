@@ -1114,6 +1114,13 @@
 	Duct	Gaine
 	Edit Duct	Modifier la gaine
 	Size Ducts	Dimensionner les gaines
+	Connect Terminals	Raccorder les bouches
+	Ducts reached from a unit: {reached} of {ducts}	Gaines reliées à une CTA : {reached} sur {ducts}
+	Terminals connected: {n}	Bouches raccordées : {n}
+	Material	Matériau
+	Rigid	Rigide
+	Flexible	Souple
+	Enter duct material	Entrez le matériau de la gaine
 	Duct Accessory	Accessoire de gaine
 	Edit Duct Accessory	Modifier l'accessoire de gaine
 	Duct Accessories	Accessoires de gaine

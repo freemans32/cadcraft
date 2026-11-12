@@ -136,6 +136,7 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
     let mut terminal: Option<TerminalKind> = None;
     let mut distribute = false;
     let mut size = false;
+    let mut connect = false;
     let accessory = app.session.last_used.accessory.kind;
     let mut chosen_accessory: Option<AccessoryKind> = None;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -176,6 +177,9 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         if row_button(ui, crate::i18n::t("Duct"), false, |_, _| {}) {
             start = Some("ductadd");
         }
+        if row_button(ui, crate::i18n::t("Connect Terminals"), false, |_, _| {}) {
+            connect = true;
+        }
         if row_button(ui, crate::i18n::t("Size Ducts"), false, |_, _| {}) {
             size = true;
         }
@@ -214,6 +218,18 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         app.session.last_used.accessory.kind = kind;
         app.cmd.buffer.clear();
         app.start("ductaccessoryadd");
+    } else if connect {
+        // DUCTCONNECT asks nothing: it runs at once and says what it did.
+        match app.run("ductconnect", serde_json::json!({})) {
+            Ok(r) => {
+                let n = r["created"].as_array().map_or(0, Vec::len);
+                app.session.echo(crate::tf!("Terminals connected: {n}", n = n));
+                for k in r["skipped"].as_array().into_iter().flatten() {
+                    app.session.echo(format!("{}: {}", k["terminal"].as_str().unwrap_or(""), k["reason"].as_str().unwrap_or("")));
+                }
+            }
+            Err(e) => app.session.echo(e.to_string()),
+        }
     } else if size {
         // DUCTSIZE asks nothing: it runs at once and says what it did.
         match app.run("ductsize", serde_json::json!({})) {
@@ -231,6 +247,11 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
                         app.session.echo(w.to_string());
                     }
                 }
+                app.session.echo(crate::tf!(
+                    "Ducts reached from a unit: {reached} of {ducts}",
+                    reached = r["reached"].as_u64().unwrap_or(0),
+                    ducts = r["ducts"].as_u64().unwrap_or(0)
+                ));
                 for sp in r["spaces"].as_array().into_iter().flatten() {
                     app.session.echo(crate::tf!(
                         "{name} ({air}): the terminals carry {supplied} m³/h, the space needs {needed} m³/h",
