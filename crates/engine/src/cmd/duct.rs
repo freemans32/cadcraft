@@ -3,7 +3,7 @@
 //! changes runs already drawn and DUCTSIZE sizes every network from its terminals back to its unit.
 //! The network is read from the drawing each time (`Drawing::duct_networks`), never stored.
 
-use cadcraft_doc::{AhuParams, AirDirection, Drawing, DuctKind, DuctParams, DuctShape, EntityKind, Handle, HvacUnits, MAX_DUCTS};
+use cadcraft_doc::{AhuKind, AhuParams, AirDirection, Drawing, DuctKind, DuctParams, DuctShape, EntityKind, Handle, HvacUnits, MAX_DUCTS};
 use cadcraft_geom::Vec2;
 use cadcraft_hvac::{DesignCriteria, Governing, size_network};
 use serde_json::{Value, json};
@@ -17,12 +17,15 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("ahuadd", "Air Handling Unit", run_ahuadd)
             .menu(&["Draw", "HVAC", "Air Handling Unit"])
             .params(
-                "{at, name?, width? (mm), depth? (mm), voidHeight? (mm available above the false ceiling for its ducts), margin? (mm kept from it, \
+                "{at, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox (default doubleFlow), width? (mm), depth? (mm), voidHeight? (mm available above the false ceiling for its ducts), margin? (mm kept from it, \
                  default 100), rotation? (degrees), labelHeight? (mm)} → {handle, name} (a double-flux unit: its ducts and terminals say supply or extract)",
             )
             .interactive(|s| Ok(Box::new(AhuAddM::new(s)))),
         CommandSpec::new("ahuedit", "Edit Air Handling Unit", run_ahuedit)
-            .params("{handle | handles, name?, width? (mm), depth? (mm), voidHeight? (mm, or null for none), margin? (mm)} → {changed}"),
+            .params(
+                "{handle | handles, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox, width? (mm), depth? (mm), voidHeight? (mm, or null for none), \
+                 margin? (mm)} → {changed}",
+            ),
         CommandSpec::new("ductadd", "Duct", run_ductadd)
             .menu(&["Draw", "HVAC", "Duct"])
             .params(
@@ -46,13 +49,21 @@ pub fn specs() -> Vec<CommandSpec> {
 /// What AHUADD remembers between uses.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AhuLastUsed {
-    pub width_mm: f64,
-    pub depth_mm: f64,
+    pub kind: AhuKind,
+    /// Width and depth the user gave, mm; the kind's own when none.
+    pub size: Option<(f64, f64)>,
 }
 
 impl Default for AhuLastUsed {
     fn default() -> Self {
-        AhuLastUsed { width_mm: 1500.0, depth_mm: 800.0 }
+        AhuLastUsed { kind: AhuKind::DoubleFlow, size: None }
+    }
+}
+
+impl AhuLastUsed {
+    /// Width and depth to draw, mm.
+    pub fn size_mm(&self) -> (f64, f64) {
+        self.size.unwrap_or_else(|| self.kind.default_size_mm())
     }
 }
 
@@ -142,6 +153,13 @@ fn duct_air_param(cmd: &str, p: &Value) -> Result<Option<Option<AirDirection>>> 
     }
 }
 
+fn ahu_kind_param(cmd: &str, p: &Value) -> Result<Option<AhuKind>> {
+    match str_param(p, "type") {
+        Some(t) => AhuKind::parse(t).map(Some).ok_or_else(|| bad(cmd, "`type` must be doubleFlow, supplyUnit, extractUnit or vmcBox")),
+        None => Ok(None),
+    }
+}
+
 fn bool_param(cmd: &str, p: &Value, key: &str) -> Result<Option<bool>> {
     match p.get(key) {
         None | Some(Value::Null) => Ok(None),
@@ -179,11 +197,13 @@ fn add_ahu(s: &mut Session, p: &AhuParams, at: Vec2, rotation: f64) -> Result<Ha
 fn run_ahuadd(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "ahuadd";
     let at = super::point_req(CMD, p, "at")?;
-    let last = AhuLastUsed::default();
+    let kind = ahu_kind_param(CMD, p)?.unwrap_or_default();
+    let (default_width, default_depth) = kind.default_size_mm();
     let params = AhuParams {
         name: str_param(p, "name").map(str::to_string).unwrap_or_else(|| s.doc().map(next_ahu_name).unwrap_or_else(|_| "CTA".into())),
-        width_mm: positive(CMD, p, "width")?.unwrap_or(last.width_mm),
-        depth_mm: positive(CMD, p, "depth")?.unwrap_or(last.depth_mm),
+        kind,
+        width_mm: positive(CMD, p, "width")?.unwrap_or(default_width),
+        depth_mm: positive(CMD, p, "depth")?.unwrap_or(default_depth),
         flow_m3h: None,
         pressure_pa: None,
         extract_flow_m3h: None,
@@ -204,6 +224,7 @@ fn run_ahuedit(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(CMD, format!("select 1 to {MAX_EDITED} units")));
     }
     let (width, depth, margin) = (positive(CMD, p, "width")?, positive(CMD, p, "depth")?, non_negative(CMD, p, "margin")?);
+    let kind = ahu_kind_param(CMD, p)?;
     // A null height available clears it: the ducts are round again.
     let void = match p.get("voidHeight") {
         None => None,
@@ -217,6 +238,7 @@ fn run_ahuedit(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(n) = str_param(p, "name") {
             a.name = n.to_string();
         }
+        a.kind = kind.unwrap_or(a.kind);
         a.width_mm = width.unwrap_or(a.width_mm);
         a.depth_mm = depth.unwrap_or(a.depth_mm);
         a.margin_mm = margin.unwrap_or(a.margin_mm);
@@ -236,6 +258,7 @@ fn run_ahuedit(s: &mut Session, p: &Value) -> Result<Value> {
 #[derive(Clone, Copy, PartialEq)]
 enum AhuAsk {
     Location,
+    Type,
     Rotation(Vec2),
     Name,
     Width,
@@ -253,7 +276,8 @@ impl AhuAddM {
         AhuAddM { last: s.last_used.ahu.clone(), name: s.doc().map(next_ahu_name).unwrap_or_else(|_| "CTA".into()), ask: AhuAsk::Location }
     }
     fn settings(&self, s: &mut Session) {
-        s.echo(format!("Current settings: Name = {}, Width = {}, Depth = {}", self.name, self.last.width_mm, self.last.depth_mm));
+        let (w, d) = self.last.size_mm();
+        s.echo(format!("Current settings: Type = {}, Name = {}, Width = {w}, Depth = {d}", self.last.kind.name(), self.name));
     }
     fn size(t: &str) -> Result<f64> {
         t.parse::<f64>()
@@ -268,8 +292,11 @@ impl AhuAddM {
         };
         match (self.ask, &i, text.as_deref()) {
             (AhuAsk::Name, _, Some(t)) if !t.is_empty() => self.name = t.to_string(),
-            (AhuAsk::Width, _, Some(t)) => self.last.width_mm = Self::size(t)?,
-            (AhuAsk::Depth, _, Some(t)) => self.last.depth_mm = Self::size(t)?,
+            (AhuAsk::Width, _, Some(t)) => self.last.size = Some((Self::size(t)?, self.last.size_mm().1)),
+            (AhuAsk::Depth, _, Some(t)) => self.last.size = Some((self.last.size_mm().0, Self::size(t)?)),
+            (AhuAsk::Type, _, Some(t)) => {
+                self.last = AhuLastUsed { kind: AhuKind::parse(t).ok_or_else(|| other("Enter DoubleFlow, Supply, Extract or Vmc."))?, size: None };
+            }
             (AhuAsk::Rotation(at), _, _) => {
                 let angle = match (&i, text.as_deref()) {
                     (Input::Point(p), _) => (*p - at).angle(),
@@ -278,10 +305,12 @@ impl AhuAddM {
                     }
                     _ => 0.0,
                 };
+                let (width_mm, depth_mm) = self.last.size_mm();
                 let params = AhuParams {
                     name: self.name.clone(),
-                    width_mm: self.last.width_mm,
-                    depth_mm: self.last.depth_mm,
+                    kind: self.last.kind,
+                    width_mm,
+                    depth_mm,
                     flow_m3h: None,
                     pressure_pa: None,
                     extract_flow_m3h: None,
@@ -314,11 +343,14 @@ impl Interactive for AhuAddM {
     }
     fn prompt(&self, _s: &Session) -> Prompt {
         match self.ask {
-            AhuAsk::Location => Prompt::new("Specify location of air handling unit", Accept::POINT).kw(&["Name", "Width", "Depth"]),
+            AhuAsk::Location => Prompt::new("Specify location of air handling unit", Accept::POINT).kw(&["Type", "Name", "Width", "Depth"]),
             AhuAsk::Rotation(at) => Prompt::new("Specify rotation angle", Accept::POINT_OR_NUMBER).base(at).default("0"),
             AhuAsk::Name => Prompt::new("Enter unit name", Accept::TEXT).default(self.name.clone()),
-            AhuAsk::Width => Prompt::new("Enter unit width (mm)", Accept::NUMBER).default(format!("{}", self.last.width_mm)),
-            AhuAsk::Depth => Prompt::new("Enter unit depth (mm)", Accept::NUMBER).default(format!("{}", self.last.depth_mm)),
+            AhuAsk::Width => Prompt::new("Enter unit width (mm)", Accept::NUMBER).default(format!("{}", self.last.size_mm().0)),
+            AhuAsk::Depth => Prompt::new("Enter unit depth (mm)", Accept::NUMBER).default(format!("{}", self.last.size_mm().1)),
+            AhuAsk::Type => {
+                Prompt::new("Enter unit type", super::curves::KW).kw(&["DoubleFlow", "Supply", "Extract", "Vmc"]).default(self.last.kind.name())
+            }
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
@@ -329,6 +361,7 @@ impl Interactive for AhuAddM {
             Input::Keyword(k) => {
                 self.ask = match k.as_str() {
                     "Name" => AhuAsk::Name,
+                    "Type" => AhuAsk::Type,
                     "Width" => AhuAsk::Width,
                     "Depth" => AhuAsk::Depth,
                     _ => AhuAsk::Location,
@@ -348,10 +381,12 @@ impl Interactive for AhuAddM {
     }
     fn preview_objects(&self, s: &Session, c: Vec2) -> Vec<cadcraft_doc::Entity> {
         let Ok(units) = units_of(s) else { return Vec::new() };
+        let (width_mm, depth_mm) = self.last.size_mm();
         let p = AhuParams {
             name: self.name.clone(),
-            width_mm: self.last.width_mm,
-            depth_mm: self.last.depth_mm,
+            kind: self.last.kind,
+            width_mm,
+            depth_mm,
             flow_m3h: None,
             pressure_pa: None,
             extract_flow_m3h: None,
@@ -414,6 +449,9 @@ fn duct_params(s: &Session, last: &DuctLastUsed, label_mm: f64) -> Result<DuctPa
         height_mm: 0.0,
         flexible: last.flexible,
         reducer: None,
+        elbow: None,
+        trim_start_mm: 0.0,
+        trim_end_mm: 0.0,
         label_height_mm: label_mm,
         units: units_of(s)?,
     })
@@ -755,6 +793,9 @@ fn run_ductconnect(s: &mut Session, p: &Value) -> Result<Value> {
             height_mm: 0.0,
             flexible: true,
             reducer: None,
+            elbow: None,
+            trim_start_mm: 0.0,
+            trim_end_mm: 0.0,
             label_height_mm: 100.0,
             units: units_of(s)?,
         };

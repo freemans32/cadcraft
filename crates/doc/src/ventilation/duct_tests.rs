@@ -7,6 +7,7 @@ use crate::{Common, Drawing, EntityKind, Handle, Space};
 fn ahu() -> AhuParams {
     AhuParams {
         name: "CTA1".into(),
+        kind: AhuKind::DoubleFlow,
         width_mm: 1000.0,
         depth_mm: 600.0,
         flow_m3h: None,
@@ -35,6 +36,9 @@ fn duct(diameter_mm: f64) -> DuctParams {
         height_mm: 0.0,
         flexible: false,
         reducer: None,
+        elbow: None,
+        trim_start_mm: 0.0,
+        trim_end_mm: 0.0,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     }
@@ -384,7 +388,9 @@ fn each_network_gives_its_flow_to_the_unit_and_the_label_shows_both() {
     let unit = d.model.iter().find_map(|e| ahu_of(e)).unwrap();
     assert_eq!((unit.flow_m3h, unit.extract_flow_m3h), (Some(300.0), Some(250.0)));
     assert!(unit.pressure_pa.is_some() && unit.extract_pressure_pa.is_some());
-    let text = unit.generate().unwrap().into_iter().find_map(|p| if let EntityKind::Text(t) = p.kind { Some(t.value) } else { None }).unwrap();
+    // The label with the figures is the last text (the unit's code comes first).
+    let text =
+        unit.generate().unwrap().into_iter().filter_map(|p| if let EntityKind::Text(t) = p.kind { Some(t.value) } else { None }).next_back().unwrap();
     assert!(text.contains("S 300 / E 250 m³/h"), "{text}");
 }
 
@@ -628,4 +634,171 @@ fn a_height_too_small_for_any_duct_is_an_error_not_a_panic() {
     assert!(size_network(&net.network, &DesignCriteria::default()).is_err());
     assert!(AhuParams { void_height_mm: Some(10.0), ..ahu() }.validate().is_err());
     assert!(AhuParams { margin_mm: -1.0, ..ahu() }.validate().is_err());
+}
+
+fn arcs(pieces: &[HvacPiece]) -> Vec<(Vec2, f64, f64, f64)> {
+    pieces.iter().filter_map(|p| if let EntityKind::Arc(a) = &p.kind { Some((a.center.xy(), a.radius, a.start, a.end)) } else { None }).collect()
+}
+
+fn point_on(arc: &(Vec2, f64, f64, f64), angle: f64) -> Vec2 {
+    arc.0 + Vec2::from_angle(angle) * arc.1
+}
+
+#[test]
+fn an_elbow_is_two_arcs_that_meet_the_sides_of_the_run_without_a_gap() {
+    // A 200 mm run of 3000 mm, turning 90° to the left or the right, entered at its start or its end.
+    for (angle, at_end) in [(90.0, false), (-90.0, false), (90.0, true), (-90.0, true), (45.0, false), (-60.0, true)] {
+        let mut p = DuctParams { length: 3000.0, ..duct(200.0) };
+        let e = DuctElbow { angle_deg: angle, radius_mm: 200.0, at_end };
+        p.elbow = Some(e);
+        let t = e.tangent_mm();
+        if at_end {
+            p.trim_end_mm = t;
+        } else {
+            p.trim_start_mm = t;
+        }
+        let pieces = p.generate(false).unwrap();
+        let a = arcs(&pieces);
+        assert_eq!(a.len(), 2, "{angle} {at_end}");
+        let radii = {
+            let mut r: Vec<f64> = a.iter().map(|x| x.1).collect();
+            r.sort_by(f64::total_cmp);
+            r
+        };
+        assert_eq!(radii, [100.0, 300.0], "the inner and the outer arc of a 200 mm run bent on a 200 mm radius");
+        // The run's own end of each arc is where its side now starts (or ends): no gap, no overlap.
+        let sides = polylines(&pieces);
+        let side_end = |side: &Vec<Vec2>| if at_end { *side.last().unwrap() } else { side[0] };
+        let arc_ends: Vec<Vec2> = a.iter().flat_map(|x| [point_on(x, x.2), point_on(x, x.3)]).collect();
+        for side in &sides {
+            let e = side_end(side);
+            assert!(arc_ends.iter().any(|p| p.near(e, 1e-6)), "{angle} {at_end}: the side ends at {e:?}, the arcs at {arc_ends:?}");
+            assert!((e.x - if at_end { 3000.0 - t } else { t }).abs() < 1e-6, "the side is trimmed by the bend's tangent length");
+        }
+        // The arc's two ends are a quarter turn... the bend's own angle apart.
+        let span = (a[0].3 - a[0].2).abs();
+        assert!((span - angle.abs().to_radians()).abs() < 1e-9, "{span}");
+    }
+    // No elbow, no arc; and a bad one is refused.
+    assert!(arcs(&DuctParams { length: 3000.0, ..duct(200.0) }.generate(false).unwrap()).is_empty());
+    let mut bad = duct(200.0);
+    bad.elbow = Some(DuctElbow { angle_deg: 0.0, radius_mm: 200.0, at_end: false });
+    assert!(bad.validate().is_err());
+    bad.elbow = Some(DuctElbow { angle_deg: 200.0, radius_mm: 200.0, at_end: false });
+    assert!(bad.validate().is_err());
+}
+
+#[test]
+fn sizing_draws_the_elbow_where_a_run_turns_and_trims_both_runs() {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    let east = add_duct(&mut d, (500.0, 0.0), (4000.0, 0.0));
+    let north = add_duct(&mut d, (4000.0, 0.0), (4000.0, 3000.0));
+    add_terminal(&mut d, (4000.0, 3000.0), 200.0);
+    size_all(&mut d);
+    let (up, ..) = d.duct_ends(east).unwrap();
+    let (turn, ..) = d.duct_ends(north).unwrap();
+    let e = turn.elbow.expect("the second run starts with an elbow");
+    assert!((e.angle_deg - 90.0).abs() < 1e-9 && !e.at_end, "a left turn from east to north: {e:?}");
+    let t = e.tangent_mm();
+    assert!((t - e.radius_mm).abs() < 1e-6, "a 90° bend's tangent is its radius");
+    assert_eq!((turn.trim_start_mm, turn.trim_end_mm), (t, 0.0));
+    assert_eq!((up.trim_start_mm, up.trim_end_mm), (0.0, t), "the run before it is drawn short of the corner");
+    assert_eq!(up.elbow, None);
+    // A run of the other orientation: the north run drawn from its far end, turning right.
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    add_duct(&mut d, (500.0, 0.0), (4000.0, 0.0));
+    let south = add_duct(&mut d, (4000.0, -3000.0), (4000.0, 0.0));
+    add_terminal(&mut d, (4000.0, -3000.0), 200.0);
+    size_all(&mut d);
+    let (p, ..) = d.duct_ends(south).unwrap();
+    let e = p.elbow.expect("an elbow");
+    assert!((e.angle_deg + 90.0).abs() < 1e-9 && e.at_end, "a right turn, entered by its end: {e:?}");
+    assert_eq!((p.trim_start_mm, p.trim_end_mm), (0.0, e.tangent_mm()));
+}
+
+#[test]
+fn a_tee_and_a_short_run_get_no_bend_and_a_tight_one_is_drawn_tighter() {
+    // A tee has no bare elbow: nothing is drawn at the branch.
+    let (mut d, [trunk, up, straight], _) = tee_and_elbow();
+    size_all(&mut d);
+    for h in [trunk, up, straight] {
+        assert_eq!(d.duct_ends(h).unwrap().0.elbow, None);
+    }
+    // Two runs of 300 mm leave no room for a 250 mm radius bend: it is tightened to fit, and a run
+    // too short for even a tight one is left as a corner.
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    add_duct(&mut d, (500.0, 0.0), (2500.0, 0.0));
+    let short = add_duct(&mut d, (2500.0, 0.0), (2500.0, 300.0));
+    add_terminal(&mut d, (2500.0, 300.0), 100.0);
+    size_all(&mut d);
+    let (p, ..) = d.duct_ends(short).unwrap();
+    if let Some(e) = p.elbow {
+        assert!(e.tangent_mm() <= 0.4 * 300.0 + 1e-9, "{e:?}");
+    }
+}
+
+fn unit_of(kind: AhuKind) -> AhuParams {
+    let (w, d) = kind.default_size_mm();
+    AhuParams { kind, width_mm: w, depth_mm: d, ..ahu() }
+}
+
+fn polys(p: &[HvacPiece]) -> usize {
+    p.iter().filter(|x| matches!(x.kind, EntityKind::LwPolyline(_))).count()
+}
+
+fn circles(p: &[HvacPiece]) -> usize {
+    p.iter().filter(|x| matches!(x.kind, EntityKind::Circle(_))).count()
+}
+
+#[test]
+fn each_kind_of_unit_is_drawn_with_its_own_parts_and_collars() {
+    // Casing and inner panel, then the collars: two on each short side of a double-flux unit, one
+    // at each end of a single-flux one, two sides and two spigots on a ventilation box.
+    let expect =
+        [(AhuKind::DoubleFlow, 2 + 4, 2), (AhuKind::SupplyUnit, 2 + 2, 1), (AhuKind::ExtractUnit, 2 + 2, 1), (AhuKind::VmcBox, 2 + 2 + 2, 1)];
+    for (kind, polylines, fans) in expect {
+        let pieces = unit_of(kind).generate().unwrap();
+        assert_eq!((polys(&pieces), circles(&pieces)), (polylines, fans), "{kind:?}");
+        assert!(pieces.iter().all(|p| p.layer == AHU_LAYER));
+        assert!(text_of(&pieces).value.starts_with(kind.code()), "the code is written on the unit: {kind:?}");
+    }
+    // Each kind starts at its own size, and the parse takes the names a command gives and the French ones.
+    let sizes: Vec<_> = AhuKind::ALL.iter().map(|k| k.default_size_mm()).collect();
+    assert_eq!(sizes[3], (700.0, 550.0));
+    assert!(sizes[3].0 < sizes[1].0, "a ventilation box is smaller than a unit");
+    for (text, kind) in [
+        ("doubleFlow", AhuKind::DoubleFlow),
+        ("DF", AhuKind::DoubleFlow),
+        ("supply", AhuKind::SupplyUnit),
+        ("extraction", AhuKind::ExtractUnit),
+        ("VMC", AhuKind::VmcBox),
+    ] {
+        assert_eq!(AhuKind::parse(text), Some(kind), "{text}");
+        assert_eq!(AhuKind::parse(kind.name()), Some(kind));
+    }
+    assert_eq!(AhuKind::parse("boiler"), None);
+}
+
+#[test]
+fn a_unit_saved_before_there_were_kinds_is_a_double_flux_one() {
+    let old = r#"{"name":"CTA1","widthMm":1500.0,"depthMm":800.0}"#;
+    let p: AhuParams = serde_json::from_str(old).unwrap();
+    assert_eq!(p.kind, AhuKind::DoubleFlow);
+    assert_eq!(AhuParams::from_xdata(&unit_of(AhuKind::VmcBox).to_xdata().unwrap()).map(|p| p.kind), Some(AhuKind::VmcBox));
+}
+
+#[test]
+fn every_kind_of_unit_feeds_a_network_the_same_way() {
+    for kind in AhuKind::ALL {
+        let mut d = Drawing::new_metric();
+        let (w, _) = kind.default_size_mm();
+        d.add_ahu(&Space::Model, Common::default(), &unit_of(kind), Vec2::ZERO, 0.0).unwrap();
+        add_duct(&mut d, (w / 2.0 + 150.0, 0.0), (w / 2.0 + 3000.0, 0.0));
+        add_terminal(&mut d, (w / 2.0 + 3000.0, 0.0), 150.0);
+        let net = d.duct_networks().unwrap().remove(0);
+        assert_eq!(net.network.segments.len(), 1, "{kind:?}: a duct starting 150 mm off its face is connected");
+    }
 }

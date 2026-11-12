@@ -3,7 +3,7 @@
 //! command so the object is regenerated, as the command line would.
 
 use cadcraft_doc::{
-    AccessoryKind, AccessoryParams, AhuParams, AirDirection, Drawing, DuctKind, DuctParams, DuctShape, Handle, SpaceParams, TerminalKind,
+    AccessoryKind, AccessoryParams, AhuKind, AhuParams, AirDirection, Drawing, DuctKind, DuctParams, DuctShape, Handle, SpaceParams, TerminalKind,
     TerminalParams, WallJustification, accessory_of, ahu_of, air_terminal_of, duct_of, space_of, wall_of,
 };
 use cadcraft_hvac::RoomUse;
@@ -363,6 +363,20 @@ fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams], bad: &mut
     let mut action: Action = None;
     let edit = |key: &str, value: Value| Some(("ahuedit", json!({ "handles": ids, key: value })));
     group(ui, "Air Handling Unit");
+    let kind = shared(&units.iter().map(|p| p.kind).collect::<Vec<_>>());
+    prop_row(ui, "Type", |ui| {
+        let label = |k: AhuKind| match k {
+            AhuKind::DoubleFlow => "Double-flow unit",
+            AhuKind::SupplyUnit => "Supply unit",
+            AhuKind::ExtractUnit => "Extract unit",
+            AhuKind::VmcBox => "Ventilation box",
+        };
+        let items =
+            [("doubleFlow", "Double-flow unit"), ("supplyUnit", "Supply unit"), ("extractUnit", "Extract unit"), ("vmcBox", "Ventilation box")];
+        if let Some(k) = choice(ui, kind.map_or(VARIES, label), &items) {
+            action = edit("type", json!(k));
+        }
+    });
     let name = shared(&units.iter().map(|p| p.name.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
     prop_row(ui, "Name", |ui| {
         if let Some(n) = edit_field(ui, ui.scope_id().with(("ahu_name", &ids)), name).filter(|n| !n.trim().is_empty() && n != VARIES) {

@@ -391,7 +391,7 @@ fn ductedit_moves_a_duct_to_the_layer_of_its_air_direction() {
     let mut s = metric();
     let r = s.execute("ductadd", &json!({"points": [[0, 0], [1000, 0]]})).unwrap();
     let h = hd(&r["handles"][0]);
-    assert_eq!(s.doc().unwrap().entity(h).unwrap().common.layer, "M-HVAC-DUCT");
+    assert_eq!(s.doc().unwrap().entity(h).unwrap().common.layer, "M-HVAC-DUCT-SUP");
     s.execute("ductedit", &json!({"handle": r["handles"][0], "air": "extract"})).unwrap();
     assert_eq!(s.doc().unwrap().entity(h).unwrap().common.layer, "M-HVAC-DUCT-EXTR");
     assert!(s.doc().unwrap().layer("M-HVAC-DUCT-EXTR").is_some());
@@ -610,4 +610,26 @@ fn ductsize_keeps_an_imposed_rectangle_and_takes_its_aspect_limit_from_its_param
     assert!(ok, "{r}");
     assert!(s.execute("ductsize", &json!({"maxAspect": 0})).is_err());
     assert!(s.execute("ductsize", &json!({"sideStep": -5})).is_err());
+}
+
+#[test]
+fn ahuadd_draws_the_kind_of_unit_asked_for_at_its_own_size() {
+    let mut s = metric();
+    let ahu = |s: &Session, h: &Value| cadcraft_doc::ahu_of(s.doc().unwrap().entity(hd(h)).unwrap()).unwrap();
+    let df = s.execute("ahuadd", &json!({"at": [0, 0]})).unwrap();
+    assert_eq!((ahu(&s, &df["handle"]).kind, ahu(&s, &df["handle"]).width_mm), (cadcraft_doc::AhuKind::DoubleFlow, 2000.0));
+    let vmc = s.execute("ahuadd", &json!({"at": [5000, 0], "type": "vmc"})).unwrap();
+    let v = ahu(&s, &vmc["handle"]);
+    assert_eq!((v.kind, v.width_mm, v.depth_mm), (cadcraft_doc::AhuKind::VmcBox, 700.0, 550.0));
+    let big = s.execute("ahuadd", &json!({"at": [9000, 0], "type": "supplyUnit", "width": 4000})).unwrap();
+    assert_eq!((ahu(&s, &big["handle"]).width_mm, ahu(&s, &big["handle"]).depth_mm), (4000.0, 900.0), "the width given, the depth of the kind");
+    assert!(s.execute("ahuadd", &json!({"at": [0, 0], "type": "boiler"})).is_err());
+    // Editing the type keeps the size; at the command line the Type keyword draws the next one that way.
+    s.execute("ahuedit", &json!({"handle": vmc["handle"], "type": "extractUnit"})).unwrap();
+    assert_eq!((ahu(&s, &vmc["handle"]).kind, ahu(&s, &vmc["handle"]).width_mm), (cadcraft_doc::AhuKind::ExtractUnit, 700.0));
+    for t in ["ahuadd", "t", "df", "0,5000", "0", "", ""] {
+        s.cmdline(t).unwrap();
+    }
+    let n = s.doc().unwrap().model.iter().filter_map(|e| cadcraft_doc::ahu_of(e)).filter(|a| a.kind == cadcraft_doc::AhuKind::DoubleFlow).count();
+    assert_eq!(n, 2);
 }

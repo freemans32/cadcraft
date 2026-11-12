@@ -71,6 +71,7 @@ fn bad_accessories_are_refused_and_good_ones_survive_their_data() {
 fn unit() -> AhuParams {
     AhuParams {
         name: "CTA1".into(),
+        kind: AhuKind::DoubleFlow,
         width_mm: 1000.0,
         depth_mm: 600.0,
         flow_m3h: None,
@@ -102,6 +103,9 @@ fn ducted(accessory_at: Option<(AccessoryKind, f64, f64)>) -> (Drawing, Option<H
         height_mm: 0.0,
         flexible: false,
         reducer: None,
+        elbow: None,
+        trim_start_mm: 0.0,
+        trim_end_mm: 0.0,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     };

@@ -2,7 +2,7 @@
 //! `CADCRAFT_AIRTERMINAL` xdata) and the drawing's air terminal models survive DXF and DWG saves.
 
 use cadcraft_doc::{
-    ACCESSORY_APP, AHU_APP, AIR_TERMINAL_APP, AccessoryKind, AccessoryParams, AhuParams, AirDirection, Common, DUCT_APP, Drawing, DuctKind,
+    ACCESSORY_APP, AHU_APP, AIR_TERMINAL_APP, AccessoryKind, AccessoryParams, AhuKind, AhuParams, AirDirection, Common, DUCT_APP, Drawing, DuctKind,
     DuctParams, DuctShape, HvacUnits, SPACE_APP, Space, SpaceParams, TerminalParams, air_terminal_of, space_of, standard_air_terminal_models,
 };
 use cadcraft_geom::Vec2;
@@ -62,6 +62,7 @@ fn ducted() -> Drawing {
     let units = HvacUnits::of(&d);
     let ahu = AhuParams {
         name: "CTA1".into(),
+        kind: AhuKind::DoubleFlow,
         width_mm: 1500.0,
         depth_mm: 800.0,
         flow_m3h: Some(500.0),
@@ -88,6 +89,9 @@ fn ducted() -> Drawing {
         height_mm: 0.0,
         flexible: false,
         reducer: None,
+        elbow: None,
+        trim_start_mm: 0.0,
+        trim_end_mm: 0.0,
         label_height_mm: 100.0,
         units,
     };

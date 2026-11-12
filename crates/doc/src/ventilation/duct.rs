@@ -16,7 +16,7 @@ pub const AHU_LAYER: &str = "M-HVAC-AHU";
 /// The registered application name of a duct's extended data.
 pub const DUCT_APP: &str = "CADCRAFT_DUCT";
 /// The layer of the supply ducts, and of the extract ducts.
-pub const DUCT_LAYER: &str = "M-HVAC-DUCT";
+pub const DUCT_LAYER: &str = "M-HVAC-DUCT-SUP";
 pub const DUCT_EXTRACT_LAYER: &str = "M-HVAC-DUCT-EXTR";
 /// Largest side of a unit, mm.
 pub const MAX_AHU_SIZE_MM: f64 = 50_000.0;
@@ -33,12 +33,72 @@ fn default_label_mm() -> f64 {
     100.0
 }
 
+/// What kind of unit an air handling unit is: it sets how it is drawn and how big it starts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AhuKind {
+    /// A double-flux unit (CTA double flux): supply and extract in one box.
+    #[default]
+    DoubleFlow,
+    /// A single-flux supply unit (CTA simple flux soufflage).
+    SupplyUnit,
+    /// A single-flux extract unit (CTA simple flux extraction).
+    ExtractUnit,
+    /// A ventilation box (caisson VMC).
+    VmcBox,
+}
+
+impl AhuKind {
+    pub const ALL: [AhuKind; 4] = [AhuKind::DoubleFlow, AhuKind::SupplyUnit, AhuKind::ExtractUnit, AhuKind::VmcBox];
+
+    pub fn parse(text: &str) -> Option<AhuKind> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "doubleflow" | "doubleflux" | "double" | "df" | "dual" => Some(AhuKind::DoubleFlow),
+            "supplyunit" | "supply" | "soufflage" | "s" => Some(AhuKind::SupplyUnit),
+            "extractunit" | "extract" | "extraction" | "e" => Some(AhuKind::ExtractUnit),
+            "vmcbox" | "vmc" | "box" | "caisson" => Some(AhuKind::VmcBox),
+            _ => None,
+        }
+    }
+
+    /// The name a command takes.
+    pub fn name(self) -> &'static str {
+        match self {
+            AhuKind::DoubleFlow => "doubleFlow",
+            AhuKind::SupplyUnit => "supplyUnit",
+            AhuKind::ExtractUnit => "extractUnit",
+            AhuKind::VmcBox => "vmcBox",
+        }
+    }
+
+    /// The short code written on the unit.
+    pub fn code(self) -> &'static str {
+        match self {
+            AhuKind::DoubleFlow => "CTA DF",
+            AhuKind::SupplyUnit => "CTA S",
+            AhuKind::ExtractUnit => "CTA E",
+            AhuKind::VmcBox => "VMC",
+        }
+    }
+
+    /// Width and depth a new unit of the kind starts with, mm.
+    pub fn default_size_mm(self) -> (f64, f64) {
+        match self {
+            AhuKind::DoubleFlow => (2000.0, 1000.0),
+            AhuKind::SupplyUnit | AhuKind::ExtractUnit => (2500.0, 900.0),
+            AhuKind::VmcBox => (700.0, 550.0),
+        }
+    }
+}
+
 /// An air handling unit: what its block reference keeps. The unit is centred on the block's
 /// origin, its width along the block's x axis.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AhuParams {
     pub name: String,
+    #[serde(default)]
+    pub kind: AhuKind,
     pub width_mm: f64,
     pub depth_mm: f64,
     /// The supply flow the network asks of the unit, m³/h, once the network is sized. A unit is
@@ -102,15 +162,6 @@ impl AhuParams {
     pub fn generate(&self) -> Result<Vec<HvacPiece>> {
         self.validate()?;
         let half = self.half();
-        let corners = [Vec2::new(-half.x, -half.y), Vec2::new(half.x, -half.y), Vec2::new(half.x, half.y), Vec2::new(-half.x, half.y)];
-        let outline = LwPolyline {
-            vertices: corners.iter().map(|p| PolyVertex { p: *p, bulge: 0.0, start_width: 0.0, end_width: 0.0 }).collect(),
-            closed: true,
-            const_width: 0.0,
-            elevation: 0.0,
-            plinegen: false,
-        };
-        let line = |a: Vec2, b: Vec2| HvacPiece { layer: AHU_LAYER, kind: EntityKind::Line(Line { a: v3(a), b: v3(b) }) };
         let h = self.units.to_units(self.label_height_mm);
         let mut text = self.name.clone();
         // Supply first, extract after; one prefix tells them apart when both are known.
@@ -125,12 +176,99 @@ impl AhuParams {
         if !pa.is_empty() {
             text.push_str(&format!(" {} Pa", pa.join(" / ")));
         }
-        Ok(vec![
-            HvacPiece { layer: AHU_LAYER, kind: EntityKind::LwPolyline(outline) },
-            line(corners[0], corners[2]),
-            line(corners[1], corners[3]),
-            HvacPiece { layer: AHU_LAYER, kind: label(Vec2::new(0.0, -half.y - 1.2 * h), h, text) },
-        ])
+        let mut pieces = self.body(half);
+        // The kind's code inside the first compartment, at the top (above a box, which has no room);
+        // the name and the figures below the unit.
+        let code_at = match self.kind {
+            AhuKind::DoubleFlow => Vec2::new(-half.x / 2.0, half.y * 0.8),
+            AhuKind::VmcBox => Vec2::new(0.0, half.y + 1.6 * h),
+            _ => Vec2::new(0.0, half.y * 0.8),
+        };
+        pieces.push(HvacPiece { layer: AHU_LAYER, kind: label(code_at, h, self.kind.code().into()) });
+        pieces.push(HvacPiece { layer: AHU_LAYER, kind: label(Vec2::new(0.0, -half.y - 1.2 * h), h, text) });
+        Ok(pieces)
+    }
+
+    /// The casing, what is inside it and the collars its ducts connect to, as the kind has them.
+    fn body(&self, half: Vec2) -> Vec<HvacPiece> {
+        let (hx, hy) = (half.x, half.y);
+        let rect = |cx: f64, cy: f64, w: f64, d: f64| {
+            let corners = [(cx - w, cy - d), (cx + w, cy - d), (cx + w, cy + d), (cx - w, cy + d)];
+            HvacPiece {
+                layer: AHU_LAYER,
+                kind: EntityKind::LwPolyline(LwPolyline {
+                    vertices: corners.iter().map(|&(x, y)| PolyVertex { p: Vec2::new(x, y), bulge: 0.0, start_width: 0.0, end_width: 0.0 }).collect(),
+                    closed: true,
+                    const_width: 0.0,
+                    elevation: 0.0,
+                    plinegen: false,
+                }),
+            }
+        };
+        let line = |a: Vec2, b: Vec2| HvacPiece { layer: AHU_LAYER, kind: EntityKind::Line(Line { a: v3(a), b: v3(b) }) };
+        // A fan: its housing and three blades.
+        let fan = |c: Vec2, r: f64| {
+            let mut v = vec![HvacPiece { layer: AHU_LAYER, kind: EntityKind::Circle(crate::Circle { center: v3(c), radius: r }) }];
+            for k in 0..3 {
+                let a = f64::from(k) * std::f64::consts::TAU / 3.0;
+                v.push(line(c, c + Vec2::from_angle(a) * (0.9 * r)));
+                v.push(line(c + Vec2::from_angle(a) * (0.9 * r), c + Vec2::from_angle(a + 0.7) * (0.55 * r)));
+            }
+            v
+        };
+        // A collar on a side: a short rectangle sticking out of the casing.
+        let stick = 0.13 * hy.min(hx);
+        let side_collar = |right: bool, y: f64, half_size: f64| {
+            let x = if right { hx + stick / 2.0 } else { -hx - stick / 2.0 };
+            rect(x, y, stick / 2.0, half_size)
+        };
+        let inset = 0.04 * hy.min(hx);
+        let mut v = vec![rect(0.0, 0.0, hx, hy), rect(0.0, 0.0, hx - inset, hy - inset)];
+        match self.kind {
+            AhuKind::DoubleFlow => {
+                // Two compartments, a fan in each, and two collars on each short side.
+                v.push(line(Vec2::new(0.0, -(hy - inset)), Vec2::new(0.0, hy - inset)));
+                let r = 0.3 * hy.min(hx / 2.0);
+                v.extend(fan(Vec2::new(-hx / 2.0, 0.0), r));
+                v.extend(fan(Vec2::new(hx / 2.0, 0.0), r));
+                for right in [false, true] {
+                    for y in [-0.5 * hy, 0.5 * hy] {
+                        v.push(side_collar(right, y, 0.22 * hy));
+                    }
+                }
+            }
+            AhuKind::SupplyUnit | AhuKind::ExtractUnit => {
+                // Three sections along the air: filter, fan, coil (its fins as slanted lines); a collar at each end.
+                let (x1, x2) = (-hx / 3.0, hx / 3.0);
+                for x in [x1, x2] {
+                    v.push(line(Vec2::new(x, -(hy - inset)), Vec2::new(x, hy - inset)));
+                }
+                let section = (x2 - x1) / 2.0;
+                v.extend(fan(Vec2::new(0.0, 0.0), 0.32 * hy.min(section * 2.0)));
+                for k in 1..4 {
+                    let x = x2 + (hx - inset - x2) * f64::from(k) / 4.0;
+                    v.push(line(Vec2::new(x - 0.04 * hx, -(hy - inset)), Vec2::new(x + 0.04 * hx, hy - inset)));
+                }
+                for k in 1..4 {
+                    let x = -hx + inset + (x1 + hx - inset) * f64::from(k) / 4.0;
+                    v.push(line(Vec2::new(x, -(hy - inset)), Vec2::new(x, hy - inset)));
+                }
+                for right in [false, true] {
+                    v.push(side_collar(right, 0.0, 0.3 * hy));
+                }
+            }
+            AhuKind::VmcBox => {
+                v.extend(fan(Vec2::ZERO, 0.38 * hy.min(hx)));
+                for right in [false, true] {
+                    v.push(side_collar(right, 0.0, 0.28 * hy));
+                }
+                // Two spigots on top, as such a box has: the air out and the air in.
+                for x in [-0.5 * hx, 0.5 * hx] {
+                    v.push(rect(x, hy + stick / 2.0, 0.2 * hy.min(hx), stick / 2.0));
+                }
+            }
+        }
+        v
     }
 
     pub fn to_xdata(&self) -> Result<Vec<RawTag>> {
@@ -239,6 +377,15 @@ pub struct DuctParams {
     /// A reducer where the run joins the one before it, drawn by sizing when the diameters differ.
     #[serde(default)]
     pub reducer: Option<DuctReducer>,
+    /// The elbow where the run joins the one before it, drawn by sizing: curved arcs across the run's
+    /// width, the two runs being drawn shorter by the length it takes.
+    #[serde(default)]
+    pub elbow: Option<DuctElbow>,
+    /// Length, mm, not drawn at each end because an elbow takes it (this run's own or its neighbour's).
+    #[serde(default)]
+    pub trim_start_mm: f64,
+    #[serde(default)]
+    pub trim_end_mm: f64,
     #[serde(default = "default_label_mm")]
     pub label_height_mm: f64,
     #[serde(default)]
@@ -280,6 +427,25 @@ pub struct DuctReducer {
     pub at_end: bool,
 }
 
+/// The elbow where a run turns away from the one it continues.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuctElbow {
+    /// How far the run turns from the one before it, degrees: positive to the left of the air's way.
+    pub angle_deg: f64,
+    /// The radius of the duct's axis through the bend, mm.
+    pub radius_mm: f64,
+    /// Whether the run is entered by its far end (the bend is then at its end, not its origin).
+    pub at_end: bool,
+}
+
+impl DuctElbow {
+    /// How far from the corner the bend starts along each run, mm.
+    pub fn tangent_mm(&self) -> f64 {
+        self.radius_mm * (self.angle_deg.abs().to_radians() / 2.0).tan()
+    }
+}
+
 /// Half the angle of a reducer's cone.
 const REDUCER_HALF_ANGLE_DEG: f64 = 15.0;
 /// Most vertices of a flexible duct's side.
@@ -289,6 +455,14 @@ impl DuctParams {
     pub fn validate(&self) -> Result<()> {
         check_label_height(self.label_height_mm)?;
         self.units.validate()?;
+        if let Some(e) = self.elbow
+            && !(e.angle_deg.is_finite() && e.angle_deg.abs() > 0.0 && e.angle_deg.abs() < 180.0 && e.radius_mm.is_finite() && e.radius_mm > 0.0)
+        {
+            return Err(invalid("An elbow turns by 0 to 180 degrees, with a radius above 0."));
+        }
+        if ![self.trim_start_mm, self.trim_end_mm].iter().all(|t| t.is_finite() && (0.0..=MAX_DUCT_LENGTH_M * 1000.0).contains(t)) {
+            return Err(invalid("A trimmed length is 0 or more."));
+        }
         let metres = self.length * self.units.mm_per_unit / 1000.0;
         if !(self.length.is_finite() && self.length > 0.0 && metres <= MAX_DUCT_LENGTH_M) {
             return Err(invalid(format!("A duct is longer than 0 and at most {MAX_DUCT_LENGTH_M} m.")));
@@ -346,17 +520,19 @@ impl DuctParams {
         let r = self.units.to_units(self.plan_width_mm()) / 2.0;
         let layer = self.layer();
         let mut pieces = Vec::new();
-        // The cone at the junction, if there is one; the straight part runs between x0 and x1.
-        let cone = self.reducer.map(|red| {
+        // What an elbow takes at each end; a cone is drawn only where no elbow is.
+        let (trim0, trim1) = (self.units.to_units(self.trim_start_mm), self.units.to_units(self.trim_end_mm));
+        let cone = self.reducer.filter(|red| if red.at_end { trim1 <= 0.0 } else { trim0 <= 0.0 }).map(|red| {
             let r0 = self.units.to_units(red.from_mm) / 2.0;
             let len = ((r0 - r).abs() / REDUCER_HALF_ANGLE_DEG.to_radians().tan()).min(0.4 * self.length);
             (r0, len, red.at_end)
         });
         let (x0, x1) = match cone {
-            Some((_, len, false)) => (len, self.length),
-            Some((_, len, true)) => (0.0, self.length - len),
-            None => (0.0, self.length),
+            Some((_, len, false)) => (len, self.length - trim1),
+            Some((_, len, true)) => (trim0, self.length - len),
+            None => (trim0, self.length - trim1),
         };
+        let (x0, x1) = (x0.min(self.length), x1.max(x0).min(self.length));
         for sign in [1.0, -1.0] {
             let mut pts = Vec::new();
             if let Some((r0, _, false)) = cone {
@@ -377,6 +553,9 @@ impl DuctParams {
                 }),
             });
         }
+        if let Some(e) = self.elbow {
+            pieces.extend(self.elbow_pieces(e, r, layer));
+        }
         // A line across where the cone meets the straight run.
         if let Some((_, len, at_end)) = cone {
             let x = if at_end { self.length - len } else { len };
@@ -395,6 +574,30 @@ impl DuctParams {
         }
         pieces.push(HvacPiece { layer, kind: t });
         Ok(pieces)
+    }
+
+    /// The two arcs of an elbow, in the run's block coordinates: the entry end is the origin (or, if
+    /// the run is entered by its far end, the end turned half a turn about the middle).
+    fn elbow_pieces(&self, e: DuctElbow, half_width: f64, layer: &'static str) -> Vec<HvacPiece> {
+        let phi = e.angle_deg.to_radians();
+        let radius = self.units.to_units(e.radius_mm);
+        let tangent = radius * (phi.abs() / 2.0).tan();
+        let side = phi.signum();
+        // The centre is on the inside of the turn; the arc runs from the parent's tangent point to the run's.
+        let (centre, start, end) = if side > 0.0 {
+            (Vec2::new(tangent, radius), -std::f64::consts::FRAC_PI_2 - phi, -std::f64::consts::FRAC_PI_2)
+        } else {
+            (Vec2::new(tangent, -radius), std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2 - phi)
+        };
+        let (centre, start, end) = if e.at_end {
+            (Vec2::new(self.length - centre.x, -centre.y), start + std::f64::consts::PI, end + std::f64::consts::PI)
+        } else {
+            (centre, start, end)
+        };
+        [radius + half_width, (radius - half_width).max(0.0)]
+            .into_iter()
+            .map(|r| HvacPiece { layer, kind: EntityKind::Arc(crate::Arc { center: v3(centre), radius: r, start, end }) })
+            .collect()
     }
 
     /// The vertices of one side of the straight part, from `x0` to `x1` at height `y`: two points

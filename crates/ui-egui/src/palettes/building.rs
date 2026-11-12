@@ -3,7 +3,7 @@
 //! rather than from a fixed list of tools.
 
 use cadcraft_color::Color;
-use cadcraft_doc::{AccessoryKind, ComponentFunction, TerminalKind};
+use cadcraft_doc::{AccessoryKind, AhuKind, ComponentFunction, TerminalKind};
 use egui::{Rect, Sense, Stroke, pos2, vec2};
 
 use crate::CadApp;
@@ -137,6 +137,8 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
     let mut distribute = false;
     let mut size = false;
     let mut connect = false;
+    let unit = app.session.last_used.ahu.kind;
+    let mut chosen_unit: Option<AhuKind> = None;
     let accessory = app.session.last_used.accessory.kind;
     let mut chosen_accessory: Option<AccessoryKind> = None;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -171,8 +173,15 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         ui.add_space(6.0);
         separator(ui);
         header(ui, "Ducts");
-        if row_button(ui, crate::i18n::t("Air Handling Unit"), false, |_, _| {}) {
-            start = Some("ahuadd");
+        for (kind, label) in [
+            (AhuKind::DoubleFlow, "Double-flow unit"),
+            (AhuKind::SupplyUnit, "Supply unit"),
+            (AhuKind::ExtractUnit, "Extract unit"),
+            (AhuKind::VmcBox, "Ventilation box"),
+        ] {
+            if row_button(ui, crate::i18n::t(label), kind == unit, |_, _| {}) {
+                chosen_unit = Some(kind);
+            }
         }
         if row_button(ui, crate::i18n::t("Duct"), false, |_, _| {}) {
             start = Some("ductadd");
@@ -213,6 +222,12 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         app.cmd.buffer.clear();
         app.start("airterminaladd");
         app.cmdline("Distribute");
+    } else if let Some(kind) = chosen_unit {
+        // The type clicked becomes AHUADD's, then it starts with it.
+        app.session.last_used.ahu.kind = kind;
+        app.session.last_used.ahu.size = None;
+        app.cmd.buffer.clear();
+        app.start("ahuadd");
     } else if let Some(kind) = chosen_accessory {
         // The type clicked becomes DUCTACCESSORYADD's, then it starts with it.
         app.session.last_used.accessory.kind = kind;

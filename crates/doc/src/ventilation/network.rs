@@ -6,8 +6,8 @@ use cadcraft_hvac::{Fitting, Network, NetworkReport, Section, Segment, SegmentKi
 
 use super::duct::{AXIS_REACH, interior_cut};
 use super::{
-    AccessoryParams, AhuParams, AirDirection, DuctKind, DuctParams, DuctReducer, DuctShape, HvacUnits, Loss, TerminalParams, accessory_of, ahu_of,
-    air_terminal_of, invalid,
+    AccessoryParams, AhuParams, AirDirection, DuctElbow, DuctKind, DuctParams, DuctReducer, DuctShape, HvacUnits, Loss, TerminalParams, accessory_of,
+    ahu_of, air_terminal_of, invalid,
 };
 use crate::{EntityKind, Handle, Result};
 
@@ -32,6 +32,9 @@ pub struct DuctNetwork {
     pub network: Network,
     /// The duct of each segment of `network`, in the same order.
     pub ducts: Vec<Handle>,
+    /// How far each duct turns from the one it continues, degrees (positive to the left of the air's
+    /// way), when that is a bare elbow: no tee, no more than a bend.
+    pub elbow_turns_deg: Vec<Option<f64>>,
     /// Whether each duct is entered by its far end (the air runs from its end to its origin).
     pub entered_at_end: Vec<bool>,
     /// Ducts connected to the unit that lead to no terminal, so are left out of the sizing.
@@ -201,8 +204,13 @@ impl crate::Drawing {
         if report.segments.len() != net.ducts.len() {
             return Err(invalid("The report is not the network's."));
         }
+        // The new parameters of every duct of the network, then its bends, then the drawing.
+        let mut next: Vec<Option<DuctParams>> = Vec::with_capacity(net.ducts.len());
         for (i, (h, r)) in net.ducts.iter().zip(&report.segments).enumerate() {
-            let Some((mut p, ..)) = self.duct_ends(*h) else { continue };
+            let Some((mut p, ..)) = self.duct_ends(*h) else {
+                next.push(None);
+                continue;
+            };
             if !p.imposed {
                 (p.shape, p.diameter_mm) = (if r.section == Section::Rectangular { DuctShape::Rectangular } else { DuctShape::Round }, r.diameter_mm);
                 (p.width_mm, p.height_mm) = if r.section == Section::Rectangular { (r.width_mm, r.height_mm) } else { (0.0, 0.0) };
@@ -219,7 +227,14 @@ impl crate::Drawing {
             p.reducer = parent
                 .filter(|q| (q.width_mm - r.width_mm).abs() > 0.5)
                 .map(|q| DuctReducer { from_mm: q.width_mm, at_end: net.entered_at_end.get(i).copied().unwrap_or(false) });
-            self.regenerate_duct(*h, &p)?;
+            (p.elbow, p.trim_start_mm, p.trim_end_mm) = (None, 0.0, 0.0);
+            next.push(Some(p));
+        }
+        draw_elbows(net, &mut next);
+        for (h, p) in net.ducts.iter().zip(&next) {
+            if let Some(p) = p {
+                self.regenerate_duct(*h, p)?;
+            }
         }
         let e = self.entity(net.ahu).ok_or(crate::DocError::NoEntity(net.ahu))?;
         if let Some(mut a) = ahu_of(e) {
@@ -231,6 +246,46 @@ impl crate::Drawing {
             self.regenerate_ahu(net.ahu, &a)?;
         }
         Ok(())
+    }
+}
+
+/// Gives each run that turns away from the one it continues (and only that: no tee) its elbow, and
+/// both runs the length it takes off their drawn ends. A bend whose radius would not fit the shorter
+/// of the two runs is drawn tighter; one too tight for the width is left as a corner.
+fn draw_elbows(net: &DuctNetwork, params: &mut [Option<DuctParams>]) {
+    for (i, turn) in net.elbow_turns_deg.iter().enumerate() {
+        let (Some(turn), Some(parent)) = (*turn, net.network.segments.get(i).and_then(|s| s.parent)) else { continue };
+        let (Some(Some(child)), Some(Some(up))) = (params.get(i), params.get(parent)) else { continue };
+        if child.flexible || up.flexible {
+            continue;
+        }
+        let width = child.plan_width_mm();
+        let tan_half = (turn.abs().to_radians() / 2.0).tan();
+        let room = 0.4 * (child.length * child.units.mm_per_unit).min(up.length * up.units.mm_per_unit);
+        // An elbow whose centre radius is the width; tighter if the runs are short.
+        let radius = width.min(room / tan_half);
+        if !(radius > 0.55 * width && tan_half.is_finite()) {
+            continue;
+        }
+        let at_end = net.entered_at_end.get(i).copied().unwrap_or(false);
+        let up_exit_at_start = net.entered_at_end.get(parent).copied().unwrap_or(false);
+        let elbow = DuctElbow { angle_deg: turn, radius_mm: radius, at_end };
+        let t = elbow.tangent_mm();
+        if let Some(Some(c)) = params.get_mut(i) {
+            c.elbow = Some(elbow);
+            if at_end {
+                c.trim_end_mm = t
+            } else {
+                c.trim_start_mm = t
+            };
+        }
+        if let Some(Some(u)) = params.get_mut(parent) {
+            if up_exit_at_start {
+                u.trim_start_mm = t
+            } else {
+                u.trim_end_mm = t
+            };
+        }
     }
 }
 
@@ -265,6 +320,14 @@ fn place_accessories(ducts: &[Duct], accessories: &[(Handle, AccessoryParams, Ve
         }
     }
     unplaced
+}
+
+/// How far run `n` turns from its parent, degrees, when its only fitting is one elbow.
+fn bare_elbow_turn(nodes: &[Node], n: &Node) -> Option<f64> {
+    let bare = n.fittings.iter().any(|f| matches!(f, Fitting::Elbow45 | Fitting::Elbow90))
+        && !n.fittings.iter().any(|f| matches!(f, Fitting::TeeStraight | Fitting::TeeBranch));
+    let up = nodes.get(n.parent?)?;
+    bare.then(|| ((n.to - n.from).angle().to_degrees() - (up.to - up.from).angle().to_degrees() + 540.0).rem_euclid(360.0) - 180.0)
 }
 
 /// What reading the networks of a drawing shares: the objects found, and which ducts and
@@ -422,6 +485,7 @@ impl Scan<'_> {
         let mut segments = Vec::with_capacity(kept.len());
         let mut handles = Vec::with_capacity(kept.len());
         let mut entered_at_end = Vec::with_capacity(kept.len());
+        let mut elbow_turns_deg = Vec::with_capacity(kept.len());
         let mut main_chain = vec![false; nodes.len()];
         for &old in &kept {
             let Some(n) = nodes.get(old) else { continue };
@@ -444,6 +508,7 @@ impl Scan<'_> {
                 roughness_mm: d.params.flexible.then_some(FLEX_ROUGHNESS_MM),
             });
             entered_at_end.push(n.from == d.b && d.a != d.b);
+            elbow_turns_deg.push(bare_elbow_turn(nodes, n));
             handles.push(d.handle);
         }
         DuctNetwork {
@@ -451,6 +516,7 @@ impl Scan<'_> {
             air,
             network: Network { segments },
             ducts: handles,
+            elbow_turns_deg,
             entered_at_end,
             dangling,
             unconnected: Vec::new(),

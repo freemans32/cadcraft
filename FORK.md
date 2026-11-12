@@ -57,7 +57,7 @@ Remotes : `origin` = ce fork, `upstream` = `storytold/cadcraft`. Ne pousse jamai
 
 Cette section sert à reprendre le travail dans une nouvelle conversation, avec n'importe quelle IA. Elle est mise à jour en continu (règle n° 2) : date, ce qui est fait, ce qui reste.
 
-*Dernière mise à jour : 12 novembre 2026 (gaines rectangulaires et hauteur disponible dans le faux-plafond).*
+*Dernière mise à jour : 12 novembre 2026 (coudes dessinés, couleur du soufflage, modèles de CTA ; zones de hauteur à valider).*
 
 ### Fait
 
@@ -191,6 +191,12 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
      - **Interface** : Propriétés d'une gaine (« Taille fixée par », Section, Diamètre, Largeur, Hauteur), d'une CTA (nom, hauteur disponible, marge, débits calculés), d'un local (hauteur disponible).
      - Tests : `hvac` (4 nouveaux, valeurs de référence calculées à part), `doc` (8), moteur (4), palette (1). Vérifié : fmt, clippy -D warnings, `cargo test --workspace` en debug, layers, assets, capture du CLI. Pas vérifié : wasm, interface graphique.
      - Limites : coudes et tés rectangulaires non dessinés et non spécifiques ; le cône de réduction ne montre que le changement de largeur, pas de hauteur ; pas de série de fabricant (pas régulier) ; `AHUEDIT` en JSON seulement.
+   - **Coudes, couleur du soufflage, modèles de CTA, 12 novembre** (captures de Guillaume : coudes absents, soufflage resté blanc, exemples de coudes et de CTA double flux). Sur `perso`.
+     - **Couleur du soufflage** : le calque `M-HVAC-DUCT` existait déjà, blanc, dans son dessin (je ne recolore jamais un calque existant). Les gaines de soufflage ont un calque neuf, `M-HVAC-DUCT-SUP` (bleu), et `DUCTSIZE` y déplace les gaines.
+     - **Coudes dessinés** (`DuctElbow`, `trim_start_mm`, `trim_end_mm`) : quand un tronçon tourne de 10° ou plus par rapport au précédent, sans té, `DUCTSIZE` dessine deux arcs concentriques (rayon d'axe = largeur, resserré si les tronçons sont courts, abandonné s'il passe sous 0,55 × la largeur) tangents aux côtés, et raccourcit de la longueur tangente les deux tronçons. Virage à gauche ou à droite, tronçon parcouru par son début ou par sa fin. Rond et rectangulaire pareil. Un coude de gaine souple n'est pas dessiné. Pas de dessin des tés. Un tronçon supprimé laisse son voisin raccourci jusqu'au prochain `DUCTSIZE`.
+     - **Modèles de CTA** (`AhuKind`) : double flux (deux compartiments, deux ventilateurs, deux orifices par petit côté), simple flux soufflage et simple flux extraction (filtre, ventilateur, batterie, orifice à chaque bout), caisson VMC (petit caisson, orifices latéraux et deux piquages dessus). Code écrit dans l'appareil (« CTA DF », « CTA S », « CTA E », « VMC »), taille de départ propre à chaque type, `AHUADD type?`, option `Type`, `AHUEDIT type`, quatre boutons dans l'onglet CVC, choix du type dans Propriétés. Les anciens dessins restent des doubles flux.
+     - Tests : `doc` (≈ 7), moteur (1). Vérifié : fmt, clippy -D warnings, `cargo test --workspace` en debug, layers, assets, captures du CLI. Pas vérifié : wasm, interface graphique.
+   - **Question en cours (12 novembre)** : où régler la hauteur disponible. Guillaume trouve bizarre de la mettre sur la CTA (en toiture, par exemple). Sa capture d'un plan réel montre une poutre hachurée sous laquelle une gaine Ø355 passe plus bas (« Ai:2.45 » au lieu de « Ai:2.72 », « Hs poutre +3,06 m »). Piste proposée : un objet « zone de hauteur » (poutre, retombée, faux-plafond bas) avec son contour, sa hauteur disponible et l'altitude du dessous ; une gaine qui la traverse est coupée aux bords et dimensionnée à plat dans la zone ; la hauteur par local reste ; la CTA n'en porte plus. À valider avec lui avant de coder.
    - **À étudier plus tard (demandé par Guillaume)** : convertir un dessin existant (comme sur sa capture : symboles de bouches, gaines souples, cônes, étiquettes de débit) en objets CADCraft (gaines, bouches, CTA). Pistes : reconnaître les blocs et les polylignes par calque, nom de bloc et dimensions, proposer la conversion avec aperçu et validation, ne jamais modifier le dessin d'origine.
    - Ensuite : étape 4 (note de calcul et métré par local), puis les autres réseaux de l'étape 5 (frigo, condensats, eau glacée).
 5. **Export IFC** (BIM).
