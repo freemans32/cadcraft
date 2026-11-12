@@ -53,7 +53,7 @@ fn json_strings(json: &str) -> Vec<String> {
     out
 }
 
-pub(super) fn to_xdata<T: Serialize>(app: &str, format: &str, value: &T) -> crate::Result<Vec<RawTag>> {
+pub(crate) fn to_xdata<T: Serialize>(app: &str, format: &str, value: &T) -> crate::Result<Vec<RawTag>> {
     let json = serde_json::to_string(value).map_err(|e| super::invalid(format!("The object can't be saved: {e}")))?;
     let strings = json_strings(&json);
     let cost: usize = strings.iter().map(|s| s.chars().map(char_cost).sum::<usize>()).sum();
@@ -65,7 +65,7 @@ pub(super) fn to_xdata<T: Serialize>(app: &str, format: &str, value: &T) -> crat
     Ok(tags)
 }
 
-pub(super) fn from_xdata<T: DeserializeOwned>(app: &str, format: &str, xdata: &[RawTag]) -> Option<T> {
+pub(crate) fn from_xdata<T: DeserializeOwned>(app: &str, format: &str, xdata: &[RawTag]) -> Option<T> {
     let start = xdata.iter().position(|t| t.code == 1001 && t.value.trim().eq_ignore_ascii_case(app))?;
     let ours = xdata.get(start + 1..)?;
     let ours = ours.get(..ours.iter().position(|t| t.code == 1001).unwrap_or(ours.len()))?;
@@ -86,7 +86,7 @@ pub(super) fn from_xdata<T: DeserializeOwned>(app: &str, format: &str, xdata: &[
 }
 
 /// `xdata` with `app`'s data replaced by `ours` (other applications' data kept).
-pub(super) fn replace(app: &str, xdata: &[RawTag], ours: Vec<RawTag>) -> Vec<RawTag> {
+pub(crate) fn replace(app: &str, xdata: &[RawTag], ours: Vec<RawTag>) -> Vec<RawTag> {
     let mut out = Vec::with_capacity(xdata.len() + ours.len());
     let mut mine = false;
     for t in xdata {

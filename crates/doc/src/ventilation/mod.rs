@@ -13,7 +13,7 @@ mod library;
 mod network;
 mod space;
 mod terminal;
-mod xdata;
+pub(crate) mod xdata;
 mod zone;
 
 pub use accessory::*;
@@ -169,7 +169,7 @@ impl crate::Drawing {
     /// Gives ventilation object `h` (a block reference) the generated `pieces` and the extended
     /// data `xdata`: a new block, the old one removed when nothing else refers to it. A scaled
     /// or arrayed reference is refused: its drawn size would no longer match its data.
-    fn regenerate_hvac(&mut self, h: crate::Handle, pieces: Vec<HvacPiece>, xdata: Vec<crate::RawTag>) -> crate::Result<()> {
+    pub(crate) fn regenerate_hvac(&mut self, h: crate::Handle, pieces: Vec<HvacPiece>, xdata: Vec<crate::RawTag>) -> crate::Result<()> {
         let e = self.entity(h).ok_or(DocError::NoEntity(h))?;
         let crate::EntityKind::Insert(i) = &e.kind else { return Err(invalid("The object is not a block reference.")) };
         let unit = |s: f64| (s - 1.0).abs() <= 1e-9;
@@ -200,7 +200,7 @@ impl crate::Drawing {
     }
 
     /// A new anonymous block holding `pieces`, at the block's origin; returns its name.
-    fn hvac_block(&mut self, pieces: Vec<HvacPiece>) -> String {
+    pub(crate) fn hvac_block(&mut self, pieces: Vec<HvacPiece>) -> String {
         let name = self.anonymous_block_name("*U");
         let mut b = crate::Block::new(&name);
         b.anonymous = true;

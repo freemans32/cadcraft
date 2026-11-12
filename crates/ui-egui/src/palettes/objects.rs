@@ -3,8 +3,9 @@
 //! command so the object is regenerated, as the command line would.
 
 use cadcraft_doc::{
-    AccessoryKind, AccessoryParams, AhuKind, AhuParams, AirDirection, Drawing, DuctKind, DuctParams, DuctShape, Handle, SpaceParams, TerminalKind,
-    TerminalParams, WallJustification, ZoneParams, accessory_of, ahu_of, air_terminal_of, duct_of, space_of, wall_of, zone_of,
+    AccessoryKind, AccessoryParams, AhuKind, AhuParams, AirDirection, Drawing, DuctKind, DuctParams, DuctShape, Handle, OpeningKind, OpeningParams,
+    SpaceParams, TerminalKind, TerminalParams, WallJustification, ZoneParams, accessory_of, ahu_of, air_terminal_of, duct_of, opening_of, space_of,
+    wall_of, zone_of,
 };
 use cadcraft_hvac::RoomUse;
 use egui::{Sense, pos2, vec2};
@@ -45,6 +46,10 @@ pub(super) fn section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], len: &dyn 
     let terminals: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| air_terminal_of(e))).collect();
     if !terminals.is_empty() && terminals.len() == sel.len() {
         return terminal_section(ui, d, sel, &terminals, bad);
+    }
+    let openings: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| opening_of(e))).collect();
+    if !openings.is_empty() && openings.len() == sel.len() {
+        return opening_section(ui, d, sel, &openings, bad);
     }
     let zones: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| zone_of(e))).collect();
     if !zones.is_empty() && zones.len() == sel.len() {
@@ -384,6 +389,73 @@ fn terminal_section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], ts: &[Termin
         if ts.iter().any(|t| t.flow_m3h > m.max_flow_m3h) {
             prop_row(ui, "Check", |ui| read_only(ui, "Flow above the model's largest"));
         }
+    }
+    action
+}
+
+// =====================================================================================
+// Openings
+// =====================================================================================
+
+fn opening_section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], openings: &[OpeningParams], bad: &mut Option<String>) -> Action {
+    let ids = handles(sel);
+    let mut action: Action = None;
+    let edit = |key: &str, value: Value| Some(("openingedit", json!({ "handles": ids, key: value })));
+    group(ui, "Opening");
+    let kind = shared(&openings.iter().map(|o| o.kind).collect::<Vec<_>>());
+    prop_row(ui, "Type", |ui| {
+        let label = |k: OpeningKind| match k {
+            OpeningKind::Door => "Door",
+            OpeningKind::DoubleDoor => "Double door",
+            OpeningKind::Window => "Window",
+            OpeningKind::Bay => "Bay",
+        };
+        let items = [("door", "Door"), ("doubleDoor", "Double door"), ("window", "Window"), ("bay", "Bay")];
+        if let Some(k) = choice(ui, kind.map_or(VARIES, label), &items) {
+            action = edit("type", json!(k));
+        }
+    });
+    for (key, label, get) in [
+        ("width", "Width (mm)", (|o: &OpeningParams| o.width_mm) as fn(&OpeningParams) -> f64),
+        ("height", "Height (mm)", |o| o.height_mm),
+        ("sill", "Sill (mm)", |o| o.sill_mm),
+    ] {
+        let value = shared(&openings.iter().map(|o| format!("{:.0}", get(o))).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+        prop_row(ui, label, |ui| {
+            if let Some(v) = number(edit_field(ui, ui.scope_id().with(("opening", key, &ids)), value), bad) {
+                action = edit(key, json!(v));
+            }
+        });
+    }
+    // Distances to the edge of the opening, from each end of the wall segment it is in: typing one moves it.
+    if let ([o], [h]) = (openings, sel)
+        && let Some((_, hit)) = d.opening_host(*h)
+    {
+        let mm = o.units.mm_per_unit;
+        let (from_start, from_end) = ((hit.along - o.width() / 2.0) * mm, (hit.length - hit.along - o.width() / 2.0) * mm);
+        for (from, label, value) in [("start", "From the start (mm)", from_start), ("end", "From the end (mm)", from_end)] {
+            prop_row(ui, label, |ui| {
+                if let Some(v) = number(edit_field(ui, ui.scope_id().with(("opening_distance", from, &ids)), format!("{value:.0}")), bad) {
+                    action = Some(("openingedit", json!({ "handles": ids, "distance": v, "from": from })));
+                }
+            });
+        }
+    }
+    if openings.iter().any(|o| matches!(o.kind, OpeningKind::Door | OpeningKind::DoubleDoor)) {
+        let side = shared(&openings.iter().map(|o| o.flip_side).collect::<Vec<_>>());
+        prop_row(ui, "Swing", |ui| {
+            let shown = side.map_or(VARIES, |f| if f { "Right" } else { "Left" });
+            if let Some(v) = choice(ui, shown, &[("left", "Left"), ("right", "Right")]) {
+                action = edit("flipSide", json!(v == "right"));
+            }
+        });
+        let hand = shared(&openings.iter().map(|o| o.flip_hand).collect::<Vec<_>>());
+        prop_row(ui, "Hinge", |ui| {
+            let shown = hand.map_or(VARIES, |f| if f { "End" } else { "Start" });
+            if let Some(v) = choice(ui, shown, &[("start", "Start"), ("end", "End")]) {
+                action = edit("flipHand", json!(v == "end"));
+            }
+        });
     }
     action
 }
@@ -796,6 +868,29 @@ mod hvac_tests {
         let a = cadcraft_doc::accessory_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
         assert_eq!(a.length_mm, 1200.0);
         assert_eq!(a.loss(), cadcraft_doc::Loss::Pascals(45.0));
+    }
+
+    #[test]
+    fn an_opening_selected_shows_its_distances_from_both_ends_and_a_typed_one_moves_it() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        let w = app.run("walladd", json!({ "points": [[0, 0], [5000, 0]] })).unwrap();
+        let w = cadcraft_doc::Handle::parse_hex(w["handle"].as_str().unwrap()).unwrap();
+        let r = app.run("openingadd", json!({ "at": [1000, 0] })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+        app.session.set_selection(vec![h]);
+        let mut hn = palette(app);
+        // 1000 centre, 900 wide: 550 from the start, 3550 from the end.
+        assert!(hn.get_all_by_value("550").next().is_some() && hn.get_all_by_value("3550").next().is_some());
+        type_into(&mut hn, "550", "300");
+        let cut = |hn: &egui_kittest::Harness<'static, CadApp>| {
+            cadcraft_doc::wall_of(hn.state().session.doc().unwrap().entity(w).unwrap()).unwrap().joints.openings[0]
+        };
+        assert_eq!((cut(&hn).from, cut(&hn).to), (300.0, 1200.0));
+        // The width typed (900 → 1000) widens it about its centre.
+        type_into(&mut hn, "900", "1000");
+        let o = cadcraft_doc::opening_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!(o.width_mm, 1000.0);
     }
 
     #[test]

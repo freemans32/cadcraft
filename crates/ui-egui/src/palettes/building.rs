@@ -3,7 +3,7 @@
 //! rather than from a fixed list of tools.
 
 use cadcraft_color::Color;
-use cadcraft_doc::{AccessoryKind, AhuKind, ComponentFunction, TerminalKind};
+use cadcraft_doc::{AccessoryKind, AhuKind, ComponentFunction, OpeningKind, TerminalKind};
 use egui::{Rect, Sense, Stroke, pos2, vec2};
 
 use crate::CadApp;
@@ -294,6 +294,8 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
     let mut draw: Option<String> = None;
     let mut start: Option<&'static str> = None;
     let mut cleanup = false;
+    let opening = app.session.last_used.opening.kind;
+    let mut chosen_opening: Option<OpeningKind> = None;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         header(ui, "Walls");
@@ -301,6 +303,16 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
             let selected = st.name.eq_ignore_ascii_case(&current) || (current.is_empty() && i == 0);
             if row_button(ui, &st.name, selected, |p, r| paint_style(p, r, st)) {
                 draw = Some(st.name.clone());
+            }
+        }
+        ui.add_space(6.0);
+        separator(ui);
+        header(ui, "Openings");
+        for (kind, label) in
+            [(OpeningKind::Door, "Door"), (OpeningKind::DoubleDoor, "Double door"), (OpeningKind::Window, "Window"), (OpeningKind::Bay, "Bay")]
+        {
+            if row_button(ui, crate::i18n::t(label), kind == opening, |_, _| {}) {
+                chosen_opening = Some(kind);
             }
         }
         ui.add_space(6.0);
@@ -318,6 +330,12 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
         app.session.last_used.wall_style = name;
         app.cmd.buffer.clear();
         app.start("walladd");
+    } else if let Some(kind) = chosen_opening {
+        // The type clicked becomes OPENINGADD's, at its own size, then it starts with it.
+        let last = &mut app.session.last_used.opening;
+        (last.kind, last.size) = (kind, None);
+        app.cmd.buffer.clear();
+        app.start("openingadd");
     } else if let Some(cmd) = start {
         app.cmd.buffer.clear();
         app.start(cmd);

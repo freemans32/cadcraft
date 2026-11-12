@@ -1,7 +1,10 @@
 //! Walls (a block reference carrying `CADCRAFT_WALL` xdata, to an anonymous block of lines and
 //! hatches) and the drawing's wall styles survive DXF and DWG saves.
 
-use cadcraft_doc::{Common, Drawing, EntityKind, Space, WALL_APP, WallJustification, WallParams, WallUnits, standard_wall_styles, wall_of};
+use cadcraft_doc::{
+    Common, Drawing, EntityKind, OPENING_APP, OpeningKind, OpeningParams, Space, WALL_APP, WallJustification, WallParams, WallUnits, opening_of,
+    standard_wall_styles, wall_of,
+};
 use cadcraft_geom::Vec2;
 
 fn drawing() -> (Drawing, WallParams) {
@@ -79,4 +82,43 @@ fn joined_walls_survive_dxf_and_dwg_still_joined() {
         assert!(got.iter().all(|(h, _)| back.wall_is_intact(*h)), "{name}: still recognised");
         assert_eq!(back.cleanup_walls(&Space::Model).expect("cleanup"), 0, "{name}: nothing to redo");
     }
+}
+
+/// A door and a window in the first segment of the wall, with the wall cut under them.
+fn with_openings() -> Drawing {
+    let (mut d, _) = drawing();
+    for (kind, x) in [(OpeningKind::Door, 1500.0), (OpeningKind::Window, 4000.0)] {
+        let o = OpeningParams::new(kind, WallUnits::of(&d));
+        d.add_opening(&Space::Model, Common::default(), &o, Vec2::new(x, 500.0), 0.0).expect("add opening");
+    }
+    d.cleanup_walls(&Space::Model).expect("join");
+    d
+}
+
+#[test]
+fn openings_and_the_cuts_they_make_survive_dxf_and_dwg() {
+    let d = with_openings();
+    let (_, saved) = the_wall(&d);
+    assert_eq!(saved.joints.openings.len(), 2, "the wall is cut twice");
+    for name in ["openings.dxf", "openings.dwg"] {
+        let bytes = cadcraft_io::write(&d, name).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let back = cadcraft_io::read(&bytes, name).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let (h, w) = the_wall(&back);
+        assert_eq!(w.joints.openings, saved.joints.openings, "{name}: the cuts");
+        assert!(back.wall_is_intact(h), "{name}: the wall still knows its own block");
+        let kinds: Vec<OpeningKind> = back.model.iter().filter_map(|e| opening_of(e).map(|o| o.kind)).collect();
+        assert_eq!(kinds.len(), 2, "{name}: both openings");
+        assert!(kinds.contains(&OpeningKind::Door) && kinds.contains(&OpeningKind::Window), "{name}");
+        // Read back, joining again changes nothing: the file holds what the drawing computes.
+        let mut again = back.clone();
+        assert_eq!(again.cleanup_walls(&Space::Model).expect("join"), 0, "{name}");
+    }
+}
+
+#[test]
+fn other_programs_see_an_opening_as_a_block_on_its_own_layers() {
+    let d = with_openings();
+    let text = String::from_utf8(cadcraft_io::write(&d, "openings.dxf").expect("dxf")).expect("utf-8");
+    assert!(text.contains(&format!("AcDbRegAppTableRecord\r\n  2\r\n{OPENING_APP}")), "APPID record for the opening data");
+    assert!(text.contains("A-DOOR") && text.contains("A-GLAZ"), "the layers architects expect");
 }

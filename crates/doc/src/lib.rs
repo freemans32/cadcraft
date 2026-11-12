@@ -14,6 +14,7 @@ mod format;
 mod gdt;
 mod header;
 pub mod library;
+mod opening;
 mod plotstyle;
 mod plotter;
 mod raster;
@@ -39,6 +40,7 @@ pub use extents::{
 pub use format::Format;
 pub use gdt::*;
 pub use header::{HVal, Header};
+pub use opening::*;
 pub use plotstyle::*;
 pub use plotter::*;
 pub use raster::{Raster, Rasters};

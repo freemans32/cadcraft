@@ -51,7 +51,17 @@ pub struct ForeignBand {
     pub yields: bool,
 }
 
-/// What a wall keeps about the walls it meets.
+/// An opening cut through a wall: where it lies along one segment of the wall's path, in drawing
+/// units from the segment's start. All the wall's layers are cut away there.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpeningCut {
+    pub segment: usize,
+    pub from: f64,
+    pub to: f64,
+}
+
+/// What a wall keeps about the walls it meets and the openings in it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WallJoints {
@@ -70,11 +80,22 @@ pub struct WallJoints {
     pub end_layers: Vec<EndCut>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub foreign: Vec<ForeignBand>,
+    /// The openings (doors, windows, bays) in the wall.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub openings: Vec<OpeningCut>,
 }
+
+/// Most openings one wall keeps.
+pub const MAX_OPENINGS_PER_WALL: usize = 64;
 
 impl WallJoints {
     pub fn is_empty(&self) -> bool {
-        self.start.is_none() && self.end.is_none() && self.start_layers.is_empty() && self.end_layers.is_empty() && self.foreign.is_empty()
+        self.start.is_none()
+            && self.end.is_none()
+            && self.start_layers.is_empty()
+            && self.end_layers.is_empty()
+            && self.foreign.is_empty()
+            && self.openings.is_empty()
     }
 
     /// Refuses numbers that could not have been computed (from a file or a script).
@@ -87,6 +108,9 @@ impl WallJoints {
             if !ok(c.point) || !ok(c.dir) || c.dir.len() < 1e-12 {
                 return Err(invalid("A wall junction is not usable."));
             }
+        }
+        if self.openings.len() > MAX_OPENINGS_PER_WALL || self.openings.iter().any(|o| !(o.from.is_finite() && o.to.is_finite() && o.from < o.to)) {
+            return Err(invalid("A wall opening is not usable."));
         }
         if self.foreign.len() > MAX_FOREIGN_BANDS {
             return Err(invalid(format!("A wall meets at most {MAX_FOREIGN_BANDS} outlines of other walls.")));
@@ -293,10 +317,15 @@ impl WallParams {
         let tol = 1e-7 * self.thickness().max(1.0);
         let foreign: Vec<(Vec<Vec2>, u16)> = self.joints.foreign.iter().map(|b| (ccw(b.corners.clone()), b.priority)).collect();
         let yields: Vec<bool> = self.joints.foreign.iter().map(|b| b.yields).collect();
+        let holes = self.opening_holes(joins);
         let mut pieces: Vec<Piece> = Vec::new();
         for (k, quad) in self.bands(joins)? {
             let p = self.style.components.get(k).map_or(u16::MAX, |c| c.priority);
             let mut parts = vec![quad];
+            // Every layer is cut away where an opening is.
+            for hole in &holes {
+                parts = parts.iter().flat_map(|q| subtract(q, hole, tol)).collect();
+            }
             for ((f, fp), y) in foreign.iter().zip(&yields) {
                 if *fp < p || (*fp == p && *y) {
                     parts = parts.iter().flat_map(|q| subtract(q, f, tol)).collect();
@@ -310,6 +339,31 @@ impl WallParams {
         let mut out = self.joint_lines(&pieces, &foreign, tol);
         out.extend(self.joint_hatches(&pieces));
         Ok(out)
+    }
+
+    /// The rectangle each opening cuts, in the block's coordinates: across the whole thickness of
+    /// the wall, and a little beyond its faces, so the lines along them stop at the opening.
+    fn opening_holes(&self, joins: &[Join]) -> Vec<Vec<Vec2>> {
+        let bounds = self.boundaries();
+        let (Some(&top), Some(&bottom)) = (bounds.first(), bounds.last()) else { return Vec::new() };
+        let margin = 0.02 * self.thickness().max(1e-6);
+        let n = joins.len();
+        self.joints
+            .openings
+            .iter()
+            .filter_map(|o| {
+                let (a, b) = (joins.get(o.segment)?, joins.get((o.segment + 1) % n)?);
+                let d = (b.at - a.at).normalized();
+                let normal = d.perp();
+                let (p0, p1) = (a.at + d * o.from, a.at + d * o.to);
+                Some(ccw(vec![
+                    p0 + normal * (bottom - margin),
+                    p1 + normal * (bottom - margin),
+                    p1 + normal * (top + margin),
+                    p0 + normal * (top + margin),
+                ]))
+            })
+            .collect()
     }
 
     fn material(&self, pieces: &[Piece], foreign: &[(Vec<Vec2>, u16)], q: Vec2, tol: f64) -> Material {
@@ -446,6 +500,39 @@ impl Placement {
 pub struct Placed {
     pub params: WallParams,
     pub at: Placement,
+}
+
+impl Placed {
+    /// Where an opening of `width` (drawing units) centred at `centre` (drawing coordinates), turned
+    /// `rotation` radians, lies in this wall: the cut it makes in a segment, and its distance from
+    /// the wall's path. `None` when it is not on the wall: not along it, past the segment's ends,
+    /// or farther from the path than the wall is thick.
+    pub fn host(&self, centre: Vec2, rotation: f64, width: f64) -> Option<(OpeningCut, f64)> {
+        let path = &self.params.path;
+        let reach = self.params.boundaries().iter().fold(0.0_f64, |m, b| m.max(b.abs())).max(1e-9);
+        let n = path.len();
+        let segs = if self.params.closed { n } else { n.saturating_sub(1) };
+        let tol = 1e-6 * reach.max(width);
+        let mut best: Option<(OpeningCut, f64)> = None;
+        for i in 0..segs {
+            let (a, b) = (self.at.to_world(*path.get(i)?), self.at.to_world(*path.get((i + 1) % n)?));
+            let len = a.dist(b);
+            if len <= tol {
+                continue;
+            }
+            let d = (b - a) / len;
+            // Along the wall, within a degree.
+            if d.cross(Vec2::from_angle(rotation)).abs() > 0.0175 {
+                continue;
+            }
+            let (t, off) = ((centre - a).dot(d), (centre - a).cross(d).abs());
+            let (from, to) = (t - width / 2.0, t + width / 2.0);
+            if off <= reach + tol && from >= -tol && to <= len + tol && best.as_ref().is_none_or(|x| off < x.1) {
+                best = Some((OpeningCut { segment: i, from: from.max(0.0), to: to.min(len) }, off));
+            }
+        }
+        best
+    }
 }
 
 /// The smallest angle, in degrees, between a wall end and a wall it meets for them to join.
@@ -664,6 +751,7 @@ pub fn work_out_joints(walls: &[Placed]) -> Vec<WallJoints> {
                 start_layers: s.as_ref().map(|c| c.1.clone()).unwrap_or_default(),
                 end_layers: e.as_ref().map(|c| c.1.clone()).unwrap_or_default(),
                 foreign: Vec::new(),
+                openings: Vec::new(),
             };
             let joins = super::joins(&p.path, p.closed, p.boundaries().iter().fold(0.0_f64, |m, b| m.max(b.abs()))).ok()?;
             p.bands(&joins).ok()
@@ -704,7 +792,7 @@ pub fn work_out_joints(walls: &[Placed]) -> Vec<WallJoints> {
         let (start, end) = cuts.get(i).cloned().unwrap_or((None, None));
         let (start, start_layers) = start.map_or((None, Vec::new()), |(c, l)| (Some(c), l));
         let (end, end_layers) = end.map_or((None, Vec::new()), |(c, l)| (Some(c), l));
-        out.push(WallJoints { start, end, start_layers, end_layers, foreign });
+        out.push(WallJoints { start, end, start_layers, end_layers, foreign, openings: Vec::new() });
     }
     out
 }

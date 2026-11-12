@@ -19,10 +19,10 @@ use cadcraft_color::Color;
 use cadcraft_geom::{PolyVertex, Vec2, Vec3, shoelace};
 use serde::{Deserialize, Serialize};
 
-use crate::{DocError, EntityKind, Hatch, HatchLoop, Line, LwPolyline, RawTag, Result};
+use crate::{DocError, EntityKind, Hatch, HatchLoop, Line, LwPolyline, OpeningParams, RawTag, Result, opening_of};
 
 mod joint;
-pub use joint::{EndCut, ForeignBand, MAX_FOREIGN_BANDS, WallJoints};
+pub use joint::{EndCut, ForeignBand, MAX_FOREIGN_BANDS, MAX_OPENINGS_PER_WALL, OpeningCut, Placement, WallJoints};
 
 /// The registered application name of a wall's extended data.
 pub const WALL_APP: &str = "CADCRAFT_WALL";
@@ -352,7 +352,7 @@ impl WallParams {
 
     /// The offsets of the component boundaries from the path (left positive), exterior face
     /// first: one more than there are components.
-    fn boundaries(&self) -> Vec<f64> {
+    pub(crate) fn boundaries(&self) -> Vec<f64> {
         let total = self.thickness();
         let mut at = match self.justification {
             WallJustification::Left => 0.0,
@@ -557,7 +557,12 @@ impl crate::Drawing {
         let Some(store) = self.space(space) else { return Ok(0) };
         let mut handles = Vec::new();
         let mut placed = Vec::new();
+        let mut openings: Vec<(crate::Handle, OpeningParams, Vec2, f64)> = Vec::new();
         for e in store.iter() {
+            if let (EntityKind::Insert(i), Some(op)) = (&e.kind, opening_of(e)) {
+                openings.push((e.handle, op, Vec2::new(i.insert.x, i.insert.y), i.rotation));
+                continue;
+            }
             let (EntityKind::Insert(i), Some(p)) = (&e.kind, wall_of(e)) else { continue };
             if !self.wall_is_intact(e.handle) {
                 continue;
@@ -573,7 +578,25 @@ impl crate::Drawing {
             handles.push(e.handle);
             placed.push(joint::Placed { params: p, at });
         }
-        let joints = joint::work_out_joints(&placed);
+        let mut joints = joint::work_out_joints(&placed);
+        // The openings in each wall: the cuts it keeps, and the faces each opening is drawn across.
+        let mut faces: Vec<(crate::Handle, OpeningParams, f64, f64)> = Vec::new();
+        for (w, j) in placed.iter().zip(joints.iter_mut()) {
+            let mut hosted: Vec<(joint::OpeningCut, f64)> = Vec::new();
+            let bounds = w.params.boundaries();
+            let to_mm = |v: f64| v / w.params.units.to_units(1.0);
+            let (left, right) = (bounds.first().copied().map(to_mm), bounds.last().copied().map(to_mm));
+            for (oh, op, centre, rotation) in &openings {
+                if let Some((cut, _)) = w.host(*centre, *rotation, op.width()) {
+                    hosted.push((cut, 0.0));
+                    if let (Some(l), Some(r)) = (left, right) {
+                        faces.push((*oh, op.clone(), l, r));
+                    }
+                }
+            }
+            hosted.sort_by(|a, b| (a.0.segment, a.0.from).partial_cmp(&(b.0.segment, b.0.from)).unwrap_or(std::cmp::Ordering::Equal));
+            j.openings = hosted.into_iter().take(joint::MAX_OPENINGS_PER_WALL).map(|(c, _)| c).collect();
+        }
         let mut redrawn = 0;
         for ((h, w), j) in handles.into_iter().zip(placed).zip(joints) {
             if w.params.joints == j {
@@ -590,6 +613,13 @@ impl crate::Drawing {
             }
             if self.regenerate_wall(h, &p).is_ok() {
                 redrawn += 1;
+            }
+        }
+        // Each opening is drawn across the faces of the wall it is in.
+        for (oh, mut op, left, right) in faces {
+            if (op.left_mm - left).abs() > 1e-6 || (op.right_mm - right).abs() > 1e-6 {
+                (op.left_mm, op.right_mm) = (left, right);
+                let _ = self.regenerate_opening(oh, &op);
             }
         }
         Ok(redrawn)

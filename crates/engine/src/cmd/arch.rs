@@ -75,7 +75,7 @@ fn add(s: &mut Session, p: WallParams) -> Result<Handle> {
 
 /// Joins the walls of `space` where they meet; a drawing with too many walls to join at once
 /// keeps them as drawn.
-fn join_walls(d: &mut Drawing, space: &cadcraft_doc::Space) -> usize {
+pub(super) fn join_walls(d: &mut Drawing, space: &cadcraft_doc::Space) -> usize {
     d.cleanup_walls(space).unwrap_or(0)
 }
 

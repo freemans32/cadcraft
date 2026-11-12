@@ -490,3 +490,163 @@ fn walledit_layers_refuses_what_is_not_a_thickness_or_a_layer() {
     }
     assert_eq!(thicknesses(&wall(&s, a)), [200.0, 120.0, 12.5], "nothing changed");
 }
+
+use cadcraft_doc::{OpeningKind, opening_of};
+use cadcraft_geom::Vec2;
+
+fn openings(s: &Session) -> Vec<(Handle, cadcraft_doc::OpeningParams, Vec2)> {
+    s.doc()
+        .unwrap()
+        .model
+        .iter()
+        .filter_map(|e| match (&e.kind, opening_of(e)) {
+            (EntityKind::Insert(i), Some(o)) => Some((e.handle, o, Vec2::new(i.insert.x, i.insert.y))),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The cuts the wall keeps, as (from, to) along its first segment.
+fn cuts(s: &Session, w: Handle) -> Vec<(f64, f64)> {
+    wall(s, w).joints.openings.iter().map(|c| (c.from, c.to)).collect()
+}
+
+fn wall_5m(s: &mut Session) -> Handle {
+    h(&s.execute("walladd", &json!({"points": [[0, 0], [5000, 0]], "style": BRICK})).unwrap())
+}
+
+#[test]
+fn openingadd_puts_an_opening_on_the_nearest_wall_and_cuts_the_wall() {
+    let mut s = metric();
+    let w = wall_5m(&mut s);
+    let r = s.execute("openingadd", &json!({"at": [2500, 120], "type": "door"})).unwrap();
+    assert_eq!(r["type"], "door");
+    let o = openings(&s);
+    assert_eq!(o.len(), 1);
+    assert!((o[0].2.x - 2500.0).abs() < 1e-9 && o[0].2.y.abs() < 1e-9, "on the wall's path, not where it was clicked: {:?}", o[0].2);
+    assert_eq!((o[0].1.width_mm, o[0].1.height_mm, o[0].1.sill_mm), (900.0, 2100.0, 0.0));
+    assert_eq!(cuts(&s, w), [(2050.0, 2950.0)], "the wall is cut under it");
+    // Another kind at another size, near the end: it is kept inside the wall.
+    s.execute("openingadd", &json!({"at": [4950, 0], "type": "window", "width": 1000, "sill": 1000})).unwrap();
+    assert_eq!(cuts(&s, w), [(2050.0, 2950.0), (4000.0, 5000.0)], "clicked near the end, the window is kept inside the wall: it ends at its end");
+}
+
+#[test]
+fn openingadd_by_a_distance_from_the_start_or_the_end_of_the_wall() {
+    let mut s = metric();
+    let w = wall_5m(&mut s);
+    // 300 mm from the start to the opening's edge: its centre is 300 + 450.
+    s.execute("openingadd", &json!({"wall": w.hex(), "distance": 300})).unwrap();
+    assert_eq!(cuts(&s, w), [(300.0, 1200.0)]);
+    // 200 mm from the end.
+    s.execute("openingadd", &json!({"wall": w.hex(), "distance": 200, "from": "end", "type": "window"})).unwrap();
+    assert_eq!(cuts(&s, w), [(300.0, 1200.0), (3600.0, 4800.0)]);
+    for bad in [
+        json!({"wall": w.hex(), "distance": -5}),
+        json!({"wall": w.hex(), "distance": 4500}),
+        json!({"wall": w.hex(), "distance": 100, "from": "middle"}),
+        json!({"wall": w.hex(), "distance": 100, "segment": 7}),
+        json!({"wall": "ZZ", "distance": 100}),
+        json!({"at": [2500, 5000]}),
+        json!({}),
+        json!({"at": [2500, 0], "type": "gate"}),
+        json!({"at": [2500, 0], "width": 9000}),
+        json!({"at": [2500, 0], "width": -1}),
+        json!({"at": [2500, 0], "flipSide": "yes"}),
+    ] {
+        assert!(s.execute("openingadd", &bad).is_err(), "{bad}");
+    }
+    assert_eq!(openings(&s).len(), 2, "what was refused added nothing");
+}
+
+#[test]
+fn openingedit_changes_an_opening_and_moves_it_along_its_wall_by_a_distance() {
+    let mut s = metric();
+    let w = wall_5m(&mut s);
+    let o = s.execute("openingadd", &json!({"at": [2500, 0]})).unwrap()["handle"].clone();
+    s.execute("openingedit", &json!({"handle": o, "width": 1200, "type": "window", "sill": 900, "height": 1500})).unwrap();
+    let p = &openings(&s)[0].1;
+    assert_eq!((p.kind, p.width_mm, p.height_mm, p.sill_mm), (OpeningKind::Window, 1200.0, 1500.0, 900.0));
+    assert_eq!(cuts(&s, w), [(1900.0, 3100.0)], "the same centre, wider");
+    // Moved: 1000 mm from the start to its edge, then 500 from the end.
+    s.execute("openingedit", &json!({"handle": o, "distance": 1000})).unwrap();
+    assert_eq!(cuts(&s, w), [(1000.0, 2200.0)]);
+    s.execute("openingedit", &json!({"handle": o, "distance": 500, "from": "end"})).unwrap();
+    assert_eq!(cuts(&s, w), [(3300.0, 4500.0)]);
+    // The swing.
+    s.execute("openingedit", &json!({"handle": o, "type": "door", "flipSide": true, "flipHand": true})).unwrap();
+    let p = &openings(&s)[0].1;
+    assert!(p.flip_side && p.flip_hand);
+    for bad in [
+        json!({"handle": o, "distance": 4500}),
+        json!({"handle": o, "width": 99999}),
+        json!({"handle": o, "distance": -1}),
+        json!({"handle": o, "from": "middle", "distance": 100}),
+        json!({"handle": w.hex(), "width": 1000}),
+        json!({"handle": o, "type": "gate"}),
+        json!({}),
+    ] {
+        assert!(s.execute("openingedit", &bad).is_err(), "{bad}");
+    }
+    assert_eq!(cuts(&s, w), [(3300.0, 4500.0)], "nothing changed by what was refused");
+    // An opening taken off its wall: it keeps its own parameters but can't be placed by a distance.
+    s.execute("move", &json!({"handles": [o], "from": [0, 0], "to": [0, 4000]})).unwrap();
+    assert!(s.execute("openingedit", &json!({"handle": o, "distance": 100})).is_err());
+    s.execute("openingedit", &json!({"handle": o, "width": 800})).unwrap();
+    s.execute("wallcleanup", &json!({})).unwrap();
+    assert!(cuts(&s, w).is_empty(), "the wall is whole where the opening no longer is");
+}
+
+#[test]
+fn openingadd_at_the_command_line_places_by_a_click_and_by_a_typed_distance() {
+    let mut s = metric();
+    let w = wall_5m(&mut s);
+    // Window of 1000 mm, then a click; then by distance: the keyword, a point near the end, the number.
+    for t in ["openingadd", "t", "window", "w", "1000", "2500,50", "d", "4800,0", "250", ""] {
+        s.cmdline(t).unwrap();
+    }
+    assert!(s.running.is_none());
+    let o = openings(&s);
+    assert_eq!(o.len(), 2);
+    assert!(o.iter().all(|x| x.1.kind == OpeningKind::Window && x.1.width_mm == 1000.0));
+    // The second was measured from the nearer end (4800 is near the end): its edge 250 from it.
+    assert_eq!(cuts(&s, w), [(2000.0, 3000.0), (3750.0, 4750.0)]);
+    // Flip and Hinge toggle, and the next use remembers them.
+    for t in ["openingadd", "t", "door", "flip", "hinge", "1000,0", ""] {
+        s.cmdline(t).unwrap();
+    }
+    let door = openings(&s).into_iter().find(|x| x.1.kind == OpeningKind::Door).unwrap();
+    assert!(door.1.flip_side && door.1.flip_hand);
+    // A click off every wall places nothing and the command goes on.
+    s.cmdline("openingadd").unwrap();
+    s.cmdline("2500,4000").unwrap();
+    assert!(s.running.is_some());
+    s.cmdline("").unwrap();
+    assert_eq!(openings(&s).len(), 3);
+}
+
+#[test]
+fn an_opening_is_seen_on_the_wall_under_the_cursor_before_it_is_placed() {
+    let mut s = metric();
+    wall_5m(&mut s);
+    s.cmdline("openingadd").unwrap();
+    let over = s.preview(Vec2::new(2500.0, 80.0));
+    assert!(!over.is_empty(), "the door's symbol over the wall");
+    assert!(s.preview(Vec2::new(2500.0, 4000.0)).is_empty(), "nothing away from a wall");
+    s.cmdline("").unwrap();
+}
+
+#[test]
+fn walls_with_openings_keep_them_through_edits_and_joins() {
+    let mut s = metric();
+    let w = wall_5m(&mut s);
+    let across = h(&s.execute("walladd", &json!({"points": [[2500, 0], [2500, 3000]], "style": PARTITION})).unwrap());
+    s.execute("openingadd", &json!({"at": [1000, 0]})).unwrap();
+    s.execute("openingadd", &json!({"at": [2500, 1500]})).unwrap();
+    assert_eq!(cuts(&s, w), [(550.0, 1450.0)]);
+    assert_eq!(cuts(&s, across), [(1050.0, 1950.0)]);
+    // A wall edit (another style) keeps its opening and the joint with the partition.
+    s.execute("walledit", &json!({"handle": w.hex(), "layers": {"Clay brick": 150}})).unwrap();
+    assert_eq!(cuts(&s, w), [(550.0, 1450.0)]);
+    assert!(s.doc().unwrap().wall_is_intact(w));
+}

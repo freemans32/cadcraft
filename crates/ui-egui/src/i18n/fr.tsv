@@ -1115,6 +1115,25 @@
 	Edit Duct	Modifier la gaine
 	Size Ducts	Dimensionner les gaines
 	Connect Terminals	Raccorder les bouches
+	Openings	Ouvertures
+	Opening	Ouverture
+	Door	Porte
+	Double door	Porte double
+	Bay	Baie
+	Edit Opening	Modifier l'ouverture
+	Sill (mm)	Allège (mm)
+	From the start (mm)	Depuis le début (mm)
+	From the end (mm)	Depuis la fin (mm)
+	Swing	Ouverture du battant
+	Hinge	Charnière
+	Specify the place of the opening on a wall	Spécifiez la position de l'ouverture sur un mur
+	Enter opening type	Entrez le type d'ouverture
+	Enter opening width (mm)	Entrez la largeur de l'ouverture (mm)
+	Enter opening height (mm)	Entrez la hauteur de l'ouverture (mm)
+	Enter sill height (mm)	Entrez la hauteur d'allège (mm)
+	Pick the wall near the end to measure from	Désignez le mur près de l'extrémité d'où mesurer
+	Enter the distance from that end to the edge of the opening (mm)	Entrez la distance de cette extrémité au bord de l'ouverture (mm)
+	End	Fin
 	Apply to the whole style	Appliquer à tout le style
 	Height Zone	Zone de hauteur
 	Edit Height Zone	Modifier la zone de hauteur
