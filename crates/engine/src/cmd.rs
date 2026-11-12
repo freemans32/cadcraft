@@ -20,8 +20,10 @@ pub mod file;
 mod gripcmds;
 mod griphot;
 pub(crate) mod groups;
+mod zone;
 pub use duct::{AhuLastUsed, DuctLastUsed};
 pub use duct_acc::AccessoryLastUsed;
+pub use zone::ZoneLastUsed;
 mod hvac;
 pub use hvac::TerminalLastUsed;
 pub(crate) mod hatch;
@@ -205,6 +207,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(hvac::specs());
         v.extend(duct::specs());
         v.extend(duct_acc::specs());
+        v.extend(zone::specs());
         v.extend(modify2::specs());
         v.extend(groups::specs());
         v.extend(gripcmds::specs());

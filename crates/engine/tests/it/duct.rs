@@ -497,13 +497,10 @@ fn sections(s: &Session) -> Vec<(cadcraft_doc::DuctShape, f64, f64)> {
     s.doc().unwrap().model.iter().filter_map(|e| duct_of(e)).map(|p| (p.shape, p.width_mm, p.height_mm)).collect()
 }
 
-/// A unit with `void` mm available, a trunk to four diffusers of 300 m³/h each by connections.
+/// A unit and a trunk to four diffusers of 300 m³/h each by connections, all under a zone with `void`
+/// mm available (none when `None`). Returns the zone's handle, or null.
 fn hall(s: &mut Session, void: Option<f64>) -> Value {
-    let mut unit = json!({"at": [0, 0]});
-    if let Some(v) = void {
-        unit["voidHeight"] = json!(v);
-    }
-    let unit = s.execute("ahuadd", &unit).unwrap();
+    s.execute("ahuadd", &json!({"at": [0, 0]})).unwrap();
     let mut from = 500;
     for x in [2000, 4000, 6000, 8000] {
         s.execute("ductadd", &json!({"points": [[from, 0], [x, 0]]})).unwrap();
@@ -511,13 +508,19 @@ fn hall(s: &mut Session, void: Option<f64>) -> Value {
         s.execute("airterminaladd", &json!({"at": [x, -1500], "flow": 300})).unwrap();
         from = x;
     }
-    unit
+    match void {
+        Some(v) => {
+            s.execute("zoneadd", &json!({"points": [[-1000, -2500], [9500, -2500], [9500, 1000], [-1000, 1000]], "voidHeight": v})).unwrap()["handle"]
+                .clone()
+        }
+        None => Value::Null,
+    }
 }
 
 #[test]
 fn ductsize_makes_the_trunk_rectangular_where_the_height_available_is_too_small_for_a_round_one() {
     let mut s = metric();
-    let unit = hall(&mut s, Some(350.0));
+    let zone = hall(&mut s, Some(350.0));
     let r = s.execute("ductsize", &json!({})).unwrap();
     assert!(r["networks"][0]["warnings"].as_array().unwrap().is_empty(), "{r}");
     let segs = r["networks"][0]["segments"].as_array().unwrap();
@@ -526,38 +529,96 @@ fn ductsize_makes_the_trunk_rectangular_where_the_height_available_is_too_small_
     assert!(rect.iter().all(|g| g["height"] == 250.0 && g["width"].as_f64().unwrap() % 50.0 == 0.0), "{r}");
     assert!(segs.iter().filter(|g| g["section"] == "round").all(|g| g["diameter"].as_f64().unwrap() <= 250.0));
     assert!(sections(&s).iter().any(|x| x.0 == cadcraft_doc::DuctShape::Rectangular));
-    // Without the height, all round, as before; a looser limit on the aspect ratio makes it narrower to fit.
-    s.execute("ahuedit", &json!({"handle": unit["handle"], "voidHeight": null})).unwrap();
+    // A smaller margin gives taller ducts.
+    let r = s.execute("ductsize", &json!({"margin": 50})).unwrap();
+    assert!(r["networks"][0]["segments"].as_array().unwrap().iter().filter(|g| g["section"] == "rectangular").all(|g| g["height"] == 300.0), "{r}");
+    assert!(s.execute("ductsize", &json!({"margin": -1})).is_err());
+    // Without the zone, all round, as before.
+    s.execute("erase", &json!({"handles": [zone]})).unwrap();
     let r = s.execute("ductsize", &json!({})).unwrap();
     assert!(r["networks"][0]["segments"].as_array().unwrap().iter().all(|g| g["section"] == "round"), "{r}");
     assert!(sections(&s).iter().all(|x| x.0 == cadcraft_doc::DuctShape::Round), "the rectangle goes back to round");
-    // A margin larger than the height available is refused, a height too small says so.
-    assert!(s.execute("ahuedit", &json!({"handle": unit["handle"], "voidHeight": 10})).is_err());
-    s.execute("ahuedit", &json!({"handle": unit["handle"], "voidHeight": 180})).unwrap();
+    // A height too small for any duct says so.
+    let tiny = s.execute("zoneadd", &json!({"points": [[-1000, -2500], [9500, -2500], [9500, 1000], [-1000, 1000]], "voidHeight": 180})).unwrap();
     let e = s.execute("ductsize", &json!({})).unwrap_err().to_string();
     assert!(e.contains("below the smallest duct side"), "{e}");
+    assert!(s.execute("zoneedit", &json!({"handle": tiny["handle"], "voidHeight": 10})).is_err());
 }
 
 #[test]
-fn a_space_with_its_own_height_decides_for_the_ducts_that_run_in_it() {
+fn a_space_gives_the_height_where_no_zone_does_and_a_zone_wins_over_it() {
     let mut s = metric();
-    hall(&mut s, Some(350.0));
-    // A room over the whole trunk, with only 250 mm available: 150 after the margin.
+    hall(&mut s, None);
+    // A room over the whole trunk with 250 mm available: 150 after the margin.
     let sp = s.execute("spaceadd", &json!({"points": [[-500, -2000], [9000, -2000], [9000, 500], [-500, 500]], "voidHeight": 250})).unwrap();
     let r = s.execute("ductsize", &json!({})).unwrap();
-    let heights: Vec<f64> = r["networks"][0]["segments"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|g| g["section"] == "rectangular")
-        .map(|g| g["height"].as_f64().unwrap())
-        .collect();
-    assert!(!heights.is_empty() && heights.iter().all(|h| *h == 150.0), "{r}");
-    // Back to the unit's by clearing the space's.
+    let heights = |r: &Value| -> Vec<f64> {
+        r["networks"][0]["segments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|g| g["section"] == "rectangular")
+            .map(|g| g["height"].as_f64().unwrap())
+            .collect()
+    };
+    assert!(!heights(&r).is_empty() && heights(&r).iter().all(|h| *h == 150.0), "{r}");
+    // A zone over the same area with 350 wins: the ducts are taller (250).
+    let z = s.execute("zoneadd", &json!({"points": [[-500, -2000], [9000, -2000], [9000, 500], [-500, 500]], "voidHeight": 350})).unwrap();
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    assert!(heights(&r).iter().all(|h| *h == 250.0), "{r}");
+    s.execute("erase", &json!({"handles": [z["handle"]]})).unwrap();
+    // Clearing the space's height leaves nothing to size to: all round.
     s.execute("spaceedit", &json!({"handle": sp["handle"], "voidHeight": null})).unwrap();
     let r = s.execute("ductsize", &json!({})).unwrap();
-    assert!(r["networks"][0]["segments"].as_array().unwrap().iter().filter(|g| g["section"] == "rectangular").all(|g| g["height"] == 250.0), "{r}");
+    assert!(heights(&r).is_empty(), "{r}");
     assert!(s.execute("spaceedit", &json!({"handle": sp["handle"], "voidHeight": -3})).is_err());
+}
+
+#[test]
+fn zoneadd_and_zoneedit_draw_and_change_a_zone_and_ductsize_cuts_a_duct_that_crosses_it() {
+    let mut s = metric();
+    assert!(s.execute("zoneadd", &json!({"points": [[0, 0], [1000, 0], [1000, 500]]})).is_err(), "a height is required");
+    assert!(s.execute("zoneadd", &json!({"points": [[0, 0], [1000, 0]], "voidHeight": 250})).is_err(), "three points at least");
+    assert!(s.execute("zoneadd", &json!({"points": [[0, 0], [1000, 0], [1000, 500]], "voidHeight": 5})).is_err());
+    s.execute("ahuadd", &json!({"at": [0, 0]})).unwrap();
+    s.execute("ductadd", &json!({"points": [[500, 0], [9000, 0]]})).unwrap();
+    s.execute("airterminaladd", &json!({"at": [9000, 0], "flow": 400})).unwrap();
+    let z = s
+        .execute(
+            "zoneadd",
+            &json!({"points": [[3000, -800], [5000, -800], [5000, 800], [3000, 800]], "voidHeight": 250, "altitude": 2.45, "name": "Poutre"}),
+        )
+        .unwrap();
+    assert_eq!(z["name"], "Poutre");
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    assert_eq!(r["cuts"], 2, "in and out of the beam: {r}");
+    let segs = r["networks"][0]["segments"].as_array().unwrap();
+    assert_eq!(segs.len(), 3, "{r}");
+    assert_eq!(segs[1]["section"], "rectangular", "flat under the beam: {r}");
+    assert!(segs[0]["section"] == "round" && segs[2]["section"] == "round");
+    let under = s.doc().unwrap().model.iter().filter_map(|e| duct_of(e)).find(|p| p.shape == cadcraft_doc::DuctShape::Rectangular).unwrap();
+    assert_eq!((under.height_mm, under.bottom_mm), (150.0, Some(2450.0)));
+    // Editing: the height and the altitude, then no altitude.
+    s.execute("zoneedit", &json!({"handle": z["handle"], "voidHeight": 300, "altitude": 2.7})).unwrap();
+    let zp = cadcraft_doc::zone_of(s.doc().unwrap().entity(hd(&z["handle"])).unwrap()).unwrap();
+    assert_eq!((zp.void_height_mm, zp.bottom_mm), (300.0, Some(2700.0)));
+    s.execute("zoneedit", &json!({"handle": z["handle"], "altitude": null})).unwrap();
+    assert_eq!(cadcraft_doc::zone_of(s.doc().unwrap().entity(hd(&z["handle"])).unwrap()).unwrap().bottom_mm, None);
+    let h = s.doc().unwrap().model.iter().find_map(|e| duct_of(e).map(|_| e.handle)).unwrap();
+    assert!(s.execute("zoneedit", &json!({"handles": [z["handle"], h.hex()], "voidHeight": 200})).is_err(), "a duct is not a zone");
+    // At the command line: Height and Altitude options, then the points.
+    for t in ["zoneadd", "h", "400", "a", "2.1", "0,3000", "2000,3000", "2000,4000", ""] {
+        s.cmdline(t).unwrap();
+    }
+    let n = s
+        .doc()
+        .unwrap()
+        .model
+        .iter()
+        .filter_map(|e| cadcraft_doc::zone_of(e))
+        .filter(|z| z.void_height_mm == 400.0 && z.bottom_mm == Some(2100.0))
+        .count();
+    assert_eq!(n, 1);
 }
 
 #[test]

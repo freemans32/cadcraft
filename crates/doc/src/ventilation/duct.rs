@@ -113,21 +113,10 @@ pub struct AhuParams {
     pub extract_flow_m3h: Option<f64>,
     #[serde(default)]
     pub extract_pressure_pa: Option<f64>,
-    /// The height available above the false ceiling where its ducts run, mm: a duct too big for it
-    /// when round is made rectangular, as tall as it leaves room for. A space may say its own.
-    #[serde(default)]
-    pub void_height_mm: Option<f64>,
-    /// What is kept back from that height for hangers, insulation and tolerances, mm.
-    #[serde(default = "default_margin_mm")]
-    pub margin_mm: f64,
     #[serde(default = "default_label_mm")]
     pub label_height_mm: f64,
     #[serde(default)]
     pub units: HvacUnits,
-}
-
-fn default_margin_mm() -> f64 {
-    100.0
 }
 
 impl AhuParams {
@@ -138,12 +127,6 @@ impl AhuParams {
         let size = |v: f64| v.is_finite() && v > 0.0 && v <= MAX_AHU_SIZE_MM;
         if !size(self.width_mm) || !size(self.depth_mm) {
             return Err(invalid(format!("A unit's sizes are more than 0 and at most {MAX_AHU_SIZE_MM} mm.")));
-        }
-        if self.void_height_mm.is_some_and(|h| !(h.is_finite() && (DUCT_DIAMETER_MM.0..=MAX_VOID_MM).contains(&h))) {
-            return Err(invalid(format!("The height available is {} to {MAX_VOID_MM} mm.", DUCT_DIAMETER_MM.0)));
-        }
-        if !(self.margin_mm.is_finite() && (0.0..=MAX_VOID_MM).contains(&self.margin_mm)) {
-            return Err(invalid(format!("The margin is 0 to {MAX_VOID_MM} mm.")));
         }
         for v in [self.flow_m3h, self.pressure_pa, self.extract_flow_m3h, self.extract_pressure_pa].into_iter().flatten() {
             if !(v.is_finite() && (0.0..=1e9).contains(&v)) {
@@ -371,6 +354,9 @@ pub struct DuctParams {
     /// The air velocity in the run, m/s, once the network is sized.
     #[serde(default)]
     pub velocity: Option<f64>,
+    /// The altitude of the run's underside, mm, when a height zone it runs in gives one: written on its label.
+    #[serde(default)]
+    pub bottom_mm: Option<f64>,
     /// A flexible duct (gaine souple): drawn as bellows, with the roughness of one.
     #[serde(default)]
     pub flexible: bool,
@@ -564,6 +550,9 @@ impl DuctParams {
         let mut text = self.size_label();
         if let Some(f) = self.flow_m3h {
             text.push_str(&format!(" {f:.0} m³/h"));
+        }
+        if let Some(b) = self.bottom_mm {
+            text.push_str(&format!(" Ai:{:.2}", b / 1000.0));
         }
         let h = self.units.to_units(self.label_height_mm);
         // A flexible duct is narrow and its bellows busy: its label sits above it.

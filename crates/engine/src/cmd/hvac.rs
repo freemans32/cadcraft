@@ -118,7 +118,7 @@ fn spaces_count(d: &Drawing) -> usize {
 }
 
 /// The vertices of closed polyline `h`, refusing arcs: a space's outline is straight.
-fn polyline_outline(d: &Drawing, h: Handle) -> Result<Vec<Vec2>> {
+pub(super) fn polyline_outline(d: &Drawing, h: Handle) -> Result<Vec<Vec2>> {
     let e = d.entity(h).ok_or_else(|| other("Cannot find that object."))?;
     match &e.kind {
         EntityKind::LwPolyline(p) if p.closed => {

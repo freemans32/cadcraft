@@ -39,6 +39,8 @@ pub struct LastUsed {
     pub duct: cmd::DuctLastUsed,
     /// DUCTACCESSORYADD's type.
     pub accessory: cmd::AccessoryLastUsed,
+    /// ZONEADD's height and altitude.
+    pub zone: cmd::ZoneLastUsed,
 }
 
 impl Default for LastUsed {
@@ -61,6 +63,7 @@ impl Default for LastUsed {
             ahu: cmd::AhuLastUsed::default(),
             duct: cmd::DuctLastUsed::default(),
             accessory: cmd::AccessoryLastUsed::default(),
+            zone: cmd::ZoneLastUsed::default(),
         }
     }
 }

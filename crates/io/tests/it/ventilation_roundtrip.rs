@@ -69,8 +69,6 @@ fn ducted() -> Drawing {
         pressure_pa: Some(120.0),
         extract_flow_m3h: Some(450.0),
         extract_pressure_pa: Some(90.0),
-        void_height_mm: None,
-        margin_mm: 100.0,
         label_height_mm: 100.0,
         units,
     };
@@ -92,6 +90,7 @@ fn ducted() -> Drawing {
         elbow: None,
         trim_start_mm: 0.0,
         trim_end_mm: 0.0,
+        bottom_mm: None,
         label_height_mm: 100.0,
         units,
     };

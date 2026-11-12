@@ -1115,6 +1115,13 @@
 	Edit Duct	Modifier la gaine
 	Size Ducts	Dimensionner les gaines
 	Connect Terminals	Raccorder les bouches
+	Height Zone	Zone de hauteur
+	Edit Height Zone	Modifier la zone de hauteur
+	Altitude of the underside (m)	Altitude du dessous (m)
+	Specify first point of zone	Spécifiez le premier point de la zone
+	Enter zone name	Entrez le nom de la zone
+	Enter the height available for ducts (mm)	Entrez la hauteur disponible pour les gaines (mm)
+	Enter the altitude of the underside of the ducts (m) or [None]	Entrez l'altitude du dessous des gaines (m) ou [None]
 	Double-flow unit	CTA double flux
 	Supply unit	CTA simple flux soufflage
 	Extract unit	CTA simple flux extraction

@@ -14,8 +14,6 @@ fn ahu() -> AhuParams {
         pressure_pa: None,
         extract_flow_m3h: None,
         extract_pressure_pa: None,
-        void_height_mm: None,
-        margin_mm: 100.0,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     }
@@ -39,6 +37,7 @@ fn duct(diameter_mm: f64) -> DuctParams {
         elbow: None,
         trim_start_mm: 0.0,
         trim_end_mm: 0.0,
+        bottom_mm: None,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     }
@@ -506,18 +505,32 @@ fn a_rectangular_duct_is_drawn_as_wide_as_its_width_and_labelled_with_its_sides(
     assert_eq!(DuctParams::from_xdata(&p.to_xdata().unwrap()), Some(p));
 }
 
-/// A unit with `void` mm available above the false ceiling, a trunk of `flow` m³/h reaching
-/// four 300 m³/h diffusers by connections.
+fn zone(name: &str, void: f64, bottom: Option<f64>, outline: &[(f64, f64)]) -> ZoneParams {
+    ZoneParams {
+        name: name.into(),
+        void_height_mm: void,
+        bottom_mm: bottom,
+        outline: outline.iter().map(|&(x, y)| Vec2::new(x, y)).collect(),
+        label_height_mm: 100.0,
+        units: HvacUnits::default(),
+    }
+}
+
+/// A unit and a trunk reaching four 300 m³/h diffusers by connections, all under a zone of `void`
+/// mm available (none when `void` is `None`).
 fn hall(void: Option<f64>) -> Drawing {
     let mut d = Drawing::new_metric();
-    let unit = AhuParams { void_height_mm: void, ..ahu() };
-    d.add_ahu(&Space::Model, Common::default(), &unit, Vec2::ZERO, 0.0).unwrap();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
     let mut from = 500.0;
     for x in [2000.0, 4000.0, 6000.0, 8000.0] {
         add_duct(&mut d, (from, 0.0), (x, 0.0));
         add_duct(&mut d, (x, 0.0), (x, -1500.0));
         add_terminal(&mut d, (x, -1500.0), 300.0);
         from = x;
+    }
+    if let Some(v) = void {
+        let all = zone("Plenum", v, None, &[(-1000.0, -2500.0), (9500.0, -2500.0), (9500.0, 1000.0), (-1000.0, 1000.0)]);
+        d.add_zone(&Space::Model, Common::default(), all).unwrap();
     }
     d
 }
@@ -535,36 +548,110 @@ fn the_height_available_less_the_margin_goes_to_every_run_of_the_network() {
     let net = d.duct_networks().unwrap().remove(0);
     assert!(net.network.segments.iter().all(|s| s.max_height_mm == Some(250.0)), "350 less the 100 mm margin");
     assert!(hall(None).duct_networks().unwrap()[0].network.segments.iter().all(|s| s.max_height_mm.is_none()));
-    let unit = AhuParams { void_height_mm: Some(350.0), margin_mm: 50.0, ..ahu() };
-    let mut d = Drawing::new_metric();
-    d.add_ahu(&Space::Model, Common::default(), &unit, Vec2::ZERO, 0.0).unwrap();
-    add_duct(&mut d, (500.0, 0.0), (3000.0, 0.0));
-    add_terminal(&mut d, (3000.0, 0.0), 100.0);
-    assert_eq!(d.duct_networks().unwrap()[0].network.segments[0].max_height_mm, Some(300.0));
+    let net = d.duct_networks_with_margin(50.0).unwrap().remove(0);
+    assert!(net.network.segments.iter().all(|s| s.max_height_mm == Some(300.0)), "a margin of 50 mm");
 }
 
 #[test]
-fn a_space_with_its_own_height_wins_over_the_units_where_the_duct_runs_in_it() {
-    let mut d = hall(Some(350.0));
-    // A room of 1.5 m below the trunk's left half only (x from 0 to 3000, y from -500 to 500), 200 mm available.
+fn a_zone_wins_over_a_space_where_the_duct_runs_in_it() {
+    let mut d = hall(None);
+    // A room over everything with 350 mm available, and a beam over the trunk's left part with 200.
     let room = SpaceParams {
-        name: "Local bas".into(),
+        name: "Salle".into(),
         room: cadcraft_hvac::RoomUse::Office,
         occupants: 1,
         collective: true,
         flow_m3h: None,
-        void_height_mm: Some(200.0),
-        outline: vec![Vec2::new(0.0, 0.0), Vec2::new(3000.0, 0.0), Vec2::new(3000.0, 1000.0), Vec2::new(0.0, 1000.0)],
+        void_height_mm: Some(350.0),
+        outline: vec![Vec2::new(0.0, 0.0), Vec2::new(10500.0, 0.0), Vec2::new(10500.0, 3500.0), Vec2::new(0.0, 3500.0)],
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     };
-    // Block coordinates start at the first point: it sits at (0, -500).
-    d.add_space(&Space::Model, Common::default(), SpaceParams { ..room }).unwrap();
+    d.add_space(&Space::Model, Common::default(), SpaceParams { void_height_mm: Some(350.0), ..room }).unwrap();
+    // The room's first point is its origin: it sits at (0, 0); move it so it holds the whole hall.
+    let space = d.model.iter().find(|e| space_of(e).is_some()).unwrap().handle;
+    d.modify_entity(space, |e| {
+        if let EntityKind::Insert(i) = &mut e.kind {
+            i.insert.x = -1000.0;
+            i.insert.y = -2500.0;
+        }
+    })
+    .unwrap();
+    d.add_zone(&Space::Model, Common::default(), zone("Poutre", 200.0, None, &[(0.0, -500.0), (3000.0, -500.0), (3000.0, 500.0), (0.0, 500.0)]))
+        .unwrap();
     let net = d.duct_networks().unwrap().remove(0);
     let heights: Vec<_> = net.network.segments.iter().map(|s| s.max_height_mm).collect();
-    // The first trunk piece (midpoint x = 1250) is inside; its neighbours are not.
-    assert_eq!(heights[0], Some(100.0), "200 less the margin, in the room");
-    assert!(heights[1..].contains(&Some(250.0)), "{heights:?}");
+    // The first trunk piece (midpoint x = 1250) is under the beam; its neighbours are not.
+    assert_eq!(heights[0], Some(100.0), "200 less the margin, under the beam");
+    assert!(heights[1..].contains(&Some(250.0)), "the room's 350 elsewhere: {heights:?}");
+}
+
+#[test]
+fn a_zone_is_drawn_hatched_with_its_height_and_altitude_written_in_it() {
+    let z = zone("Poutre P3", 280.0, Some(2450.0), &[(0.0, 0.0), (4000.0, 0.0), (4000.0, 600.0), (0.0, 600.0)]);
+    let pieces = z.generate().unwrap();
+    assert!(pieces.iter().any(|p| matches!(p.kind, EntityKind::Hatch(_))));
+    assert!(pieces.iter().any(|p| matches!(p.kind, EntityKind::LwPolyline(_))));
+    assert_eq!(text_of(&pieces).value, "Poutre P3 H=280 Ai:2.45", "readable by another program");
+    assert!(pieces.iter().all(|p| p.layer == ZONE_LAYER));
+    assert_eq!(ZoneParams::from_xdata(&z.to_xdata().unwrap()), Some(z.clone()));
+    for bad in [
+        ZoneParams { void_height_mm: 10.0, ..z.clone() },
+        ZoneParams { void_height_mm: f64::NAN, ..z.clone() },
+        ZoneParams { outline: z.outline[..2].to_vec(), ..z.clone() },
+        ZoneParams { name: " ".into(), ..z.clone() },
+        ZoneParams { bottom_mm: Some(f64::INFINITY), ..z.clone() },
+    ] {
+        assert!(bad.validate().is_err(), "{bad:?}");
+    }
+    // In the drawing: a block on its own layer, its outline read back in drawing coordinates.
+    let mut d = Drawing::new_metric();
+    let h = d
+        .add_zone(&Space::Model, Common::default(), ZoneParams { outline: z.outline.iter().map(|p| *p + Vec2::new(100.0, 200.0)).collect(), ..z })
+        .unwrap();
+    let (_, outline) = d.zone_outline(h).unwrap();
+    assert!(outline[0].near(Vec2::new(100.0, 200.0), 1e-9) && outline[2].near(Vec2::new(4100.0, 800.0), 1e-9));
+    assert_eq!(d.entity(h).unwrap().common.layer, ZONE_LAYER);
+}
+
+#[test]
+fn a_duct_crossing_a_zone_is_cut_at_its_edges_and_the_piece_inside_takes_its_height_and_altitude() {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    let trunk = add_duct(&mut d, (500.0, 0.0), (9000.0, 0.0));
+    add_terminal(&mut d, (9000.0, 0.0), 300.0);
+    d.add_zone(
+        &Space::Model,
+        Common::default(),
+        zone("Poutre", 250.0, Some(2450.0), &[(3000.0, -800.0), (5000.0, -800.0), (5000.0, 800.0), (3000.0, 800.0)]),
+    )
+    .unwrap();
+    assert_eq!(d.split_duct_taps(&Space::Model).unwrap(), 2, "in at x = 3000, out at x = 5000");
+    assert_eq!(d.split_duct_taps(&Space::Model).unwrap(), 0, "cutting twice changes nothing");
+    let net = d.duct_networks().unwrap().remove(0);
+    assert_eq!(net.network.segments.len(), 3);
+    let (first, mid, last) = (&net.network.segments[0], &net.network.segments[1], &net.network.segments[2]);
+    assert_eq!((first.max_height_mm, mid.max_height_mm, last.max_height_mm), (None, Some(150.0), None));
+    assert_eq!(net.bottoms_mm, [None, Some(2450.0), None]);
+    // Sized at 400 m³/h (about Ø160): round before and after, flat under the beam (150 mm tall), with
+    // the altitude on its label, and a reducer where the section changes.
+    let mut d2 = d.clone();
+    let big = d2.model.iter().find(|e| air_terminal_of(e).is_some()).unwrap().handle;
+    let (mut t, ..) = (air_terminal_of(d2.entity(big).unwrap()).unwrap(), 0);
+    t.flow_m3h = 400.0;
+    d2.regenerate_air_terminal(big, &t).unwrap();
+    let net = d2.duct_networks().unwrap().remove(0);
+    let report = size_network(&net.network, &DesignCriteria::default()).unwrap();
+    d2.apply_duct_report(&net, &report).unwrap();
+    let pieces: Vec<_> = net.ducts.iter().map(|h| d2.duct_ends(*h).unwrap().0).collect();
+    assert_eq!((pieces[0].shape, pieces[2].shape), (DuctShape::Round, DuctShape::Round));
+    assert_eq!((pieces[1].shape, pieces[1].height_mm), (DuctShape::Rectangular, 150.0), "{:?}", pieces[1]);
+    assert_eq!(pieces[1].bottom_mm, Some(2450.0));
+    assert!(pieces[1].size_label().contains('×') && pieces[0].bottom_mm.is_none());
+    let label = text_of(&pieces[1].generate(false).unwrap()).value;
+    assert!(label.contains("Ai:2.45"), "{label}");
+    assert!(pieces[1].reducer.is_some() || pieces[2].reducer.is_some(), "a reducer where the section changes");
+    let _ = trunk;
 }
 
 #[test]
@@ -632,8 +719,6 @@ fn a_height_too_small_for_any_duct_is_an_error_not_a_panic() {
     assert_eq!(net.network.segments[0].max_height_mm, Some(50.0));
     // 50 mm is below the smallest side, but only when a round duct would not fit it: sizing says so.
     assert!(size_network(&net.network, &DesignCriteria::default()).is_err());
-    assert!(AhuParams { void_height_mm: Some(10.0), ..ahu() }.validate().is_err());
-    assert!(AhuParams { margin_mm: -1.0, ..ahu() }.validate().is_err());
 }
 
 fn arcs(pieces: &[HvacPiece]) -> Vec<(Vec2, f64, f64, f64)> {

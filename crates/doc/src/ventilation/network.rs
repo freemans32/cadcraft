@@ -13,6 +13,8 @@ use crate::{EntityKind, Handle, Result};
 
 /// Most ducts one drawing's networks are read from.
 pub const MAX_DUCTS: usize = 5_000;
+/// What is kept back from the height available, mm, unless a sizing says otherwise.
+pub const DEFAULT_MARGIN_MM: f64 = 100.0;
 /// Distance, in millimetres, within which two ends are one point.
 const MEET_MM: f64 = 10.0;
 /// Distance, in millimetres, within which a duct end is on an air handling unit: a click near its face.
@@ -35,6 +37,8 @@ pub struct DuctNetwork {
     /// How far each duct turns from the one it continues, degrees (positive to the left of the air's
     /// way), when that is a bare elbow: no tee, no more than a bend.
     pub elbow_turns_deg: Vec<Option<f64>>,
+    /// The altitude of each duct's underside, mm, where a height zone it runs in gives one.
+    pub bottoms_mm: Vec<Option<f64>>,
     /// Whether each duct is entered by its far end (the air runs from its end to its origin).
     pub entered_at_end: Vec<bool>,
     /// Ducts connected to the unit that lead to no terminal, so are left out of the sizing.
@@ -91,6 +95,12 @@ impl crate::Drawing {
     /// The networks of every air handling unit in model space. Several units may not share a duct:
     /// a duct is read once, for the first unit that reaches it.
     pub fn duct_networks(&self) -> Result<Vec<DuctNetwork>> {
+        self.duct_networks_with_margin(DEFAULT_MARGIN_MM)
+    }
+
+    /// [`Self::duct_networks`] keeping `margin_mm` back from the height available (for hangers,
+    /// insulation and tolerances).
+    pub fn duct_networks_with_margin(&self, margin_mm: f64) -> Result<Vec<DuctNetwork>> {
         let units = HvacUnits::of(self);
         let tol = units.to_units(MEET_MM);
         let mut ducts = Vec::new();
@@ -112,13 +122,21 @@ impl crate::Drawing {
                 accessories.push((e.handle, p, Vec2::new(i.insert.x, i.insert.y)));
             }
         }
-        // The spaces that say how much height there is above their false ceiling.
-        let voids: Vec<(Vec<Vec2>, f64)> = self
-            .model
-            .iter()
-            .filter_map(|e| self.space_outline(e.handle))
-            .filter_map(|(sp, outline)| sp.void_height_mm.map(|h| (outline, h)))
-            .collect();
+        // Where the height available is given: height zones first (a beam is more particular than a
+        // room), then spaces. Each carries its outline, its height and the altitude of the underside.
+        let mut voids: Vec<(Vec<Vec2>, f64, Option<f64>)> = Vec::new();
+        for e in self.model.iter() {
+            if let Some((z, outline)) = self.zone_outline(e.handle) {
+                voids.push((outline, z.void_height_mm, z.bottom_mm));
+            }
+        }
+        for e in self.model.iter() {
+            if let Some((sp, outline)) = self.space_outline(e.handle)
+                && let Some(h) = sp.void_height_mm
+            {
+                voids.push((outline, h, None));
+            }
+        }
         let mut scan = Scan {
             ducts: &ducts,
             terminals: &terminals,
@@ -127,13 +145,11 @@ impl crate::Drawing {
             taken: vec![false; ducts.len()],
             touched: vec![false; terminals.len()],
             voids,
-            unit_void: None,
-            margin_mm: 0.0,
+            margin_mm,
         };
         let mut out = Vec::new();
         let unit_tol = units.to_units(UNIT_MEET_MM);
         for (handle, p, at, rotation) in &ahus {
-            (scan.unit_void, scan.margin_mm) = (p.void_height_mm, p.margin_mm);
             let half = p.half();
             // A duct end within a radius of the unit's face is on it (snapping lands on a line's edge).
             let inside = |q: Vec2, diameter_mm: f64| {
@@ -176,7 +192,7 @@ impl crate::Drawing {
             }
         }
         let mut cuts = 0;
-        for p in points {
+        for p in points.clone() {
             // Ducts cut on the way are appended: the point is tried against them too.
             let mut i = 0;
             while let Some(&(h, a, b, d)) = ducts.get(i) {
@@ -193,6 +209,37 @@ impl crate::Drawing {
                     cuts += 1;
                     break;
                 }
+            }
+        }
+        cuts += self.split_ducts_at_zones(space, tol)?;
+        Ok(cuts)
+    }
+
+    /// Cuts every duct where it enters or leaves a height zone, so each piece lies wholly in or out
+    /// of it and is sized for the height there.
+    fn split_ducts_at_zones(&mut self, space: &crate::Space, tol: f64) -> Result<usize> {
+        let zones: Vec<Vec<Vec2>> = self.model.iter().filter_map(|e| self.zone_outline(e.handle)).map(|(_, outline)| outline).collect();
+        if zones.is_empty() {
+            return Ok(0);
+        }
+        let ducts: Vec<Handle> = self.model.iter().filter(|e| self.duct_ends(e.handle).is_some()).map(|e| e.handle).collect();
+        let (mut cuts, mut total) = (0, ducts.len());
+        for h in ducts {
+            let mut at = h;
+            // The nearest crossing along what is left of the duct, until none is.
+            while let Some((_, a, b)) = self.duct_ends(at) {
+                let hit = zones
+                    .iter()
+                    .flat_map(|poly| poly.iter().zip(poly.iter().cycle().skip(1)))
+                    .filter_map(|(c, d)| segments_cross(a, b, *c, *d))
+                    .filter(|p| p.dist(a) > tol && p.dist(b) > tol)
+                    .min_by(|x, y| x.dist(a).total_cmp(&y.dist(a)));
+                let Some(p) = hit else { break };
+                if total >= MAX_DUCTS {
+                    return Err(invalid(format!("The drawing would have more than {MAX_DUCTS} ducts.")));
+                }
+                let Some(next) = self.split_duct_at(space, at, p, tol)? else { break };
+                (at, cuts, total) = (next, cuts + 1, total + 1);
             }
         }
         Ok(cuts)
@@ -228,6 +275,7 @@ impl crate::Drawing {
                 .filter(|q| (q.width_mm - r.width_mm).abs() > 0.5)
                 .map(|q| DuctReducer { from_mm: q.width_mm, at_end: net.entered_at_end.get(i).copied().unwrap_or(false) });
             (p.elbow, p.trim_start_mm, p.trim_end_mm) = (None, 0.0, 0.0);
+            p.bottom_mm = net.bottoms_mm.get(i).copied().flatten();
             next.push(Some(p));
         }
         draw_elbows(net, &mut next);
@@ -339,19 +387,21 @@ struct Scan<'a> {
     tol: f64,
     taken: Vec<bool>,
     touched: Vec<bool>,
-    /// The spaces with a height available above their false ceiling: outline and height, mm.
-    voids: Vec<(Vec<Vec2>, f64)>,
-    /// The height available where no space says, and the margin kept from it, mm: the unit's.
-    unit_void: Option<f64>,
+    /// Where a height available is given: outline, height and the altitude of the underside, mm.
+    voids: Vec<(Vec<Vec2>, f64, Option<f64>)>,
+    /// What is kept back from that height, mm.
     margin_mm: f64,
 }
 
 impl Scan<'_> {
-    /// The tallest a duct may be at `at`, mm: the height available there (a space's, else the
-    /// unit's) less the margin.
+    /// The first zone or space that holds `at` and gives a height, with the altitude of the underside.
+    fn void_at(&self, at: Vec2) -> Option<(f64, Option<f64>)> {
+        self.voids.iter().find(|(outline, ..)| cadcraft_geom::point_in_polygon(outline, at)).map(|v| (v.1, v.2))
+    }
+
+    /// The tallest a duct may be at `at`, mm: the height available there less the margin.
     fn height_available(&self, at: Vec2) -> Option<f64> {
-        let void = self.voids.iter().find(|(outline, _)| cadcraft_geom::point_in_polygon(outline, at)).map(|v| v.1).or(self.unit_void);
-        void.map(|h| h - self.margin_mm)
+        self.void_at(at).map(|(h, _)| h - self.margin_mm)
     }
 
     fn is_free(&self, i: usize, air: AirDirection) -> bool {
@@ -486,6 +536,7 @@ impl Scan<'_> {
         let mut handles = Vec::with_capacity(kept.len());
         let mut entered_at_end = Vec::with_capacity(kept.len());
         let mut elbow_turns_deg = Vec::with_capacity(kept.len());
+        let mut bottoms_mm = Vec::with_capacity(kept.len());
         let mut main_chain = vec![false; nodes.len()];
         for &old in &kept {
             let Some(n) = nodes.get(old) else { continue };
@@ -509,6 +560,7 @@ impl Scan<'_> {
             });
             entered_at_end.push(n.from == d.b && d.a != d.b);
             elbow_turns_deg.push(bare_elbow_turn(nodes, n));
+            bottoms_mm.push(self.void_at(d.a.mid(d.b)).and_then(|(_, b)| b));
             handles.push(d.handle);
         }
         DuctNetwork {
@@ -517,6 +569,7 @@ impl Scan<'_> {
             network: Network { segments },
             ducts: handles,
             elbow_turns_deg,
+            bottoms_mm,
             entered_at_end,
             dangling,
             unconnected: Vec::new(),
@@ -565,6 +618,18 @@ fn segment_kind(kind: DuctKind, terminals_below: usize, on_trunk: bool) -> Segme
         DuctKind::Auto if on_trunk => SegmentKind::Main,
         DuctKind::Auto => SegmentKind::Branch,
     }
+}
+
+/// Where segment `a`–`b` crosses segment `c`–`d`, if it does.
+fn segments_cross(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> Option<Vec2> {
+    let (r, s) = (b - a, d - c);
+    let denom = r.cross(s);
+    if denom.abs() < 1e-12 {
+        return None;
+    }
+    let t = (c - a).cross(s) / denom;
+    let u = (c - a).cross(r) / denom;
+    ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then(|| a + r * t)
 }
 
 /// How many terminals each run serves, itself and all the runs below it.

@@ -17,14 +17,13 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("ahuadd", "Air Handling Unit", run_ahuadd)
             .menu(&["Draw", "HVAC", "Air Handling Unit"])
             .params(
-                "{at, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox (default doubleFlow), width? (mm), depth? (mm), voidHeight? (mm available above the false ceiling for its ducts), margin? (mm kept from it, \
-                 default 100), rotation? (degrees), labelHeight? (mm)} → {handle, name} (a double-flux unit: its ducts and terminals say supply or extract)",
+                "{at, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox (default doubleFlow), width? (mm), depth? (mm), rotation? (degrees), \
+                 labelHeight? (mm)} → {handle, name} (its ducts and terminals say supply or extract)",
             )
             .interactive(|s| Ok(Box::new(AhuAddM::new(s)))),
         CommandSpec::new("ahuedit", "Edit Air Handling Unit", run_ahuedit)
             .params(
-                "{handle | handles, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox, width? (mm), depth? (mm), voidHeight? (mm, or null for none), \
-                 margin? (mm)} → {changed}",
+                "{handle | handles, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox, width? (mm), depth? (mm)} → {changed}",
             ),
         CommandSpec::new("ductadd", "Duct", run_ductadd)
             .menu(&["Draw", "HVAC", "Duct"])
@@ -40,7 +39,7 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         CommandSpec::new("ductsize", "Size Ducts", run_ductsize).menu(&["Draw", "HVAC", "Size Ducts"]).params(
             "{ahu? (handle; default every unit), maxVelocityMain? (m/s), maxVelocityBranch?, maxVelocityConnection?, \
-             maxGradient? (Pa/m), maxAspect? (width / height of a rectangular duct, default 4), sideStep? (mm, default 50), \
+             maxGradient? (Pa/m), margin? (mm kept back from the height available, default 100), maxAspect? (width / height of a rectangular duct, default 4), sideStep? (mm, default 50), \
              minSide? (mm, default 100), maxSide? (mm, default 2000)} → {networks: [{ahu, totalFlow (m³/h), requiredPressure (Pa), criticalPath, segments, warnings}]}",
         ),
     ]
@@ -208,8 +207,6 @@ fn run_ahuadd(s: &mut Session, p: &Value) -> Result<Value> {
         pressure_pa: None,
         extract_flow_m3h: None,
         extract_pressure_pa: None,
-        void_height_mm: positive(CMD, p, "voidHeight")?,
-        margin_mm: non_negative(CMD, p, "margin")?.unwrap_or(100.0),
         label_height_mm: positive(CMD, p, "labelHeight")?.unwrap_or(100.0),
         units: units_of(s)?,
     };
@@ -223,14 +220,8 @@ fn run_ahuedit(s: &mut Session, p: &Value) -> Result<Value> {
     if hs.is_empty() || hs.len() > MAX_EDITED {
         return Err(bad(CMD, format!("select 1 to {MAX_EDITED} units")));
     }
-    let (width, depth, margin) = (positive(CMD, p, "width")?, positive(CMD, p, "depth")?, non_negative(CMD, p, "margin")?);
+    let (width, depth) = (positive(CMD, p, "width")?, positive(CMD, p, "depth")?);
     let kind = ahu_kind_param(CMD, p)?;
-    // A null height available clears it: the ducts are round again.
-    let void = match p.get("voidHeight") {
-        None => None,
-        Some(Value::Null) => Some(None),
-        Some(_) => Some(positive(CMD, p, "voidHeight")?),
-    };
     let d = s.doc()?;
     let mut next = Vec::with_capacity(hs.len());
     for h in &hs {
@@ -241,10 +232,6 @@ fn run_ahuedit(s: &mut Session, p: &Value) -> Result<Value> {
         a.kind = kind.unwrap_or(a.kind);
         a.width_mm = width.unwrap_or(a.width_mm);
         a.depth_mm = depth.unwrap_or(a.depth_mm);
-        a.margin_mm = margin.unwrap_or(a.margin_mm);
-        if let Some(v) = void {
-            a.void_height_mm = v;
-        }
         a.validate().map_err(doc_err)?;
         next.push((*h, a));
     }
@@ -315,8 +302,6 @@ impl AhuAddM {
                     pressure_pa: None,
                     extract_flow_m3h: None,
                     extract_pressure_pa: None,
-                    void_height_mm: None,
-                    margin_mm: 100.0,
                     label_height_mm: 100.0,
                     units: units_of(s)?,
                 };
@@ -391,8 +376,6 @@ impl Interactive for AhuAddM {
             pressure_pa: None,
             extract_flow_m3h: None,
             extract_pressure_pa: None,
-            void_height_mm: None,
-            margin_mm: 100.0,
             label_height_mm: 100.0,
             units,
         };
@@ -452,6 +435,7 @@ fn duct_params(s: &Session, last: &DuctLastUsed, label_mm: f64) -> Result<DuctPa
         elbow: None,
         trim_start_mm: 0.0,
         trim_end_mm: 0.0,
+        bottom_mm: None,
         label_height_mm: label_mm,
         units: units_of(s)?,
     })
@@ -796,6 +780,7 @@ fn run_ductconnect(s: &mut Session, p: &Value) -> Result<Value> {
             elbow: None,
             trim_start_mm: 0.0,
             trim_end_mm: 0.0,
+            bottom_mm: None,
             label_height_mm: 100.0,
             units: units_of(s)?,
         };
@@ -943,6 +928,7 @@ fn criteria(p: &Value) -> Result<DesignCriteria> {
 fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "ductsize";
     let criteria = criteria(p)?;
+    let margin_mm = non_negative(CMD, p, "margin")?.unwrap_or(cadcraft_doc::DEFAULT_MARGIN_MM);
     let only = match p.get("ahu") {
         None | Some(Value::Null) => None,
         Some(v) => Some(v.as_str().and_then(Handle::parse_hex).ok_or_else(|| bad(CMD, "`ahu` must be a handle"))?),
@@ -950,7 +936,8 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
     // Ducts drawn across one another, or a terminal on a run, are cut so their ends meet.
     let space = s.space();
     let cuts = s.doc_mut()?.split_duct_taps(&space).map_err(doc_err)?;
-    let nets: Vec<_> = s.doc()?.duct_networks().map_err(doc_err)?.into_iter().filter(|n| only.is_none_or(|h| h == n.ahu)).collect();
+    let nets: Vec<_> =
+        s.doc()?.duct_networks_with_margin(margin_mm).map_err(doc_err)?.into_iter().filter(|n| only.is_none_or(|h| h == n.ahu)).collect();
     if nets.is_empty() {
         return Err(other("There is no air handling unit to size: place one with AHUADD."));
     }

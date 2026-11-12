@@ -186,6 +186,9 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         if row_button(ui, crate::i18n::t("Duct"), false, |_, _| {}) {
             start = Some("ductadd");
         }
+        if row_button(ui, crate::i18n::t("Height Zone"), false, |_, _| {}) {
+            start = Some("zoneadd");
+        }
         if row_button(ui, crate::i18n::t("Connect Terminals"), false, |_, _| {}) {
             connect = true;
         }

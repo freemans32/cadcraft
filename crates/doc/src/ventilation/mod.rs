@@ -14,14 +14,16 @@ mod network;
 mod space;
 mod terminal;
 mod xdata;
+mod zone;
 
 pub use accessory::*;
 pub use distribute::{Distribution, MAX_DISTRIBUTED, distribute_in_polygon};
 pub use duct::*;
 pub use library::standard_air_terminal_models;
-pub use network::{DuctNetwork, FLEX_ROUGHNESS_MM, MAX_DUCTS};
+pub use network::{DEFAULT_MARGIN_MM, DuctNetwork, FLEX_ROUGHNESS_MM, MAX_DUCTS};
 pub use space::*;
 pub use terminal::*;
+pub use zone::*;
 
 use cadcraft_geom::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
@@ -44,6 +46,7 @@ fn hvac_layer_color(name: &str) -> Option<cadcraft_color::Color> {
     match name {
         AIR_SUPPLY_LAYER | DUCT_LAYER => Some(Color::True(Rgb(0x1e, 0x90, 0xff))),
         AIR_EXTRACT_LAYER | DUCT_EXTRACT_LAYER => Some(Color::True(Rgb(0xff, 0x4d, 0xb8))),
+        ZONE_LAYER => Some(Color::True(Rgb(0x2e, 0xb8, 0xa6))),
         _ => None,
     }
 }

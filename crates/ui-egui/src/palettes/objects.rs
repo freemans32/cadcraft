@@ -4,7 +4,7 @@
 
 use cadcraft_doc::{
     AccessoryKind, AccessoryParams, AhuKind, AhuParams, AirDirection, Drawing, DuctKind, DuctParams, DuctShape, Handle, SpaceParams, TerminalKind,
-    TerminalParams, WallJustification, accessory_of, ahu_of, air_terminal_of, duct_of, space_of, wall_of,
+    TerminalParams, WallJustification, ZoneParams, accessory_of, ahu_of, air_terminal_of, duct_of, space_of, wall_of, zone_of,
 };
 use cadcraft_hvac::RoomUse;
 use egui::{Sense, pos2, vec2};
@@ -46,9 +46,13 @@ pub(super) fn section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], len: &dyn 
     if !terminals.is_empty() && terminals.len() == sel.len() {
         return terminal_section(ui, d, sel, &terminals, bad);
     }
+    let zones: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| zone_of(e))).collect();
+    if !zones.is_empty() && zones.len() == sel.len() {
+        return zone_section(ui, sel, &zones, bad);
+    }
     let units: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| ahu_of(e))).collect();
     if !units.is_empty() && units.len() == sel.len() {
-        return ahu_section(ui, sel, &units, bad);
+        return ahu_section(ui, sel, &units);
     }
     let accessories: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| accessory_of(e))).collect();
     if !accessories.is_empty() && accessories.len() == sel.len() {
@@ -355,10 +359,46 @@ fn terminal_section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], ts: &[Termin
 }
 
 // =====================================================================================
+// Height zones
+// =====================================================================================
+
+fn zone_section(ui: &mut egui::Ui, sel: &[Handle], zones: &[ZoneParams], bad: &mut Option<String>) -> Action {
+    let ids = handles(sel);
+    let mut action: Action = None;
+    let edit = |key: &str, value: Value| Some(("zoneedit", json!({ "handles": ids, key: value })));
+    group(ui, "Height Zone");
+    let name = shared(&zones.iter().map(|z| z.name.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Name", |ui| {
+        if let Some(n) = edit_field(ui, ui.scope_id().with(("zone_name", &ids)), name).filter(|n| !n.trim().is_empty() && n != VARIES) {
+            action = edit("name", json!(n));
+        }
+    });
+    let height = shared(&zones.iter().map(|z| format!("{:.0}", z.void_height_mm)).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Height available (mm)", |ui| {
+        if let Some(v) = number(edit_field(ui, ui.scope_id().with(("zone_height", &ids)), height), bad) {
+            action = edit("voidHeight", json!(v));
+        }
+    });
+    // The altitude of the underside of the ducts, in metres as plans write it: empty or 0 for none.
+    let altitude = shared(&zones.iter().map(|z| z.bottom_mm.map(|b| format!("{}", b / 1000.0)).unwrap_or_default()).collect::<Vec<_>>())
+        .unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Altitude of the underside (m)", |ui| {
+        if let Some(t) = edit_field(ui, ui.scope_id().with(("zone_altitude", &ids)), altitude) {
+            if t.trim().is_empty() || t.trim() == "0" {
+                action = edit("altitude", Value::Null);
+            } else if let Some(m) = number(Some(t), bad) {
+                action = edit("altitude", json!(m));
+            }
+        }
+    });
+    action
+}
+
+// =====================================================================================
 // Air handling units
 // =====================================================================================
 
-fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams], bad: &mut Option<String>) -> Action {
+fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams]) -> Action {
     let ids = handles(sel);
     let mut action: Action = None;
     let edit = |key: &str, value: Value| Some(("ahuedit", json!({ "handles": ids, key: value })));
@@ -381,25 +421,6 @@ fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams], bad: &mut
     prop_row(ui, "Name", |ui| {
         if let Some(n) = edit_field(ui, ui.scope_id().with(("ahu_name", &ids)), name).filter(|n| !n.trim().is_empty() && n != VARIES) {
             action = edit("name", json!(n));
-        }
-    });
-    // The height available above the false ceiling for its ducts: empty or 0 means round ducts only.
-    // A space may say its own.
-    let void = shared(&units.iter().map(|p| p.void_height_mm.map(|v| format!("{v:.0}")).unwrap_or_default()).collect::<Vec<_>>())
-        .unwrap_or_else(|| VARIES.into());
-    prop_row(ui, "Height available (mm)", |ui| {
-        if let Some(t) = edit_field(ui, ui.scope_id().with(("ahu_void", &ids)), void) {
-            if t.trim().is_empty() || t.trim() == "0" {
-                action = edit("voidHeight", Value::Null);
-            } else if let Some(v) = number(Some(t), bad) {
-                action = edit("voidHeight", json!(v));
-            }
-        }
-    });
-    let margin = shared(&units.iter().map(|p| format!("{:.0}", p.margin_mm)).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
-    prop_row(ui, "Margin (mm)", |ui| {
-        if let Some(m) = number(edit_field(ui, ui.scope_id().with(("ahu_margin", &ids)), margin), bad) {
-            action = edit("margin", json!(m));
         }
     });
     if let [u] = units {
@@ -716,21 +737,22 @@ mod hvac_tests {
     }
 
     #[test]
-    fn a_selected_unit_takes_the_margin_typed_in_the_palette() {
+    fn a_selected_zone_takes_the_height_and_altitude_typed_in_the_palette() {
         let mut app = CadApp::new(Session::new(), Services::default());
         *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
-        let r = app.run("ahuadd", json!({ "at": [0, 0], "voidHeight": 350 })).unwrap();
+        let r = app
+            .run("zoneadd", json!({ "points": [[0, 0], [3000, 0], [3000, 600], [0, 600]], "voidHeight": 250, "altitude": 2.45, "name": "Poutre" }))
+            .unwrap();
         let h = cadcraft_doc::Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
         app.session.set_selection(vec![h]);
         let mut hn = palette(app);
-        // The height available shows its value, and the margin 100 mm by default.
-        assert!(hn.get_all_by_value("350").next().is_some());
-        type_into(&mut hn, "100", "60");
-        let a = cadcraft_doc::ahu_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
-        assert_eq!((a.margin_mm, a.void_height_mm), (60.0, Some(350.0)));
-        // A height typed gives the unit's ducts room: 350 becomes 400.
-        type_into(&mut hn, "350", "400");
-        let a = cadcraft_doc::ahu_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
-        assert_eq!(a.void_height_mm, Some(400.0));
+        assert!(hn.get_all_by_value("Poutre").next().is_some());
+        type_into(&mut hn, "250", "300");
+        let z = cadcraft_doc::zone_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!((z.void_height_mm, z.bottom_mm), (300.0, Some(2450.0)));
+        // The altitude is shown in metres.
+        type_into(&mut hn, "2.45", "2.7");
+        let z = cadcraft_doc::zone_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!(z.bottom_mm, Some(2700.0));
     }
 }
