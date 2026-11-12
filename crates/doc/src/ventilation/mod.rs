@@ -38,6 +38,9 @@ const LABEL_HEIGHT_MM: (f64, f64) = (1.0, 10_000.0);
 /// The layers of supply and extract arrows: blue and magenta, as a plan shows the two air flows.
 pub const AIR_SUPPLY_LAYER: &str = "M-HVAC-SUPPLY";
 pub const AIR_EXTRACT_LAYER: &str = "M-HVAC-EXTRACT";
+/// The layers of fresh air (air neuf) and exhaust air (rejet) arrows: green and orange.
+pub const AIR_FRESH_LAYER: &str = "M-HVAC-FRESH";
+pub const AIR_EXHAUST_LAYER: &str = "M-HVAC-EXHAUST";
 
 /// The colour a ventilation layer is created with, when it has one of its own: a bright blue and
 /// pink, readable on a dark background as on white paper.
@@ -46,6 +49,8 @@ fn hvac_layer_color(name: &str) -> Option<cadcraft_color::Color> {
     match name {
         AIR_SUPPLY_LAYER | DUCT_LAYER => Some(Color::True(Rgb(0x1e, 0x90, 0xff))),
         AIR_EXTRACT_LAYER | DUCT_EXTRACT_LAYER => Some(Color::True(Rgb(0xff, 0x4d, 0xb8))),
+        AIR_FRESH_LAYER | DUCT_FRESH_LAYER => Some(Color::True(Rgb(0x3c, 0xc8, 0x64))),
+        AIR_EXHAUST_LAYER | DUCT_EXHAUST_LAYER => Some(Color::True(Rgb(0xff, 0x9a, 0x1e))),
         ZONE_LAYER => Some(Color::True(Rgb(0x2e, 0xb8, 0xa6))),
         _ => None,
     }

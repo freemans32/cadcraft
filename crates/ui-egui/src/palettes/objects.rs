@@ -331,6 +331,7 @@ fn space_section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], spaces: &[Space
 // =====================================================================================
 
 const KINDS: &[(&str, &str)] = &[
+    ("louvre", "Louvre"),
     ("squareCeiling", "Square ceiling diffuser"),
     ("round", "Round diffuser"),
     ("rectangular", "Rectangular grille"),
@@ -370,8 +371,14 @@ fn terminal_section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], ts: &[Termin
     });
     let air = shared(&ts.iter().map(|t| t.air).collect::<Vec<_>>());
     prop_row(ui, "Air", |ui| {
-        let shown = air.map_or(VARIES, |a| if a == AirDirection::Supply { "Supply" } else { "Extract" });
-        if let Some(a) = choice(ui, shown, &[("supply", "Supply"), ("extract", "Extract")]) {
+        let shown = air.map_or(VARIES, |a| match a {
+            AirDirection::Supply => "Supply",
+            AirDirection::Extract => "Extract",
+            AirDirection::Fresh => "Fresh air",
+            AirDirection::Exhaust => "Exhaust air",
+        });
+        let items = [("supply", "Supply"), ("extract", "Extract"), ("fresh", "Fresh air"), ("exhaust", "Exhaust air")];
+        if let Some(a) = choice(ui, shown, &items) {
             action = edit("air", json!(a));
         }
     });
@@ -533,6 +540,23 @@ fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams]) -> Action
         };
         prop_row(ui, "Supply", |ui| read_only(ui, &flows(u.flow_m3h, u.pressure_pa)));
         prop_row(ui, "Extract", |ui| read_only(ui, &flows(u.extract_flow_m3h, u.extract_pressure_pa)));
+        // The direction of the air at each collar: the ducts that start there take it.
+        let roles = u.roles();
+        let items = [("supply", "Supply"), ("extract", "Extract"), ("fresh", "Fresh air"), ("exhaust", "Exhaust air")];
+        for (k, name) in u.kind.port_names().iter().enumerate() {
+            let Some(role) = roles.get(k).copied() else { continue };
+            prop_row(ui, name, |ui| {
+                if let Some(c) = choice(ui, items.iter().find(|i| AirDirection::parse(i.0) == Some(role)).map_or("", |i| i.1), &items)
+                    && let Some(new) = AirDirection::parse(c)
+                {
+                    let mut next = roles.clone();
+                    if let Some(slot) = next.get_mut(k) {
+                        *slot = new;
+                    }
+                    action = edit("ports", json!(next.iter().map(|r| r.name()).collect::<Vec<_>>()));
+                }
+            });
+        }
     }
     action
 }
@@ -621,8 +645,11 @@ fn duct_section(ui: &mut egui::Ui, sel: &[Handle], ds: &[DuctParams], len: &dyn 
             (false, _) => "Auto",
             (true, AirDirection::Supply) => "Supply",
             (true, AirDirection::Extract) => "Extract",
+            (true, AirDirection::Fresh) => "Fresh air",
+            (true, AirDirection::Exhaust) => "Exhaust air",
         });
-        if let Some(a) = choice(ui, shown, &[("auto", "Auto"), ("supply", "Supply"), ("extract", "Extract")]) {
+        let items = [("auto", "Auto"), ("supply", "Supply"), ("extract", "Extract"), ("fresh", "Fresh air"), ("exhaust", "Exhaust air")];
+        if let Some(a) = choice(ui, shown, &items) {
             action = edit("air", json!(a));
         }
     });

@@ -18,6 +18,9 @@ pub const DUCT_APP: &str = "CADCRAFT_DUCT";
 /// The layer of the supply ducts, and of the extract ducts.
 pub const DUCT_LAYER: &str = "M-HVAC-DUCT-SUP";
 pub const DUCT_EXTRACT_LAYER: &str = "M-HVAC-DUCT-EXTR";
+/// The layers of the fresh air (air neuf) and the exhaust air (rejet) ducts.
+pub const DUCT_FRESH_LAYER: &str = "M-HVAC-DUCT-FRESH";
+pub const DUCT_EXHAUST_LAYER: &str = "M-HVAC-DUCT-EXH";
 /// Largest side of a unit, mm.
 pub const MAX_AHU_SIZE_MM: f64 = 50_000.0;
 /// Smallest and largest duct diameter, mm.
@@ -81,6 +84,27 @@ impl AhuKind {
         }
     }
 
+    /// The names of its connections, in the order [`AhuParams::ports`] lists them.
+    pub fn port_names(self) -> &'static [&'static str] {
+        match self {
+            AhuKind::DoubleFlow => &["Left top", "Left bottom", "Right top", "Right bottom"],
+            AhuKind::SupplyUnit | AhuKind::ExtractUnit => &["Left", "Right"],
+            AhuKind::VmcBox => &["Left", "Right", "Top left", "Top right"],
+        }
+    }
+
+    /// The direction of the air at each connection by default: a double-flux unit takes fresh air in
+    /// and rejects exhaust on its left and supplies and extracts on its right.
+    pub fn default_ports(self) -> Vec<AirDirection> {
+        use AirDirection::{Exhaust, Extract, Fresh, Supply};
+        match self {
+            AhuKind::DoubleFlow => vec![Fresh, Exhaust, Supply, Extract],
+            AhuKind::SupplyUnit => vec![Fresh, Supply],
+            AhuKind::ExtractUnit => vec![Extract, Exhaust],
+            AhuKind::VmcBox => vec![Fresh, Exhaust, Supply, Extract],
+        }
+    }
+
     /// Width and depth a new unit of the kind starts with, mm.
     pub fn default_size_mm(self) -> (f64, f64) {
         match self {
@@ -99,6 +123,11 @@ pub struct AhuParams {
     pub name: String,
     #[serde(default)]
     pub kind: AhuKind,
+    /// The direction of the air at each connection, in the order of [`AhuKind::port_names`]; empty:
+    /// the kind's own ([`AhuKind::default_ports`]). A duct that starts at a connection takes its
+    /// direction, so the four ducts of a double-flux unit need no telling.
+    #[serde(default)]
+    pub ports: Vec<AirDirection>,
     pub width_mm: f64,
     pub depth_mm: f64,
     /// The supply flow the network asks of the unit, m³/h, once the network is sized. A unit is
@@ -113,6 +142,15 @@ pub struct AhuParams {
     pub extract_flow_m3h: Option<f64>,
     #[serde(default)]
     pub extract_pressure_pa: Option<f64>,
+    /// And for the fresh air (air neuf) coming in and the exhaust air (rejet) going out.
+    #[serde(default)]
+    pub fresh_flow_m3h: Option<f64>,
+    #[serde(default)]
+    pub fresh_pressure_pa: Option<f64>,
+    #[serde(default)]
+    pub exhaust_flow_m3h: Option<f64>,
+    #[serde(default)]
+    pub exhaust_pressure_pa: Option<f64>,
     #[serde(default = "default_label_mm")]
     pub label_height_mm: f64,
     #[serde(default)]
@@ -120,15 +158,104 @@ pub struct AhuParams {
 }
 
 impl AhuParams {
+    /// The direction of the air at each connection: the ones set, else the kind's.
+    pub fn roles(&self) -> Vec<AirDirection> {
+        if self.ports.len() == self.kind.default_ports().len() { self.ports.clone() } else { self.kind.default_ports() }
+    }
+
+    /// Where each connection ends, in the block's coordinates, and the direction it points out of
+    /// the unit, in the order of [`AhuKind::port_names`].
+    pub fn port_tips(&self) -> Vec<(Vec2, Vec2)> {
+        let half = self.half();
+        let (hx, hy) = (half.x, half.y);
+        let stick = 0.13 * hy.min(hx);
+        let (l, r, t) = (Vec2::new(-1.0, 0.0), Vec2::new(1.0, 0.0), Vec2::new(0.0, 1.0));
+        match self.kind {
+            AhuKind::DoubleFlow => vec![
+                (Vec2::new(-hx - stick, 0.5 * hy), l),
+                (Vec2::new(-hx - stick, -0.5 * hy), l),
+                (Vec2::new(hx + stick, 0.5 * hy), r),
+                (Vec2::new(hx + stick, -0.5 * hy), r),
+            ],
+            AhuKind::SupplyUnit | AhuKind::ExtractUnit => vec![(Vec2::new(-hx - stick, 0.0), l), (Vec2::new(hx + stick, 0.0), r)],
+            AhuKind::VmcBox => {
+                vec![
+                    (Vec2::new(-hx - stick, 0.0), l),
+                    (Vec2::new(hx + stick, 0.0), r),
+                    (Vec2::new(-0.5 * hx, hy + stick), t),
+                    (Vec2::new(0.5 * hx, hy + stick), t),
+                ]
+            }
+        }
+    }
+
+    /// An arrow and a tag at each connection: air coming in (fresh air, extract) points at the unit,
+    /// air going out (supply, exhaust) away from it, each on the layer and in the colour of its direction.
+    fn port_marks(&self, label_height: f64) -> Vec<HvacPiece> {
+        let half = self.half();
+        let len = 0.45 * half.y.min(half.x);
+        let gap = 0.1 * half.y.min(half.x);
+        let mut v = Vec::new();
+        for ((tip, normal), role) in self.port_tips().into_iter().zip(self.roles()) {
+            let layer = match role {
+                AirDirection::Supply => super::AIR_SUPPLY_LAYER,
+                AirDirection::Extract => super::AIR_EXTRACT_LAYER,
+                AirDirection::Fresh => super::AIR_FRESH_LAYER,
+                AirDirection::Exhaust => super::AIR_EXHAUST_LAYER,
+            };
+            let from = tip + normal * gap;
+            let to = from + normal * len;
+            let line = |a: Vec2, b: Vec2| HvacPiece { layer, kind: EntityKind::Line(Line { a: v3(a), b: v3(b) }) };
+            // The head at the far end for air going out, at the unit's end for air coming in.
+            let (head_at, back) = if role.leaves_the_unit() { (to, -normal) } else { (from, normal) };
+            let head = len * 0.3;
+            let side = normal.perp() * (head * 0.6);
+            v.extend([line(from, to), line(head_at, head_at + back * head + side), line(head_at, head_at + back * head - side)]);
+            v.push(HvacPiece { layer, kind: label(to + normal * (1.2 * label_height), label_height * 0.8, role.tag().into()) });
+        }
+        v
+    }
+
+    /// The flow and the pressure sized for a direction, if it has been.
+    pub fn figures(&self, air: AirDirection) -> (Option<f64>, Option<f64>) {
+        match air {
+            AirDirection::Supply => (self.flow_m3h, self.pressure_pa),
+            AirDirection::Extract => (self.extract_flow_m3h, self.extract_pressure_pa),
+            AirDirection::Fresh => (self.fresh_flow_m3h, self.fresh_pressure_pa),
+            AirDirection::Exhaust => (self.exhaust_flow_m3h, self.exhaust_pressure_pa),
+        }
+    }
+
+    /// Keeps the flow and the pressure sized for a direction.
+    pub fn set_figures(&mut self, air: AirDirection, flow: f64, pressure: f64) {
+        let (f, p) = (Some(flow), Some(pressure));
+        match air {
+            AirDirection::Supply => (self.flow_m3h, self.pressure_pa) = (f, p),
+            AirDirection::Extract => (self.extract_flow_m3h, self.extract_pressure_pa) = (f, p),
+            AirDirection::Fresh => (self.fresh_flow_m3h, self.fresh_pressure_pa) = (f, p),
+            AirDirection::Exhaust => (self.exhaust_flow_m3h, self.exhaust_pressure_pa) = (f, p),
+        }
+    }
+
     pub fn validate(&self) -> Result<()> {
         check_name("unit", &self.name)?;
+        if !(self.ports.is_empty() || self.ports.len() == self.kind.default_ports().len()) {
+            return Err(invalid(format!("A {} has {} connections.", self.kind.code(), self.kind.default_ports().len())));
+        }
         check_label_height(self.label_height_mm)?;
         self.units.validate()?;
         let size = |v: f64| v.is_finite() && v > 0.0 && v <= MAX_AHU_SIZE_MM;
         if !size(self.width_mm) || !size(self.depth_mm) {
             return Err(invalid(format!("A unit's sizes are more than 0 and at most {MAX_AHU_SIZE_MM} mm.")));
         }
-        for v in [self.flow_m3h, self.pressure_pa, self.extract_flow_m3h, self.extract_pressure_pa].into_iter().flatten() {
+        for v in AirDirection::ALL
+            .into_iter()
+            .flat_map(|a| {
+                let (f, p) = self.figures(a);
+                [f, p]
+            })
+            .flatten()
+        {
             if !(v.is_finite() && (0.0..=1e9).contains(&v)) {
                 return Err(invalid("A unit's flow and pressure are 0 or more."));
             }
@@ -146,18 +273,19 @@ impl AhuParams {
         self.validate()?;
         let half = self.half();
         let h = self.units.to_units(self.label_height_mm);
+        // The name and, for each direction sized, its flow and pressure: "S 1200 / E 1100 m³/h ...".
+        // One prefix per direction tells them apart when there are several.
         let mut text = self.name.clone();
-        // Supply first, extract after; one prefix tells them apart when both are known.
-        let flows = [("S", self.flow_m3h), ("E", self.extract_flow_m3h)];
-        let both = flows.iter().all(|(_, f)| f.is_some());
-        let part = |tag: &str, v: Option<f64>, unit: &str| v.map(|v| if both { format!("{tag} {v:.0}{unit}") } else { format!("{v:.0}{unit}") });
-        let flow: Vec<String> = [part("S", self.flow_m3h, ""), part("E", self.extract_flow_m3h, "")].into_iter().flatten().collect();
-        if !flow.is_empty() {
-            text.push_str(&format!(" {} m³/h", flow.join(" / ")));
-        }
-        let pa: Vec<String> = [part("S", self.pressure_pa, ""), part("E", self.extract_pressure_pa, "")].into_iter().flatten().collect();
-        if !pa.is_empty() {
-            text.push_str(&format!(" {} Pa", pa.join(" / ")));
+        let known: Vec<(AirDirection, f64, Option<f64>)> =
+            AirDirection::ALL.into_iter().filter_map(|a| self.figures(a).0.map(|f| (a, f, self.figures(a).1))).collect();
+        let tagged = |a: AirDirection, v: f64| if known.len() > 1 { format!("{} {v:.0}", a.tag()) } else { format!("{v:.0}") };
+        if !known.is_empty() {
+            let flows: Vec<String> = known.iter().map(|(a, f, _)| tagged(*a, *f)).collect();
+            text.push_str(&format!(" {} m³/h", flows.join(" / ")));
+            let pressures: Vec<String> = known.iter().filter_map(|(a, _, p)| p.map(|p| tagged(*a, p))).collect();
+            if !pressures.is_empty() {
+                text.push_str(&format!(" {} Pa", pressures.join(" / ")));
+            }
         }
         let mut pieces = self.body(half);
         // The kind's code inside the first compartment, at the top (above a box, which has no room);
@@ -169,6 +297,7 @@ impl AhuParams {
         };
         pieces.push(HvacPiece { layer: AHU_LAYER, kind: label(code_at, h, self.kind.code().into()) });
         pieces.push(HvacPiece { layer: AHU_LAYER, kind: label(Vec2::new(0.0, -half.y - 1.2 * h), h, text) });
+        pieces.extend(self.port_marks(h));
         Ok(pieces)
     }
 
@@ -354,6 +483,10 @@ pub struct DuctParams {
     /// The air velocity in the run, m/s, once the network is sized.
     #[serde(default)]
     pub velocity: Option<f64>,
+    /// Which way the air runs in the run, set by sizing: along the block's x axis (`true`) or against
+    /// it. Drawn as an arrow on the run; `None` until the network is sized.
+    #[serde(default)]
+    pub flow_forward: Option<bool>,
     /// The altitude of the run's underside, mm, when a height zone it runs in gives one: written on its label.
     #[serde(default)]
     pub bottom_mm: Option<f64>,
@@ -491,6 +624,8 @@ impl DuctParams {
         match self.air {
             AirDirection::Supply => DUCT_LAYER,
             AirDirection::Extract => DUCT_EXTRACT_LAYER,
+            AirDirection::Fresh => DUCT_FRESH_LAYER,
+            AirDirection::Exhaust => DUCT_EXHAUST_LAYER,
         }
     }
 
@@ -541,6 +676,19 @@ impl DuctParams {
         }
         if let Some(e) = self.elbow {
             pieces.extend(self.elbow_pieces(e, r, layer));
+        }
+        // An arrow a quarter of the way along, the way the air runs.
+        if let Some(forward) = self.flow_forward {
+            let len = (1.6 * r).min(0.15 * (x1 - x0));
+            if len > 0.0 {
+                let at = x0 + 0.25 * (x1 - x0);
+                let dir = Vec2::new(if forward { 1.0 } else { -1.0 }, 0.0);
+                let (tail, tip) = (Vec2::new(at, 0.0) - dir * (len / 2.0), Vec2::new(at, 0.0) + dir * (len / 2.0));
+                let head = len * 0.35;
+                let side = dir.perp() * (head * 0.6);
+                let l = |a: Vec2, b: Vec2| HvacPiece { layer, kind: EntityKind::Line(Line { a: v3(a), b: v3(b) }) };
+                pieces.extend([l(tail, tip), l(tip, tip - dir * head + side), l(tip, tip - dir * head - side)]);
+            }
         }
         // A line across where the cone meets the straight run.
         if let Some((_, len, at_end)) = cone {

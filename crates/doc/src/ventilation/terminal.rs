@@ -6,7 +6,10 @@ use std::f64::consts::FRAC_1_SQRT_2;
 use cadcraft_geom::{PolyVertex, Vec2};
 use serde::{Deserialize, Serialize};
 
-use super::{AIR_EXTRACT_LAYER, AIR_SUPPLY_LAYER, HvacPiece, HvacUnits, check_label_height, check_name, invalid, label, v3, xdata};
+use super::{
+    AIR_EXHAUST_LAYER, AIR_EXTRACT_LAYER, AIR_FRESH_LAYER, AIR_SUPPLY_LAYER, HvacPiece, HvacUnits, check_label_height, check_name, invalid, label,
+    v3, xdata,
+};
 use crate::{Circle, EntityKind, Line, LwPolyline, RawTag, Result};
 
 /// The registered application name of an air terminal's extended data.
@@ -35,11 +38,20 @@ pub enum TerminalKind {
     Linear,
     /// A round extract valve.
     Extract,
+    /// A weather louvre or hood on the outside of the building: where fresh air comes in and
+    /// exhaust air goes out.
+    Louvre,
 }
 
 impl TerminalKind {
-    pub const ALL: [TerminalKind; 5] =
-        [TerminalKind::SquareCeiling, TerminalKind::Round, TerminalKind::Rectangular, TerminalKind::Linear, TerminalKind::Extract];
+    pub const ALL: [TerminalKind; 6] = [
+        TerminalKind::SquareCeiling,
+        TerminalKind::Round,
+        TerminalKind::Rectangular,
+        TerminalKind::Linear,
+        TerminalKind::Extract,
+        TerminalKind::Louvre,
+    ];
 
     /// The name commands take.
     pub fn name(self) -> &'static str {
@@ -49,6 +61,7 @@ impl TerminalKind {
             TerminalKind::Rectangular => "rectangular",
             TerminalKind::Linear => "linear",
             TerminalKind::Extract => "extract",
+            TerminalKind::Louvre => "louvre",
         }
     }
 
@@ -65,6 +78,7 @@ impl TerminalKind {
             TerminalKind::Rectangular => "Grille",
             TerminalKind::Linear => "Linear",
             TerminalKind::Extract => "Extract",
+            TerminalKind::Louvre => "Louvre",
         }
     }
 }
@@ -109,20 +123,30 @@ impl TerminalModel {
     }
 }
 
-/// Which way the air goes through a terminal.
+/// Which way the air goes through a terminal or a duct: into a room (supply), out of it (extract),
+/// in from outdoors to the unit (fresh air) or out from the unit to outdoors (exhaust). A
+/// double-flux unit has all four.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AirDirection {
     #[default]
     Supply,
     Extract,
+    /// Fresh air (air neuf): from outdoors to the unit.
+    Fresh,
+    /// Exhaust air (rejet): from the unit to outdoors.
+    Exhaust,
 }
 
 impl AirDirection {
+    pub const ALL: [AirDirection; 4] = [AirDirection::Supply, AirDirection::Extract, AirDirection::Fresh, AirDirection::Exhaust];
+
     pub fn parse(text: &str) -> Option<AirDirection> {
         match text.trim().to_ascii_lowercase().as_str() {
-            "supply" | "s" => Some(AirDirection::Supply),
-            "extract" | "return" | "e" | "r" => Some(AirDirection::Extract),
+            "supply" | "s" | "soufflage" => Some(AirDirection::Supply),
+            "extract" | "return" | "e" | "r" | "reprise" => Some(AirDirection::Extract),
+            "fresh" | "freshair" | "intake" | "an" | "airneuf" | "air neuf" => Some(AirDirection::Fresh),
+            "exhaust" | "x" | "rejet" => Some(AirDirection::Exhaust),
             _ => None,
         }
     }
@@ -130,6 +154,24 @@ impl AirDirection {
         match self {
             AirDirection::Supply => "supply",
             AirDirection::Extract => "extract",
+            AirDirection::Fresh => "fresh",
+            AirDirection::Exhaust => "exhaust",
+        }
+    }
+
+    /// Whether the air leaves the unit (supply and exhaust) rather than coming to it (extract and
+    /// fresh air): the way it runs in a duct, and out of or into a terminal's face.
+    pub fn leaves_the_unit(self) -> bool {
+        matches!(self, AirDirection::Supply | AirDirection::Exhaust)
+    }
+
+    /// The short tag a unit's label writes before its figures.
+    pub fn tag(self) -> &'static str {
+        match self {
+            AirDirection::Supply => "S",
+            AirDirection::Extract => "E",
+            AirDirection::Fresh => "AN",
+            AirDirection::Exhaust => "R",
         }
     }
 }
@@ -179,6 +221,8 @@ fn air_layer(air: AirDirection) -> &'static str {
     match air {
         AirDirection::Supply => AIR_SUPPLY_LAYER,
         AirDirection::Extract => AIR_EXTRACT_LAYER,
+        AirDirection::Fresh => AIR_FRESH_LAYER,
+        AirDirection::Exhaust => AIR_EXHAUST_LAYER,
     }
 }
 
@@ -186,10 +230,8 @@ fn air_layer(air: AirDirection) -> &'static str {
 /// at the far end; extract air comes back to it, so the head is at `from`.
 fn arrow_at(from: Vec2, dir: Vec2, len: f64, air: AirDirection) -> Vec<HvacPiece> {
     let to = from + dir * len;
-    let (tip, toward_tail) = match air {
-        AirDirection::Supply => (to, -dir),
-        AirDirection::Extract => (from, dir),
-    };
+    // Air leaving the face has its head at the far end; air coming to it, at the face.
+    let (tip, toward_tail) = if air.leaves_the_unit() { (to, -dir) } else { (from, dir) };
     let head = len * 0.35;
     let side = dir.perp() * (head * 0.6);
     let l = |a: Vec2, b: Vec2| HvacPiece { layer: air_layer(air), kind: EntityKind::Line(Line { a: v3(a), b: v3(b) }) };
@@ -224,7 +266,7 @@ impl TerminalParams {
         let m = &self.model;
         let depth = match m.kind {
             TerminalKind::SquareCeiling | TerminalKind::Round | TerminalKind::Extract => m.width_mm,
-            TerminalKind::Rectangular | TerminalKind::Linear => m.depth_mm,
+            TerminalKind::Rectangular | TerminalKind::Linear | TerminalKind::Louvre => m.depth_mm,
         };
         Vec2::new(self.units.to_units(m.width_mm) / 2.0, self.units.to_units(depth) / 2.0)
     }
@@ -259,6 +301,16 @@ impl TerminalParams {
                 let mut v = vec![rect(half)];
                 for k in [-0.5, 0.0, 0.5] {
                     v.push(line(Vec2::new(-half.x * 0.9, half.y * k), Vec2::new(half.x * 0.9, half.y * k)));
+                }
+                v.extend(arrow_at(Vec2::new(0.0, half.y), Vec2::new(0.0, 1.0), half.y.max(half.x * 0.25), self.air));
+                v
+            }
+            TerminalKind::Louvre => {
+                // A weather louvre: the frame, five slats slanted across it, and one arrow.
+                let mut v = vec![rect(half)];
+                for k in [-0.6, -0.3, 0.0, 0.3, 0.6] {
+                    let y = half.y * k;
+                    v.push(line(Vec2::new(-half.x * 0.9, y - half.y * 0.08), Vec2::new(half.x * 0.9, y + half.y * 0.08)));
                 }
                 v.extend(arrow_at(Vec2::new(0.0, half.y), Vec2::new(0.0, 1.0), half.y.max(half.x * 0.25), self.air));
                 v

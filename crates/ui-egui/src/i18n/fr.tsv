@@ -1115,6 +1115,12 @@
 	Edit Duct	Modifier la gaine
 	Size Ducts	Dimensionner les gaines
 	Connect Terminals	Raccorder les bouches
+	Unbalanced unit: {a} {fa} m³/h against {b} {fb} m³/h	Centrale déséquilibrée : {a} {fa} m³/h contre {b} {fb} m³/h
+	Fresh air louvre	Grille d'air neuf
+	Exhaust louvre	Grille de rejet
+	Fresh air	Air neuf
+	Exhaust air	Rejet
+	Louvre	Grille extérieure
 	Openings	Ouvertures
 	Opening	Ouverture
 	Door	Porte
@@ -1226,3 +1232,9 @@
 	Select air terminals	Sélectionnez des bouches
 	Wall Junctions	Jonctions de murs
 	Walls joined: {n} redrawn	Murs raccordés : {n} redessinés
+	Left top	Gauche haut
+	Left bottom	Gauche bas
+	Right top	Droite haut
+	Right bottom	Droite bas
+	Top left	Haut gauche
+	Top right	Haut droite

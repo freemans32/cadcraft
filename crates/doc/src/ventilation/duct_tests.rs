@@ -8,12 +8,17 @@ fn ahu() -> AhuParams {
     AhuParams {
         name: "CTA1".into(),
         kind: AhuKind::DoubleFlow,
+        ports: vec![],
         width_mm: 1000.0,
         depth_mm: 600.0,
         flow_m3h: None,
         pressure_pa: None,
         extract_flow_m3h: None,
         extract_pressure_pa: None,
+        fresh_flow_m3h: None,
+        fresh_pressure_pa: None,
+        exhaust_flow_m3h: None,
+        exhaust_pressure_pa: None,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     }
@@ -37,6 +42,7 @@ fn duct(diameter_mm: f64) -> DuctParams {
         elbow: None,
         trim_start_mm: 0.0,
         trim_end_mm: 0.0,
+        flow_forward: None,
         bottom_mm: None,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
@@ -387,9 +393,9 @@ fn each_network_gives_its_flow_to_the_unit_and_the_label_shows_both() {
     let unit = d.model.iter().find_map(|e| ahu_of(e)).unwrap();
     assert_eq!((unit.flow_m3h, unit.extract_flow_m3h), (Some(300.0), Some(250.0)));
     assert!(unit.pressure_pa.is_some() && unit.extract_pressure_pa.is_some());
-    // The label with the figures is the last text (the unit's code comes first).
+    // The label with the figures is the second text (the unit's code comes first, the collars' tags last).
     let text =
-        unit.generate().unwrap().into_iter().filter_map(|p| if let EntityKind::Text(t) = p.kind { Some(t.value) } else { None }).next_back().unwrap();
+        unit.generate().unwrap().into_iter().filter_map(|p| if let EntityKind::Text(t) = p.kind { Some(t.value) } else { None }).nth(1).unwrap();
     assert!(text.contains("S 300 / E 250 m³/h"), "{text}");
 }
 
@@ -447,7 +453,9 @@ fn a_duct_ending_on_the_face_of_a_turned_terminal_reaches_it() {
 #[test]
 fn ducts_left_on_auto_take_the_direction_of_the_terminals_they_serve() {
     let mut d = Drawing::new_metric();
-    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    // A collar names its direction; a unit whose collars say nothing useful leaves it to the terminals.
+    let unit = AhuParams { ports: vec![AirDirection::Extract; 4], ..ahu() };
+    d.add_ahu(&Space::Model, Common::default(), &unit, Vec2::ZERO, 0.0).unwrap();
     add_duct(&mut d, (500.0, 0.0), (4000.0, 0.0));
     let t = extract_terminal(&mut d, (4000.0, 0.0), 250.0);
     let net = d.duct_networks().unwrap().remove(0);
@@ -462,12 +470,12 @@ fn ducts_left_on_auto_take_the_direction_of_the_terminals_they_serve() {
     assert_eq!(d.entity(duct.0).unwrap().common.layer, DUCT_EXTRACT_LAYER);
     assert_eq!(ahu_of(d.model.iter().find(|e| ahu_of(e).is_some()).unwrap()).unwrap().extract_flow_m3h, Some(250.0));
     let _ = t;
-    // Moving the terminal to a supply one and reading again flips it back.
+    // The collar names the direction: a terminal that says otherwise does not turn the network round.
     let (mut tp, ..) = (air_terminal_of(d.model.iter().find(|e| air_terminal_of(e).is_some()).unwrap()).unwrap(), 0);
     tp.air = AirDirection::Supply;
     let h = d.model.iter().find(|e| air_terminal_of(e).is_some()).unwrap().handle;
     d.regenerate_air_terminal(h, &tp).unwrap();
-    assert_eq!(d.duct_networks().unwrap()[0].air, AirDirection::Supply);
+    assert_eq!(d.duct_networks().unwrap()[0].air, AirDirection::Extract);
 }
 
 #[test]
@@ -847,7 +855,7 @@ fn each_kind_of_unit_is_drawn_with_its_own_parts_and_collars() {
     for (kind, polylines, fans) in expect {
         let pieces = unit_of(kind).generate().unwrap();
         assert_eq!((polys(&pieces), circles(&pieces)), (polylines, fans), "{kind:?}");
-        assert!(pieces.iter().all(|p| p.layer == AHU_LAYER));
+        assert!(pieces.iter().filter(|p| p.layer == AHU_LAYER).count() > 0);
         assert!(text_of(&pieces).value.starts_with(kind.code()), "the code is written on the unit: {kind:?}");
     }
     // Each kind starts at its own size, and the parse takes the names a command gives and the French ones.
@@ -880,10 +888,191 @@ fn every_kind_of_unit_feeds_a_network_the_same_way() {
     for kind in AhuKind::ALL {
         let mut d = Drawing::new_metric();
         let (w, _) = kind.default_size_mm();
-        d.add_ahu(&Space::Model, Common::default(), &unit_of(kind), Vec2::ZERO, 0.0).unwrap();
+        // Every collar supplies, so the duct and its supply terminal agree whichever side the kind puts it on.
+        let unit = AhuParams { ports: vec![AirDirection::Supply; kind.default_ports().len()], ..unit_of(kind) };
+        d.add_ahu(&Space::Model, Common::default(), &unit, Vec2::ZERO, 0.0).unwrap();
         add_duct(&mut d, (w / 2.0 + 150.0, 0.0), (w / 2.0 + 3000.0, 0.0));
         add_terminal(&mut d, (w / 2.0 + 3000.0, 0.0), 150.0);
         let net = d.duct_networks().unwrap().remove(0);
         assert_eq!(net.network.segments.len(), 1, "{kind:?}: a duct starting 150 mm off its face is connected");
     }
+}
+
+fn louvre(d: &mut Drawing, at: (f64, f64), flow: f64, air: AirDirection) -> Handle {
+    let model = standard_air_terminal_models().into_iter().find(|m| m.name == "LV600x400").unwrap();
+    let t = TerminalParams { model, flow_m3h: flow, air, label_height_mm: 100.0, units: HvacUnits::default() };
+    d.add_air_terminal(&Space::Model, Common::default(), &t, Vec2::new(at.0, at.1), 0.0).unwrap()
+}
+
+/// A double-flux unit with its four connections, each a duct to the terminal of its own direction:
+/// supply and extract above and below its right side, fresh air and exhaust on its left.
+fn four_connections() -> Drawing {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &unit_of(AhuKind::DoubleFlow), Vec2::ZERO, 0.0).unwrap();
+    // The unit is 2000 x 1000: its right face is at x = 1000, its left at x = -1000.
+    add_duct(&mut d, (1100.0, 250.0), (5000.0, 250.0));
+    add_terminal(&mut d, (5000.0, 250.0), 300.0);
+    add_duct(&mut d, (5000.0, -250.0), (1100.0, -250.0));
+    extract_terminal(&mut d, (5000.0, -250.0), 280.0);
+    add_duct(&mut d, (-5000.0, 250.0), (-1100.0, 250.0));
+    louvre(&mut d, (-5000.0, 250.0), 300.0, AirDirection::Fresh);
+    add_duct(&mut d, (-1100.0, -250.0), (-5000.0, -250.0));
+    louvre(&mut d, (-5000.0, -250.0), 280.0, AirDirection::Exhaust);
+    d
+}
+
+#[test]
+fn a_double_flux_unit_has_four_networks_supply_extract_fresh_air_and_exhaust() {
+    let d = four_connections();
+    let nets = d.duct_networks().unwrap();
+    assert_eq!(
+        nets.iter().map(|n| n.air).collect::<Vec<_>>(),
+        [AirDirection::Supply, AirDirection::Extract, AirDirection::Fresh, AirDirection::Exhaust]
+    );
+    assert!(nets.iter().all(|n| n.network.segments.len() == 1 && n.unconnected.is_empty() && n.dangling.is_empty()), "{nets:?}");
+    let flows: Vec<_> = nets.iter().map(|n| n.network.segments[0].terminal.map(|t| t.flow_m3h)).collect();
+    assert_eq!(flows, [Some(300.0), Some(280.0), Some(300.0), Some(280.0)]);
+}
+
+#[test]
+fn each_direction_gives_its_flow_to_the_unit_and_the_label_names_the_four() {
+    let mut d = four_connections();
+    for net in d.duct_networks().unwrap() {
+        let report = size_network(&net.network, &DesignCriteria::default()).unwrap();
+        d.apply_duct_report(&net, &report).unwrap();
+    }
+    let unit = d.model.iter().find_map(|e| ahu_of(e)).unwrap();
+    assert_eq!(
+        (unit.flow_m3h, unit.extract_flow_m3h, unit.fresh_flow_m3h, unit.exhaust_flow_m3h),
+        (Some(300.0), Some(280.0), Some(300.0), Some(280.0))
+    );
+    let text = text_of(&unit.generate().unwrap()).value;
+    let all: String = unit
+        .generate()
+        .unwrap()
+        .into_iter()
+        .filter_map(|p| if let EntityKind::Text(t) = p.kind { Some(t.value) } else { None })
+        .collect::<Vec<_>>()
+        .join("|");
+    assert!(all.contains("S 300 / E 280 / AN 300 / R 280 m³/h"), "{all} ({text})");
+    // The ducts took the layer and colour of their direction.
+    let layers: Vec<String> = d.model.iter().filter(|e| duct_of(e).is_some()).map(|e| e.common.layer.clone()).collect();
+    for want in [DUCT_LAYER, DUCT_EXTRACT_LAYER, DUCT_FRESH_LAYER, DUCT_EXHAUST_LAYER] {
+        assert!(layers.iter().any(|l| l == want), "{want}: {layers:?}");
+    }
+    use cadcraft_color::{Color, Rgb};
+    assert_eq!(d.layer(DUCT_FRESH_LAYER).map(|l| l.color), Some(Color::True(Rgb(0x3c, 0xc8, 0x64))));
+    assert_eq!(d.layer(DUCT_EXHAUST_LAYER).map(|l| l.color), Some(Color::True(Rgb(0xff, 0x9a, 0x1e))));
+}
+
+#[test]
+fn an_arrow_on_each_duct_shows_the_way_the_air_runs() {
+    let mut d = four_connections();
+    for net in d.duct_networks().unwrap() {
+        let report = size_network(&net.network, &DesignCriteria::default()).unwrap();
+        d.apply_duct_report(&net, &report).unwrap();
+    }
+    // The ducts were drawn: supply from the unit out; extract from its terminal in; fresh from its
+    // louvre in; exhaust from the unit out. The air runs along each one's block x axis in all four.
+    let ducts: Vec<_> = d.model.iter().filter_map(|e| duct_of(e).map(|p| (p.air, p.flow_forward))).collect();
+    assert_eq!(ducts.len(), 4);
+    for (air, forward) in &ducts {
+        assert_eq!(*forward, Some(true), "{air:?}: drawn the way the air runs");
+    }
+    // A duct drawn the other way round has its arrow the other way: against its x axis.
+    let mut e = Drawing::new_metric();
+    e.add_ahu(&Space::Model, Common::default(), &unit_of(AhuKind::DoubleFlow), Vec2::ZERO, 0.0).unwrap();
+    add_duct(&mut e, (5000.0, 250.0), (1100.0, 250.0));
+    add_terminal(&mut e, (5000.0, 250.0), 300.0);
+    let net = e.duct_networks().unwrap().remove(0);
+    let report = size_network(&net.network, &DesignCriteria::default()).unwrap();
+    e.apply_duct_report(&net, &report).unwrap();
+    let p = e.model.iter().find_map(|x| duct_of(x)).unwrap();
+    assert_eq!(p.flow_forward, Some(false), "supply air leaves the unit, here toward -x");
+    // And the arrow is drawn: three lines, the head at the way's end.
+    let lines = p.generate(false).unwrap().iter().filter(|x| matches!(x.kind, EntityKind::Line(_))).count();
+    assert!(lines >= 3, "the shaft and the two sides of the head");
+    assert!(
+        DuctParams { length: 3000.0, ..duct(200.0) }.generate(false).unwrap().iter().all(|x| !matches!(x.kind, EntityKind::Line(_))),
+        "none before sizing"
+    );
+}
+
+#[test]
+fn a_louvre_is_drawn_with_arrows_of_its_direction_and_comes_in_standard_sizes() {
+    let model = standard_air_terminal_models().into_iter().find(|m| m.name == "LV600x400").unwrap();
+    assert_eq!((model.kind, model.neck_mm, model.max_flow_m3h), (TerminalKind::Louvre, 400.0, 3000.0));
+    let t = |air| TerminalParams { model: model.clone(), flow_m3h: 500.0, air, label_height_mm: 100.0, units: HvacUnits::default() };
+    for (air, layer) in [(AirDirection::Fresh, AIR_FRESH_LAYER), (AirDirection::Exhaust, AIR_EXHAUST_LAYER)] {
+        let pieces = t(air).generate().unwrap();
+        assert_eq!(pieces.iter().filter(|p| p.layer == layer).count(), 3, "one arrow: its shaft and two sides of the head");
+        assert!(pieces.iter().all(|p| p.layer == AIR_TERMINAL_LAYER || p.layer == layer));
+    }
+    // Fresh air comes toward the face, exhaust goes away from it: the head is at the face for the first.
+    let heads = |air: AirDirection| -> f64 {
+        let lines: Vec<_> = t(air)
+            .generate()
+            .unwrap()
+            .into_iter()
+            .filter(|p| p.layer == AIR_FRESH_LAYER || p.layer == AIR_EXHAUST_LAYER)
+            .filter_map(|p| if let EntityKind::Line(l) = p.kind { Some((l.a.y, l.b.y)) } else { None })
+            .collect();
+        // The side lines of the head start at the tip.
+        lines[1].0
+    };
+    assert!(heads(AirDirection::Fresh) < heads(AirDirection::Exhaust), "fresh air's tip is at the face, exhaust's farther out");
+    for (text, want) in [
+        ("fresh", AirDirection::Fresh),
+        ("air neuf", AirDirection::Fresh),
+        ("rejet", AirDirection::Exhaust),
+        ("exhaust", AirDirection::Exhaust),
+        ("reprise", AirDirection::Extract),
+    ] {
+        assert_eq!(AirDirection::parse(text), Some(want), "{text}");
+    }
+    assert!(AirDirection::Supply.leaves_the_unit() && AirDirection::Exhaust.leaves_the_unit());
+    assert!(!AirDirection::Extract.leaves_the_unit() && !AirDirection::Fresh.leaves_the_unit());
+}
+
+#[test]
+fn a_unit_saved_without_fresh_air_and_exhaust_reads_back_and_a_duct_to_a_louvre_is_its_own_network() {
+    let old = r#"{"name":"CTA1","widthMm":1500.0,"depthMm":800.0,"flowM3h":300.0}"#;
+    let p: AhuParams = serde_json::from_str(old).unwrap();
+    assert_eq!((p.fresh_flow_m3h, p.exhaust_pressure_pa), (None, None));
+    // A duct from the unit to a louvre alone: fresh air, though the duct was left on auto.
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    add_duct(&mut d, (-3000.0, 0.0), (-500.0, 0.0));
+    louvre(&mut d, (-3000.0, 0.0), 400.0, AirDirection::Fresh);
+    let net = d.duct_networks().unwrap().remove(0);
+    assert_eq!(net.air, AirDirection::Fresh);
+    assert!(net.unconnected.is_empty(), "the louvre is reached");
+}
+
+#[test]
+fn a_duct_on_a_collar_takes_the_direction_of_that_collar_and_the_roles_can_be_changed() {
+    // The 1000 x 600 unit's collars: fresh air top left, exhaust bottom left, supply top right, extract bottom right.
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    add_duct(&mut d, (500.0, 300.0), (4000.0, 300.0));
+    add_terminal(&mut d, (4000.0, 300.0), 300.0);
+    add_duct(&mut d, (500.0, -300.0), (4000.0, -300.0));
+    extract_terminal(&mut d, (4000.0, -300.0), 250.0);
+    add_duct(&mut d, (-500.0, 300.0), (-4000.0, 300.0));
+    louvre(&mut d, (-4000.0, 300.0), 300.0, AirDirection::Fresh);
+    let airs = |d: &Drawing| d.duct_networks().unwrap().iter().map(|n| n.air).collect::<Vec<_>>();
+    assert_eq!(airs(&d), [AirDirection::Supply, AirDirection::Extract, AirDirection::Fresh]);
+    // Each collar is marked with an arrow and a tag of its direction.
+    let marks = ahu().generate().unwrap();
+    for layer in [AIR_SUPPLY_LAYER, AIR_EXTRACT_LAYER, AIR_FRESH_LAYER, AIR_EXHAUST_LAYER] {
+        assert!(marks.iter().any(|p| p.layer == layer && matches!(p.kind, EntityKind::Text(_))), "{layer}");
+    }
+    // Turning the top right collar into an extract one: both ducts there are now extract ones.
+    let mut p = d.model.iter().find_map(|e| ahu_of(e)).unwrap();
+    p.ports = vec![AirDirection::Fresh, AirDirection::Exhaust, AirDirection::Extract, AirDirection::Extract];
+    let h = d.model.iter().find(|e| ahu_of(e).is_some()).unwrap().handle;
+    d.regenerate_ahu(h, &p).unwrap();
+    assert_eq!(airs(&d), [AirDirection::Extract, AirDirection::Fresh]);
+    // A unit takes as many roles as it has collars.
+    assert!(AhuParams { ports: vec![AirDirection::Supply], ..ahu() }.validate().is_err());
 }

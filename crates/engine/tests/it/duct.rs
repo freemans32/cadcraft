@@ -694,3 +694,88 @@ fn ahuadd_draws_the_kind_of_unit_asked_for_at_its_own_size() {
     let n = s.doc().unwrap().model.iter().filter_map(|e| cadcraft_doc::ahu_of(e)).filter(|a| a.kind == cadcraft_doc::AhuKind::DoubleFlow).count();
     assert_eq!(n, 2);
 }
+
+/// A double-flux unit with its four connections: supply and extract on its right, fresh air and
+/// exhaust on its left, each a duct to a terminal of its own direction (ducts left on auto).
+fn four_connections(s: &mut Session, fresh: f64) -> Vec<Value> {
+    s.execute("ahuadd", &json!({"at": [0, 0]})).unwrap();
+    s.execute("ductadd", &json!({"points": [[1100, 250], [5000, 250]]})).unwrap();
+    s.execute("ductadd", &json!({"points": [[5000, -250], [1100, -250]]})).unwrap();
+    s.execute("ductadd", &json!({"points": [[-5000, 250], [-1100, 250]]})).unwrap();
+    s.execute("ductadd", &json!({"points": [[-1100, -250], [-5000, -250]]})).unwrap();
+    vec![
+        s.execute("airterminaladd", &json!({"at": [5000, 250], "flow": 300})).unwrap(),
+        s.execute("airterminaladd", &json!({"at": [5000, -250], "flow": 280, "air": "extract", "type": "squareCeiling"})).unwrap(),
+        s.execute("airterminaladd", &json!({"at": [-5000, 250], "flow": fresh, "air": "fresh"})).unwrap(),
+        s.execute("airterminaladd", &json!({"at": [-5000, -250], "flow": 280, "air": "exhaust"})).unwrap(),
+    ]
+}
+
+#[test]
+fn a_louvre_is_the_terminal_of_fresh_air_and_exhaust_and_ductsize_sizes_the_four_directions() {
+    let mut s = metric();
+    let ts = four_connections(&mut s, 300.0);
+    let kinds: Vec<_> = s.doc().unwrap().model.iter().filter_map(|e| cadcraft_doc::air_terminal_of(e)).map(|t| (t.model.kind, t.air)).collect();
+    assert!(kinds.contains(&(cadcraft_doc::TerminalKind::Louvre, cadcraft_doc::AirDirection::Fresh)), "{kinds:?}");
+    assert!(kinds.contains(&(cadcraft_doc::TerminalKind::Louvre, cadcraft_doc::AirDirection::Exhaust)));
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    let nets = r["networks"].as_array().unwrap();
+    assert_eq!(nets.iter().map(|n| n["air"].as_str().unwrap()).collect::<Vec<_>>(), ["supply", "extract", "fresh", "exhaust"], "{r}");
+    assert_eq!(nets.iter().map(|n| n["totalFlow"].as_f64().unwrap()).collect::<Vec<_>>(), [300.0, 280.0, 300.0, 280.0]);
+    assert!(nets.iter().all(|n| n["warnings"].as_array().unwrap().is_empty()), "{r}");
+    assert!(r["balance"].as_array().unwrap().is_empty(), "fresh air matches the supply and the exhaust the extract: {r}");
+    assert_eq!((r["ducts"].as_u64(), r["reached"].as_u64()), (Some(4), Some(4)));
+    let unit = cadcraft_doc::ahu_of(s.doc().unwrap().model.iter().find(|e| cadcraft_doc::ahu_of(e).is_some()).unwrap()).unwrap();
+    assert_eq!((unit.fresh_flow_m3h, unit.exhaust_flow_m3h), (Some(300.0), Some(280.0)));
+    // The fresh air a unit takes in no longer matches what it blows out: the sizing says so.
+    s.execute("airterminaledit", &json!({"handle": ts[2]["handles"][0], "flow": 200})).unwrap();
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    let b = r["balance"].as_array().unwrap();
+    assert_eq!(b.len(), 1, "{r}");
+    assert_eq!(
+        (b[0]["left"].as_str(), b[0]["right"].as_str(), b[0]["leftFlow"].as_f64(), b[0]["rightFlow"].as_f64()),
+        (Some("supply"), Some("fresh"), Some(300.0), Some(200.0))
+    );
+    assert!(s.execute("airterminaladd", &json!({"at": [0, 5000], "air": "sideways"})).is_err());
+}
+
+#[test]
+fn ductedit_can_fix_a_duct_to_fresh_air_or_exhaust_and_ductadd_takes_them_as_options() {
+    let mut s = metric();
+    let r = s.execute("ductadd", &json!({"points": [[0, 0], [2000, 0]], "air": "fresh"})).unwrap();
+    let h = hd(&r["handles"][0]);
+    let p = duct_of(s.doc().unwrap().entity(h).unwrap()).unwrap();
+    assert_eq!((p.air, p.air_set), (cadcraft_doc::AirDirection::Fresh, true));
+    assert_eq!(s.doc().unwrap().entity(h).unwrap().common.layer, "M-HVAC-DUCT-FRESH");
+    s.execute("ductedit", &json!({"handle": r["handles"][0], "air": "exhaust"})).unwrap();
+    assert_eq!(s.doc().unwrap().entity(h).unwrap().common.layer, "M-HVAC-DUCT-EXH");
+    s.execute("ductedit", &json!({"handle": r["handles"][0], "air": "auto"})).unwrap();
+    assert!(!duct_of(s.doc().unwrap().entity(h).unwrap()).unwrap().air_set);
+    // At the command line: the Air keyword takes Fresh and Exhaust.
+    for t in ["ductadd", "a", "fresh", "0,500", "1000,500", ""] {
+        s.cmdline(t).unwrap();
+    }
+    assert!(
+        s.doc()
+            .unwrap()
+            .model
+            .iter()
+            .filter_map(|e| duct_of(e))
+            .any(|p| p.air == cadcraft_doc::AirDirection::Fresh && p.air_set && p.length > 900.0 && p.length < 1100.0)
+    );
+}
+
+#[test]
+fn ahuedit_sets_the_direction_of_each_collar() {
+    let mut s = Session::new();
+    s.execute("ahuadd", &json!({"at": [0, 0]})).unwrap();
+    let h = s.doc().unwrap().model.iter().find(|e| cadcraft_doc::ahu_of(e).is_some()).unwrap().handle;
+    let ports = |s: &Session| cadcraft_doc::ahu_of(s.doc().unwrap().entity(h).unwrap()).unwrap().roles();
+    assert_eq!(ports(&s).len(), 4);
+    s.execute("ahuedit", &json!({"handle": h, "ports": ["extract", "exhaust", "supply", "fresh"]})).unwrap();
+    assert_eq!(ports(&s)[3], cadcraft_doc::AirDirection::Fresh);
+    assert!(s.execute("ahuedit", &json!({"handle": h, "ports": ["supply"]})).is_err(), "one role per collar");
+    assert!(s.execute("ahuedit", &json!({"handle": h, "ports": ["up", "up", "up", "up"]})).is_err());
+    s.execute("ahuedit", &json!({"handle": h, "type": "supplyUnit"})).unwrap();
+    assert_eq!(ports(&s).len(), 2, "a change of kind restores that kind's roles");
+}

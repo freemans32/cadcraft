@@ -18,7 +18,7 @@ fn model(name: &str, kind: TerminalKind, width_mm: f64, depth_mm: f64, neck_mm: 
 
 /// The standard models, smallest first within each kind.
 pub fn standard_air_terminal_models() -> Vec<TerminalModel> {
-    use TerminalKind::{Extract, Linear, Rectangular, Round, SquareCeiling};
+    use TerminalKind::{Extract, Linear, Louvre, Rectangular, Round, SquareCeiling};
     vec![
         model("SQ600-160", SquareCeiling, 600.0, 600.0, 160.0, 250.0),
         model("SQ600-200", SquareCeiling, 600.0, 600.0, 200.0, 400.0),
@@ -32,5 +32,8 @@ pub fn standard_air_terminal_models() -> Vec<TerminalModel> {
         model("EX100", Extract, 150.0, 150.0, 100.0, 60.0),
         model("EX125", Extract, 180.0, 180.0, 125.0, 90.0),
         model("EX160", Extract, 220.0, 220.0, 160.0, 150.0),
+        model("LV400", Louvre, 400.0, 400.0, 315.0, 1_500.0),
+        model("LV600x400", Louvre, 600.0, 400.0, 400.0, 3_000.0),
+        model("LV800x600", Louvre, 800.0, 600.0, 500.0, 5_000.0),
     ]
 }

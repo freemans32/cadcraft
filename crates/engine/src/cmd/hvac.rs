@@ -30,7 +30,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["Draw", "HVAC", "Air Terminal"])
             .params(
                 "{at | space (handle) with count? or rows?+cols?, model? | type?: squareCeiling|round|rectangular|linear|extract, \
-                 flow? (m³/h per terminal; spread over a space: its flow shared), air?: supply|extract, rotation? (degrees), \
+                 flow? (m³/h per terminal; spread over a space: its flow shared), air?: supply|extract|fresh|exhaust, rotation? (degrees), \
                  labelHeight? (mm)} → {handles, model, flow}",
             )
             .interactive(|s| Ok(Box::new(TerminalAddM::new(s)))),
@@ -43,7 +43,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|s| Ok(Box::new(SpaceEditM::new(s)))),
         CommandSpec::new("airterminaledit", "Edit Air Terminal", run_airterminaledit)
             .params(
-                "{handle | handles, model? (a name or auto), type?, flow? (m³/h), air?: supply|extract, rotation? (degrees)} \
+                "{handle | handles, model? (a name or auto), type?, flow? (m³/h), air?: supply|extract|fresh|exhaust, rotation? (degrees)} \
                  → {regenerated}",
             )
             .interactive(|s| Ok(Box::new(TerminalEditM::new(s)))),
@@ -426,16 +426,25 @@ fn spread(d: &Drawing, h: Handle, how: Distribution, flow: Option<f64>) -> Resul
     Ok((pts, each))
 }
 
+/// The kind of terminal a direction starts with: a diffuser for supply, a valve for extract, a
+/// louvre on the outside of the building for fresh air and exhaust.
+fn default_kind(air: AirDirection) -> TerminalKind {
+    match air {
+        AirDirection::Supply => TerminalKind::SquareCeiling,
+        AirDirection::Extract => TerminalKind::Extract,
+        AirDirection::Fresh | AirDirection::Exhaust => TerminalKind::Louvre,
+    }
+}
+
 fn run_airterminaladd(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "airterminaladd";
     let air = match str_param(p, "air") {
-        Some(t) => AirDirection::parse(t).ok_or_else(|| bad(CMD, "`air` must be supply or extract"))?,
+        Some(t) => AirDirection::parse(t).ok_or_else(|| bad(CMD, "`air` must be supply, extract, fresh or exhaust"))?,
         None => AirDirection::Supply,
     };
     let kind = match str_param(p, "type") {
         Some(t) => TerminalKind::parse(t).ok_or_else(|| bad(CMD, "unknown `type`"))?,
-        None if air == AirDirection::Extract => TerminalKind::Extract,
-        None => TerminalKind::SquareCeiling,
+        None => default_kind(air),
     };
     let flow = positive_param(CMD, p, "flow")?;
     let rotation = super::f64_or(p, "rotation", 0.0).to_radians();
@@ -538,9 +547,9 @@ impl TerminalAddM {
                     .ok_or_else(|| other("Requires a positive flow in m³/h."))?;
             }
             (TermAsk::Air, _, Some(t)) => {
-                self.last.air = AirDirection::parse(t).ok_or_else(|| other("Enter Supply or Extract."))?;
-                if self.last.air == AirDirection::Extract && self.last.model.is_empty() {
-                    self.last.kind = TerminalKind::Extract;
+                self.last.air = AirDirection::parse(t).ok_or_else(|| other("Enter Supply, Extract, Fresh or Exhaust."))?;
+                if self.last.model.is_empty() {
+                    self.last.kind = default_kind(self.last.air);
                 }
             }
             (TermAsk::Space, Input::Pick(hs), _) => {
@@ -608,9 +617,14 @@ impl Interactive for TerminalAddM {
                 self.last.model.clone()
             }),
             TermAsk::Flow => Prompt::new("Enter flow per terminal (m³/h)", Accept::NUMBER).default(format!("{:.0}", self.last.flow_m3h)),
-            TermAsk::Air => Prompt::new("Enter air direction", super::curves::KW)
-                .kw(&["Supply", "Extract"])
-                .default(if self.last.air == AirDirection::Supply { "Supply" } else { "Extract" }),
+            TermAsk::Air => {
+                Prompt::new("Enter air direction", super::curves::KW).kw(&["Supply", "Extract", "Fresh", "Exhaust"]).default(match self.last.air {
+                    AirDirection::Supply => "Supply",
+                    AirDirection::Extract => "Extract",
+                    AirDirection::Fresh => "Fresh",
+                    AirDirection::Exhaust => "Exhaust",
+                })
+            }
             TermAsk::Space => Prompt::new("Select space", Accept::SELECT),
             TermAsk::Count(_) => Prompt::new("Enter number of terminals or rows x columns", Accept::TEXT).default("1"),
         }
@@ -1026,7 +1040,7 @@ fn run_airterminaledit(s: &mut Session, p: &Value) -> Result<Value> {
         },
         flow: positive_param(CMD, p, "flow")?,
         air: match str_param(p, "air") {
-            Some(t) => Some(AirDirection::parse(t).ok_or_else(|| bad(CMD, "`air` must be supply or extract"))?),
+            Some(t) => Some(AirDirection::parse(t).ok_or_else(|| bad(CMD, "`air` must be supply, extract, fresh or exhaust"))?),
             None => None,
         },
         rotation: match p.get("rotation") {
@@ -1069,7 +1083,7 @@ impl Interactive for TerminalEditM {
             EditAsk::Type => Prompt::new("Enter air terminal type", super::curves::KW).kw(&["Square", "Round", "Grille", "Linear", "Extract"]),
             EditAsk::Size => Prompt::new("Enter model name or [Auto/?]", Accept::TEXT),
             EditAsk::Flow => Prompt::new("Enter flow per terminal (m³/h)", Accept::NUMBER),
-            EditAsk::Air => Prompt::new("Enter air direction", super::curves::KW).kw(&["Supply", "Extract"]),
+            EditAsk::Air => Prompt::new("Enter air direction", super::curves::KW).kw(&["Supply", "Extract", "Fresh", "Exhaust"]),
             EditAsk::Rotation => Prompt::new("Specify rotation angle", Accept::NUMBER),
             _ => Prompt::new("Enter an option", super::curves::KW).kw(&["Type", "Size", "Flow", "Air", "Rotation"]),
         }

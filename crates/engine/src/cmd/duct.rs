@@ -23,13 +23,14 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|s| Ok(Box::new(AhuAddM::new(s)))),
         CommandSpec::new("ahuedit", "Edit Air Handling Unit", run_ahuedit)
             .params(
-                "{handle | handles, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox, width? (mm), depth? (mm)} → {changed}",
+                "{handle | handles, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox, width? (mm), depth? (mm), \
+                 ports? (the direction of the air at each collar, supply|extract|fresh|exhaust, one per collar: four for a double-flux unit or a box, two for a single-flux unit; [] restores the kind's)} → {changed}",
             ),
         CommandSpec::new("ductadd", "Duct", run_ductadd)
             .menu(&["Draw", "HVAC", "Duct"])
             .params(
                 "{points (2 or more; one round duct per segment), diameter? (mm), kind?: auto|main|branch|connection, \
-                 width? + height? (mm; a rectangular duct), air?: auto|supply|extract (auto: from the terminals it serves), flexible? (true: a flexible duct), labelHeight? (mm)} → {handles}",
+                 width? + height? (mm; a rectangular duct), air?: auto|supply|extract|fresh|exhaust (auto: from the terminals it serves), flexible? (true: a flexible duct), labelHeight? (mm)} → {handles}",
             )
             .interactive(|s| Ok(Box::new(DuctAddM::new(s)))),
         CommandSpec::new("ductedit", "Edit Duct", run_ductedit)
@@ -148,7 +149,7 @@ fn duct_air_param(cmd: &str, p: &Value) -> Result<Option<Option<AirDirection>>> 
     match str_param(p, "air") {
         None => Ok(None),
         Some(t) if t.trim().eq_ignore_ascii_case("auto") => Ok(Some(None)),
-        Some(t) => AirDirection::parse(t).map(|a| Some(Some(a))).ok_or_else(|| bad(cmd, "`air` must be auto, supply or extract")),
+        Some(t) => AirDirection::parse(t).map(|a| Some(Some(a))).ok_or_else(|| bad(cmd, "`air` must be auto, supply, extract, fresh or exhaust")),
     }
 }
 
@@ -201,17 +202,30 @@ fn run_ahuadd(s: &mut Session, p: &Value) -> Result<Value> {
     let params = AhuParams {
         name: str_param(p, "name").map(str::to_string).unwrap_or_else(|| s.doc().map(next_ahu_name).unwrap_or_else(|_| "CTA".into())),
         kind,
+        ports: vec![],
         width_mm: positive(CMD, p, "width")?.unwrap_or(default_width),
         depth_mm: positive(CMD, p, "depth")?.unwrap_or(default_depth),
         flow_m3h: None,
         pressure_pa: None,
         extract_flow_m3h: None,
         extract_pressure_pa: None,
+        fresh_flow_m3h: None,
+        fresh_pressure_pa: None,
+        exhaust_flow_m3h: None,
+        exhaust_pressure_pa: None,
         label_height_mm: positive(CMD, p, "labelHeight")?.unwrap_or(100.0),
         units: units_of(s)?,
     };
     let h = add_ahu(s, &params, at, f64_or(p, "rotation", 0.0).to_radians())?;
     Ok(json!({ "handle": h.hex(), "name": params.name }))
+}
+
+/// The `ports` of AHUEDIT: a direction for each collar.
+fn ports_param(cmd: &str, p: &Value) -> Result<Option<Vec<AirDirection>>> {
+    let Some(v) = p.get("ports") else { return Ok(None) };
+    let list = v.as_array().filter(|a| a.len() <= 8).ok_or_else(|| bad(cmd, "`ports` is a list of directions"))?;
+    let roles = list.iter().map(|x| x.as_str().and_then(AirDirection::parse)).collect::<Option<Vec<_>>>();
+    roles.map(Some).ok_or_else(|| bad(cmd, "each port is supply, extract, fresh or exhaust"))
 }
 
 fn run_ahuedit(s: &mut Session, p: &Value) -> Result<Value> {
@@ -229,7 +243,13 @@ fn run_ahuedit(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(n) = str_param(p, "name") {
             a.name = n.to_string();
         }
+        if kind.is_some_and(|k| k != a.kind) {
+            a.ports.clear();
+        }
         a.kind = kind.unwrap_or(a.kind);
+        if let Some(ports) = ports_param(CMD, p)? {
+            a.ports = ports;
+        }
         a.width_mm = width.unwrap_or(a.width_mm);
         a.depth_mm = depth.unwrap_or(a.depth_mm);
         a.validate().map_err(doc_err)?;
@@ -296,12 +316,17 @@ impl AhuAddM {
                 let params = AhuParams {
                     name: self.name.clone(),
                     kind: self.last.kind,
+                    ports: vec![],
                     width_mm,
                     depth_mm,
                     flow_m3h: None,
                     pressure_pa: None,
                     extract_flow_m3h: None,
                     extract_pressure_pa: None,
+                    fresh_flow_m3h: None,
+                    fresh_pressure_pa: None,
+                    exhaust_flow_m3h: None,
+                    exhaust_pressure_pa: None,
                     label_height_mm: 100.0,
                     units: units_of(s)?,
                 };
@@ -370,12 +395,17 @@ impl Interactive for AhuAddM {
         let p = AhuParams {
             name: self.name.clone(),
             kind: self.last.kind,
+            ports: vec![],
             width_mm,
             depth_mm,
             flow_m3h: None,
             pressure_pa: None,
             extract_flow_m3h: None,
             extract_pressure_pa: None,
+            fresh_flow_m3h: None,
+            fresh_pressure_pa: None,
+            exhaust_flow_m3h: None,
+            exhaust_pressure_pa: None,
             label_height_mm: 100.0,
             units,
         };
@@ -435,6 +465,7 @@ fn duct_params(s: &Session, last: &DuctLastUsed, label_mm: f64) -> Result<DuctPa
         elbow: None,
         trim_start_mm: 0.0,
         trim_end_mm: 0.0,
+        flow_forward: None,
         bottom_mm: None,
         label_height_mm: label_mm,
         units: units_of(s)?,
@@ -571,7 +602,9 @@ impl DuctAddM {
             }
             (DuctAsk::Kind, Some(t)) => self.last.kind = DuctKind::parse(t).ok_or_else(|| other("Enter Auto, Main, Branch or Connection."))?,
             (DuctAsk::Air, Some(t)) if t.eq_ignore_ascii_case("auto") => self.last.air = None,
-            (DuctAsk::Air, Some(t)) => self.last.air = Some(AirDirection::parse(t).ok_or_else(|| other("Enter Auto, Supply or Extract."))?),
+            (DuctAsk::Air, Some(t)) => {
+                self.last.air = Some(AirDirection::parse(t).ok_or_else(|| other("Enter Auto, Supply, Extract, Fresh or Exhaust."))?)
+            }
             (DuctAsk::Material, Some(t)) => {
                 self.last.flexible = match t.to_ascii_lowercase().as_str() {
                     "rigid" | "r" => false,
@@ -602,7 +635,7 @@ impl Interactive for DuctAddM {
                 Prompt::new("Enter duct kind", super::curves::KW).kw(&["Auto", "Main", "Branch", "Connection"]).default(self.last.kind.name())
             }
             DuctAsk::Air => Prompt::new("Enter air direction", super::curves::KW)
-                .kw(&["Auto", "Supply", "Extract"])
+                .kw(&["Auto", "Supply", "Extract", "Fresh", "Exhaust"])
                 .default(self.last.air.map_or("auto", AirDirection::name)),
             DuctAsk::Material => Prompt::new("Enter duct material", super::curves::KW).kw(&["Rigid", "Flexible"]).default(if self.last.flexible {
                 "Flexible"
@@ -780,6 +813,7 @@ fn run_ductconnect(s: &mut Session, p: &Value) -> Result<Value> {
             elbow: None,
             trim_start_mm: 0.0,
             trim_end_mm: 0.0,
+            flow_forward: None,
             bottom_mm: None,
             label_height_mm: 100.0,
             units: units_of(s)?,
@@ -870,6 +904,25 @@ fn nearest_duct_end(d: &Drawing, h: Handle) -> String {
         Some(dist) if dist <= 1000.0 => format!(" (the nearest end of another duct is {dist:.0} mm away)"),
         _ => String::new(),
     }
+}
+
+/// The units whose fresh air does not match their supply, or whose exhaust does not match their
+/// extract (by more than 5 %): a double-flux unit takes in what it blows out and rejects what it extracts.
+fn unit_balance(sized: &[(&cadcraft_doc::DuctNetwork, cadcraft_hvac::NetworkReport)]) -> Vec<Value> {
+    let flow = |ahu: Handle, air: AirDirection| sized.iter().find(|(n, _)| n.ahu == ahu && n.air == air).map(|(_, r)| r.total_flow_m3h);
+    let mut units: Vec<Handle> = sized.iter().map(|(n, _)| n.ahu).collect();
+    units.dedup();
+    let mut out = Vec::new();
+    for ahu in units {
+        for (a, b) in [(AirDirection::Supply, AirDirection::Fresh), (AirDirection::Extract, AirDirection::Exhaust)] {
+            if let (Some(fa), Some(fb)) = (flow(ahu, a), flow(ahu, b))
+                && (fa - fb).abs() > 0.05 * fa.max(fb)
+            {
+                out.push(json!({ "ahu": ahu.hex(), "left": a.name(), "leftFlow": fa, "right": b.name(), "rightFlow": fb }));
+            }
+        }
+    }
+    out
 }
 
 /// Where object `h` is, for a message.
@@ -989,11 +1042,12 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
         sized.push((net, report));
     }
     let mismatches = space_mismatches(s.doc()?);
+    let balance = unit_balance(&sized);
     let d = s.doc_mut()?;
     for (net, report) in &sized {
         d.apply_duct_report(net, report).map_err(doc_err)?;
     }
     let ducts = nets.first().map_or(0, |n| n.duct_count);
     let isolated = nets.first().map_or(0, |n| n.isolated.len());
-    Ok(json!({ "networks": out, "cuts": cuts, "spaces": mismatches, "ducts": ducts, "reached": ducts - isolated }))
+    Ok(json!({ "networks": out, "cuts": cuts, "spaces": mismatches, "balance": balance, "ducts": ducts, "reached": ducts - isolated }))
 }

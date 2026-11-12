@@ -3,7 +3,7 @@
 //! rather than from a fixed list of tools.
 
 use cadcraft_color::Color;
-use cadcraft_doc::{AccessoryKind, AhuKind, ComponentFunction, OpeningKind, TerminalKind};
+use cadcraft_doc::{AccessoryKind, AhuKind, AirDirection, ComponentFunction, OpeningKind, TerminalKind};
 use egui::{Rect, Sense, Stroke, pos2, vec2};
 
 use crate::CadApp;
@@ -112,6 +112,13 @@ fn paint_terminal(p: &egui::Painter, r: Rect, kind: TerminalKind) {
             p.rect_stroke(q, 0.0, s, egui::StrokeKind::Inside);
             p.line_segment([pos2(q.left(), c.y), pos2(q.right(), c.y)], s);
         }
+        TerminalKind::Louvre => {
+            let q = Rect::from_center_size(c, vec2(2.0 * h, 1.4 * h));
+            p.rect_stroke(q, 0.0, s, egui::StrokeKind::Inside);
+            for k in [-0.5, 0.0, 0.5] {
+                p.line_segment([pos2(q.left() + 3.0, c.y + k * q.height() * 0.8), pos2(q.right() - 3.0, c.y + k * q.height() * 0.8 - 2.0)], s);
+            }
+        }
         TerminalKind::Extract => {
             p.circle_stroke(c, h, s);
             let d = h * 0.7;
@@ -130,8 +137,20 @@ fn paint_space(p: &egui::Painter, r: Rect) {
     p.line_segment([pos2(r.left() + 9.0, r.center().y + 3.0), pos2(r.right() - 9.0, r.center().y + 3.0)], Stroke::new(1.0, t.text_dim));
 }
 
+/// The label of a direction named in a sizing report.
+fn air_label(name: &str) -> &'static str {
+    match name {
+        "extract" => "Extract",
+        "fresh" => "Fresh air",
+        "exhaust" => "Exhaust air",
+        _ => "Supply",
+    }
+}
+
 fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
     let current = app.session.last_used.air_terminal.kind;
+    let app_air = app.session.last_used.air_terminal.air;
+    let mut outdoor: Option<AirDirection> = None;
     let mut start: Option<&'static str> = None;
     let mut terminal: Option<TerminalKind> = None;
     let mut distribute = false;
@@ -162,6 +181,13 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         ] {
             if row_button(ui, crate::i18n::t(label), kind == current, |p, r| paint_terminal(p, r, kind)) {
                 terminal = Some(kind);
+            }
+        }
+        for (air, label) in [(AirDirection::Fresh, "Fresh air louvre"), (AirDirection::Exhaust, "Exhaust louvre")] {
+            if row_button(ui, crate::i18n::t(label), current == TerminalKind::Louvre && app_air == air, |p, r| {
+                paint_terminal(p, r, TerminalKind::Louvre)
+            }) {
+                outdoor = Some(air);
             }
         }
         if row_button(ui, crate::i18n::t("Distribute in a Space"), false, |_, _| {}) {
@@ -214,11 +240,14 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         let last = &mut app.session.last_used.air_terminal;
         last.kind = kind;
         last.model.clear();
-        if kind == TerminalKind::Extract {
-            last.air = cadcraft_doc::AirDirection::Extract;
-        } else if last.air == cadcraft_doc::AirDirection::Extract {
-            last.air = cadcraft_doc::AirDirection::Supply;
-        }
+        last.air = if kind == TerminalKind::Extract { AirDirection::Extract } else { AirDirection::Supply };
+        app.cmd.buffer.clear();
+        app.start("airterminaladd");
+    } else if let Some(air) = outdoor {
+        // A louvre on the outside: fresh air comes in through it, exhaust air goes out.
+        let last = &mut app.session.last_used.air_terminal;
+        (last.kind, last.air) = (TerminalKind::Louvre, air);
+        last.model.clear();
         app.cmd.buffer.clear();
         app.start("airterminaladd");
     } else if distribute {
@@ -254,7 +283,7 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
             Ok(r) => {
                 for net in r["networks"].as_array().into_iter().flatten() {
                     let (flow, pa) = (net["totalFlow"].as_f64().unwrap_or(0.0), net["requiredPressure"].as_f64().unwrap_or(0.0));
-                    let air = if net["air"] == "extract" { crate::i18n::t("Extract") } else { crate::i18n::t("Supply") };
+                    let air = crate::i18n::t(air_label(net["air"].as_str().unwrap_or("")));
                     app.session.echo(crate::tf!(
                         "Ducts sized, {air}: {flow} m³/h, {pa} Pa",
                         air = air,
@@ -270,6 +299,15 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
                     reached = r["reached"].as_u64().unwrap_or(0),
                     ducts = r["ducts"].as_u64().unwrap_or(0)
                 ));
+                for b in r["balance"].as_array().into_iter().flatten() {
+                    app.session.echo(crate::tf!(
+                        "Unbalanced unit: {a} {fa} m³/h against {b} {fb} m³/h",
+                        a = crate::i18n::t(air_label(b["left"].as_str().unwrap_or(""))),
+                        fa = format!("{:.0}", b["leftFlow"].as_f64().unwrap_or(0.0)),
+                        b = crate::i18n::t(air_label(b["right"].as_str().unwrap_or(""))),
+                        fb = format!("{:.0}", b["rightFlow"].as_f64().unwrap_or(0.0))
+                    ));
+                }
                 for sp in r["spaces"].as_array().into_iter().flatten() {
                     app.session.echo(crate::tf!(
                         "{name} ({air}): the terminals carry {supplied} m³/h, the space needs {needed} m³/h",

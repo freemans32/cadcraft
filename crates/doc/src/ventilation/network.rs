@@ -157,7 +157,14 @@ impl crate::Drawing {
                 let reach = unit_tol.max(units.to_units(AXIS_REACH * diameter_mm));
                 l.x.abs() <= half.x + reach && l.y.abs() <= half.y + reach
             };
-            let found = scan.read_unit(*handle, &inside);
+            // The direction of the collar a duct end is nearest to, if it is on the unit's face.
+            let roles = p.roles();
+            let tips: Vec<Vec2> = p.port_tips().into_iter().map(|(t, _)| *at + t.rotate(*rotation)).collect();
+            let port = |q: Vec2| {
+                let (k, d) = tips.iter().enumerate().map(|(k, t)| (k, (*t - q).len())).min_by(|a, b| a.1.total_cmp(&b.1))?;
+                (d <= units.to_units(0.8 * half.y.min(half.x))).then(|| roles.get(k).copied()).flatten()
+            };
+            let found = scan.read_unit(*handle, &inside, &port);
             out.extend(found);
         }
         // A terminal left unreached by every unit is reported on each network: say so once, on the first.
@@ -276,6 +283,9 @@ impl crate::Drawing {
                 .map(|q| DuctReducer { from_mm: q.width_mm, at_end: net.entered_at_end.get(i).copied().unwrap_or(false) });
             (p.elbow, p.trim_start_mm, p.trim_end_mm) = (None, 0.0, 0.0);
             p.bottom_mm = net.bottoms_mm.get(i).copied().flatten();
+            // Supply and exhaust air leave the unit, extract and fresh air come to it: with the way the
+            // run is entered, that is the way along its block's x axis.
+            p.flow_forward = Some(net.air.leaves_the_unit() != net.entered_at_end.get(i).copied().unwrap_or(false));
             next.push(Some(p));
         }
         draw_elbows(net, &mut next);
@@ -286,11 +296,7 @@ impl crate::Drawing {
         }
         let e = self.entity(net.ahu).ok_or(crate::DocError::NoEntity(net.ahu))?;
         if let Some(mut a) = ahu_of(e) {
-            let (flow, pressure) = (Some(report.total_flow_m3h), Some(report.required_pressure_pa));
-            match net.air {
-                AirDirection::Supply => (a.flow_m3h, a.pressure_pa) = (flow, pressure),
-                AirDirection::Extract => (a.extract_flow_m3h, a.extract_pressure_pa) = (flow, pressure),
-            }
+            a.set_figures(net.air, report.total_flow_m3h, report.required_pressure_pa);
             self.regenerate_ahu(net.ahu, &a)?;
         }
         Ok(())
@@ -418,9 +424,9 @@ impl Scan<'_> {
     /// for each air direction that has a duct leading to a terminal. Each duct leaving the unit is
     /// read with its own tree of runs: its direction is the one it was given, else the one of the
     /// terminals the tree reaches, so a double-flux unit's supply and extract trees stay apart.
-    fn read_unit(&mut self, ahu: Handle, inside: &impl Fn(Vec2, f64) -> bool) -> Vec<DuctNetwork> {
-        let airs = [AirDirection::Supply, AirDirection::Extract];
-        let mut by_air: [Vec<Node>; 2] = [Vec::new(), Vec::new()];
+    fn read_unit(&mut self, ahu: Handle, inside: &impl Fn(Vec2, f64) -> bool, port: &impl Fn(Vec2) -> Option<AirDirection>) -> Vec<DuctNetwork> {
+        let airs = AirDirection::ALL;
+        let mut by_air: [Vec<Node>; 4] = Default::default();
         for i in 0..self.ducts.len() {
             let Some(d) = self.ducts.get(i).filter(|_| !self.taken.get(i).copied().unwrap_or(true)) else { continue };
             let (from, to) = if inside(d.a, d.params.plan_width_mm()) {
@@ -430,9 +436,12 @@ impl Scan<'_> {
             } else {
                 continue;
             };
-            let candidates: Vec<usize> = match d.params.air_set {
-                true => vec![usize::from(d.params.air == AirDirection::Extract)],
-                false => vec![0, 1],
+            // A direction fixed by hand is the only one tried; else each in turn, the terminals deciding.
+            // A duct on a collar takes the collar's direction.
+            let candidates: Vec<usize> = match (d.params.air_set, port(from)) {
+                (true, _) => airs.iter().position(|a| *a == d.params.air).into_iter().collect(),
+                (false, Some(role)) => airs.iter().position(|a| *a == role).into_iter().collect(),
+                (false, None) => (0..airs.len()).collect(),
             };
             let mut chosen = None;
             for &k in &candidates {
