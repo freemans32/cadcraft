@@ -3,7 +3,7 @@
 
 pub(crate) mod annoscale;
 mod annotate;
-mod arch;
+pub(crate) mod arch;
 mod array;
 mod audit;
 pub(crate) mod blocks;

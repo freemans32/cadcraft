@@ -650,3 +650,22 @@ fn walls_with_openings_keep_them_through_edits_and_joins() {
     assert_eq!(cuts(&s, w), [(550.0, 1450.0)]);
     assert!(s.doc().unwrap().wall_is_intact(w));
 }
+
+#[test]
+fn moving_copying_or_erasing_an_opening_recuts_the_wall_by_itself() {
+    let mut s = metric();
+    let w = wall_5m(&mut s);
+    let o = openings_after_add(&mut s, [1000, 0]);
+    assert_eq!(cuts(&s, w), [(550.0, 1450.0)]);
+    s.execute("move", &json!({"handles": [o.hex()], "from": [1000, 0], "to": [3000, 0]})).unwrap();
+    assert_eq!(cuts(&s, w), [(2550.0, 3450.0)], "moved: the old hole is filled, a new one cut");
+    s.execute("copy", &json!({"handles": [o.hex()], "from": [3000, 0], "to": [4000, 0]})).unwrap();
+    assert_eq!(cuts(&s, w).len(), 2, "copied: a second hole");
+    s.execute("erase", &json!({"handles": [o.hex()]})).unwrap();
+    assert_eq!(cuts(&s, w), [(3550.0, 4450.0)], "erased: its hole is filled");
+}
+
+fn openings_after_add(s: &mut Session, at: [i32; 2]) -> Handle {
+    s.execute("openingadd", &json!({"at": at, "type": "door"})).unwrap();
+    openings(s)[0].0
+}

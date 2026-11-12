@@ -455,6 +455,7 @@ impl Session {
         #[cfg(test)]
         crate::guard::tests::panic_if_armed();
         cmd::groups::after_command(self, before);
+        cmd::arch::after_command(self, before);
         cmd::constraints::after_command(self, before, ok);
         assoc::after_command(self, before, uid);
     }

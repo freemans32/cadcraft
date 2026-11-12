@@ -73,6 +73,21 @@ fn add(s: &mut Session, p: WallParams) -> Result<Handle> {
     Ok(h)
 }
 
+/// The post-command pass for openings: a drawing that has openings, or had them before the command,
+/// gets its walls joined again, so an opening moved, copied or erased cuts its wall (or stops cutting
+/// it) without WALLCLEANUP. Cheap when the command changed nothing or there are no openings.
+pub(crate) fn after_command(s: &mut Session, before: Option<&std::sync::Arc<Drawing>>) {
+    let space = s.space();
+    let Ok(st) = s.state_mut() else { return };
+    if before.is_none_or(|b| std::sync::Arc::ptr_eq(b, &st.doc)) {
+        return;
+    }
+    let has_openings = |d: &Drawing| d.space(&space).is_some_and(|sp| sp.iter().any(|e| cadcraft_doc::opening_of(e).is_some()));
+    if before.is_some_and(|b| has_openings(b)) || has_openings(&st.doc) {
+        join_walls(std::sync::Arc::make_mut(&mut st.doc), &space);
+    }
+}
+
 /// Joins the walls of `space` where they meet; a drawing with too many walls to join at once
 /// keeps them as drawn.
 pub(super) fn join_walls(d: &mut Drawing, space: &cadcraft_doc::Space) -> usize {
