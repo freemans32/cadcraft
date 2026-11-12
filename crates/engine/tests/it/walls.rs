@@ -419,3 +419,74 @@ fn walledit_rejoins_the_walls_with_the_new_style() {
     assert_eq!(wall(&s, b).style.name, PARTITION);
     assert_eq!(s.execute("wallcleanup", &json!({})).unwrap()["regenerated"], 0, "already joined with the new style");
 }
+
+fn thicknesses(w: &WallParams) -> Vec<f64> {
+    w.style.components.iter().map(|c| c.thickness).collect()
+}
+
+#[test]
+fn walledit_changes_a_layers_thickness_for_the_walls_given_and_no_other() {
+    let mut s = metric();
+    let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [5000, 0]], "style": BRICK})).unwrap());
+    let b = h(&s.execute("walladd", &json!({"points": [[0, 3000], [5000, 3000]], "style": BRICK})).unwrap());
+    assert_eq!(thicknesses(&wall(&s, a)), [200.0, 120.0, 12.5]);
+    s.execute("walledit", &json!({"handle": a.hex(), "layers": {"Mineral wool": 80}})).unwrap();
+    assert_eq!(thicknesses(&wall(&s, a)), [200.0, 80.0, 12.5], "this wall: the wool is thinner");
+    assert_eq!(wall(&s, a).style.thickness(), 292.5);
+    assert_eq!(thicknesses(&wall(&s, b)), [200.0, 120.0, 12.5], "the other wall of the style is untouched");
+    assert_eq!(
+        thicknesses(&s.doc().unwrap().wall_style(BRICK).map(|st| WallParams { style: st.clone(), ..wall(&s, a) }).unwrap()),
+        [200.0, 120.0, 12.5],
+        "and so is the style"
+    );
+    // By place from the exterior face, as the palette does, and the wall is drawn again to the new size.
+    s.execute("walledit", &json!({"handle": a.hex(), "layers": [{"index": 0, "thickness": 150}]})).unwrap();
+    assert_eq!(thicknesses(&wall(&s, a)), [150.0, 80.0, 12.5]);
+    assert!(s.doc().unwrap().wall_is_intact(a), "the block is the wall's own again");
+    // The justification keeps its face: the wall grows on the other side, and its length does not change.
+    assert_eq!(path(&wall(&s, a)), [(0.0, 0.0), (5000.0, 0.0)]);
+}
+
+#[test]
+fn walledit_applytostyle_gives_the_style_and_every_wall_that_uses_it_the_thicknesses() {
+    let mut s = metric();
+    let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [5000, 0]], "style": BRICK})).unwrap());
+    let b = h(&s.execute("walladd", &json!({"points": [[0, 3000], [5000, 3000]], "style": BRICK})).unwrap());
+    let other_style = h(&s.execute("walladd", &json!({"points": [[0, 6000], [5000, 6000]], "style": PARTITION})).unwrap());
+    s.execute("walledit", &json!({"handle": a.hex(), "layers": {"Clay brick": 150}, "applyToStyle": true})).unwrap();
+    assert_eq!(wall(&s, b).style.components[0].thickness, 150.0, "the other wall of the style follows");
+    assert_eq!(s.doc().unwrap().wall_style(BRICK).unwrap().components[0].thickness, 150.0, "the style itself too");
+    assert_eq!(thicknesses(&wall(&s, other_style)), [12.5, 48.0, 12.5], "another style is not touched");
+    // A style that was a standard one and is not yet in the drawing is copied into it.
+    let c = h(&s.execute("walladd", &json!({"points": [[0, 9000], [5000, 9000]], "style": "Concrete 200"})).unwrap());
+    s.execute("walledit", &json!({"handle": c.hex(), "layers": {"Concrete": 250}, "applyToStyle": true})).unwrap();
+    assert_eq!(s.doc().unwrap().wall_style("Concrete 200").unwrap().components[0].thickness, 250.0);
+    // A name given to a style whose two layers share it changes both (the two plasterboards of a partition).
+    s.execute("walledit", &json!({"handle": other_style.hex(), "layers": {"Plasterboard": 15}})).unwrap();
+    assert_eq!(thicknesses(&wall(&s, other_style)), [15.0, 48.0, 15.0]);
+    // But by place, only the one.
+    s.execute("walledit", &json!({"handle": other_style.hex(), "layers": [{"index": 2, "thickness": 18}]})).unwrap();
+    assert_eq!(thicknesses(&wall(&s, other_style)), [15.0, 48.0, 18.0]);
+}
+
+#[test]
+fn walledit_layers_refuses_what_is_not_a_thickness_or_a_layer() {
+    let mut s = metric();
+    let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [5000, 0]], "style": BRICK})).unwrap());
+    let timber = h(&s.execute("walladd", &json!({"points": [[0, 3000], [5000, 3000]], "style": "Timber frame 145"})).unwrap());
+    for p in [
+        json!({"handle": a.hex(), "layers": {"Glass": 10}}),
+        json!({"handle": a.hex(), "layers": {"Clay brick": -5}}),
+        json!({"handle": a.hex(), "layers": {"Clay brick": "thick"}}),
+        json!({"handle": a.hex(), "layers": {"Clay brick": 1e9}}),
+        json!({"handle": a.hex(), "layers": [{"index": 9, "thickness": 10}]}),
+        json!({"handle": a.hex(), "layers": [{"thickness": 10}]}),
+        json!({"handle": a.hex(), "layers": [3]}),
+        json!({"handle": a.hex(), "applyToStyle": true}),
+        json!({"handle": timber.hex(), "layers": {"Breather membrane": 5}}),
+        json!({"handle": a.hex(), "layers": {"Clay brick": 0, "Mineral wool": 0, "Plasterboard": 0}}),
+    ] {
+        assert!(s.execute("walledit", &p).is_err(), "{p}");
+    }
+    assert_eq!(thicknesses(&wall(&s, a)), [200.0, 120.0, 12.5], "nothing changed");
+}

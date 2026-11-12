@@ -27,7 +27,10 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("wallcleanup", "Wall Junctions", run_wallcleanup)
             .params("{} → {regenerated}: joins the walls where they meet (L, T, X), after walls were moved, copied or erased"),
         CommandSpec::new("walledit", "Edit Wall", run_walledit)
-            .params("{handle | handles, style?, justification?: left|center|right, height? (mm)} → {regenerated}")
+            .params(
+                "{handle | handles, style?, justification?: left|center|right, height? (mm), layers? ({layer name: thickness in mm}, or [{name | index, thickness}]: these walls only), \
+                 applyToStyle? (true: the style and every wall that uses it take the thicknesses too)} → {regenerated}",
+            )
             .interactive(|s| Ok(Box::new(WallEditM::new(s)))),
     ]
 }
@@ -475,6 +478,45 @@ struct WallChange {
     style: Option<WallStyle>,
     justification: Option<WallJustification>,
     height: Option<f64>,
+    /// New thicknesses by component name, mm: for these walls only, or, with `apply_to_style`, for
+    /// the style the walls have (the drawing's, and every wall that uses it).
+    layers: Vec<(LayerRef, f64)>,
+    apply_to_style: bool,
+}
+
+/// A layer of a wall style: by name (every layer of that name) or by its place from the exterior face.
+#[derive(Clone, Debug)]
+enum LayerRef {
+    Name(String),
+    Index(usize),
+}
+
+/// Gives the components of `style` the thicknesses in `layers`.
+fn set_thicknesses(style: &mut WallStyle, layers: &[(LayerRef, f64)]) -> Result<()> {
+    for (layer, t) in layers {
+        let hits: Vec<usize> = match layer {
+            LayerRef::Index(i) => (*i < style.components.len()).then_some(*i).into_iter().collect(),
+            LayerRef::Name(n) => {
+                style.components.iter().enumerate().filter(|(_, c)| c.name.trim().eq_ignore_ascii_case(n.trim())).map(|(i, _)| i).collect()
+            }
+        };
+        if hits.is_empty() {
+            let what = match layer {
+                LayerRef::Index(i) => format!("no layer number {i}"),
+                LayerRef::Name(n) => format!("no layer \"{}\"", n.trim()),
+            };
+            return Err(other(format!("The wall style \"{}\" has {what}.", style.name)));
+        }
+        for i in hits {
+            if let Some(c) = style.components.get_mut(i) {
+                if c.function == cadcraft_doc::ComponentFunction::Membrane {
+                    return Err(other(format!("Layer \"{}\" is a membrane: it has no thickness to change.", c.name)));
+                }
+                c.thickness = *t;
+            }
+        }
+    }
+    style.validate().map_err(|e| other(e.to_string()))
 }
 
 /// The walls among `handles`, refusing an object that is not a wall or that was edited by hand.
@@ -510,6 +552,9 @@ fn edit_walls(s: &mut Session, handles: &[Handle], c: &WallChange) -> Result<usi
         if let Some(height) = c.height {
             w.height = height;
         }
+        if !c.layers.is_empty() {
+            set_thicknesses(&mut w.style, &c.layers)?;
+        }
         // Junctions are worked out again after the change.
         w.joints = Default::default();
         w.validate().map_err(|e| other(e.to_string()))?;
@@ -523,6 +568,22 @@ fn edit_walls(s: &mut Session, handles: &[Handle], c: &WallChange) -> Result<usi
         && d.wall_style(&st.name).is_none()
     {
         d.wall_styles.push(st.clone());
+    }
+    // The style itself takes the thicknesses too: the drawing's entry (added when the style was a
+    // standard one) and every wall that uses it, the first of each name giving the thicknesses.
+    if c.apply_to_style && !c.layers.is_empty() {
+        let mut done: Vec<String> = Vec::new();
+        for (_, w) in &next {
+            if done.iter().any(|n| n.eq_ignore_ascii_case(&w.style.name)) {
+                continue;
+            }
+            done.push(w.style.name.clone());
+            match d.wall_styles.iter_mut().find(|o| o.name.eq_ignore_ascii_case(&w.style.name)) {
+                Some(o) => *o = w.style.clone(),
+                None => d.wall_styles.push(w.style.clone()),
+            }
+            update_walls(d, &w.style.name.clone(), &w.style)?;
+        }
     }
     for space in wall_spaces(d) {
         join_walls(d, &space);
@@ -565,6 +626,35 @@ pub(crate) fn handles_param(cmd: &str, p: &Value) -> Result<Vec<Handle>> {
     a.iter().map(|v| v.as_str().and_then(Handle::parse_hex).ok_or_else(|| bad(cmd, "`handles` must be handles"))).collect()
 }
 
+/// `layers` of WALLEDIT: an object `{"Clay brick": 150}` (by name), or a list of `{name | index, thickness}`
+/// (the index counts from the exterior face, from 0), in millimetres.
+fn layers_param(p: &Value) -> Result<Vec<(LayerRef, f64)>> {
+    const CMD: &str = "walledit";
+    let number = |v: &Value| {
+        v.as_f64().filter(|t| t.is_finite() && *t >= 0.0).ok_or_else(|| bad(CMD, "a layer's thickness is a number of millimetres, 0 or more"))
+    };
+    let out: Vec<(LayerRef, f64)> = match p.get("layers") {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(Value::Object(o)) => o.iter().map(|(k, v)| Ok((LayerRef::Name(k.clone()), number(v)?))).collect::<Result<_>>()?,
+        Some(Value::Array(a)) => a
+            .iter()
+            .map(|x| {
+                let layer = match (x.get("index").and_then(Value::as_u64), x.get("name").and_then(Value::as_str)) {
+                    (Some(i), _) => LayerRef::Index(usize::try_from(i).map_err(|_| bad(CMD, "a layer index is a small whole number"))?),
+                    (None, Some(n)) => LayerRef::Name(n.to_string()),
+                    _ => return Err(bad(CMD, "each layer has a `name` or an `index`")),
+                };
+                Ok((layer, number(x.get("thickness").unwrap_or(&Value::Null))?))
+            })
+            .collect::<Result<_>>()?,
+        Some(_) => return Err(bad(CMD, "`layers` is an object of thicknesses by layer name, or a list")),
+    };
+    if out.len() > cadcraft_doc::MAX_WALL_COMPONENTS {
+        return Err(bad(CMD, format!("at most {} layers", cadcraft_doc::MAX_WALL_COMPONENTS)));
+    }
+    Ok(out)
+}
+
 fn run_walledit(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "walledit";
     let handles = handles_param(CMD, p)?;
@@ -580,7 +670,12 @@ fn run_walledit(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => None,
         Some(v) => Some(v.as_f64().filter(|h| h.is_finite() && *h > 0.0).ok_or_else(|| bad(CMD, "`height` must be a positive number"))?),
     };
-    let n = edit_walls(s, &handles, &WallChange { style, justification, height })?;
+    let layers = layers_param(p)?;
+    let apply_to_style = p.get("applyToStyle").and_then(Value::as_bool).unwrap_or(false);
+    if apply_to_style && layers.is_empty() {
+        return Err(bad(CMD, "`applyToStyle` needs `layers`"));
+    }
+    let n = edit_walls(s, &handles, &WallChange { style, justification, height, layers, apply_to_style })?;
     Ok(json!({ "regenerated": n }))
 }
 

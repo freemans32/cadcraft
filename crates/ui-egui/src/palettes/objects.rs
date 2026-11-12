@@ -76,6 +76,12 @@ fn handles(sel: &[Handle]) -> Vec<String> {
     sel.iter().map(|h| h.hex()).collect()
 }
 
+/// Whether two walls have the same layers (names and which are membranes), so their thicknesses can be listed together.
+fn same_layers(a: &cadcraft_doc::WallParams, b: &cadcraft_doc::WallParams) -> bool {
+    a.style.components.len() == b.style.components.len()
+        && a.style.components.iter().zip(&b.style.components).all(|(x, y)| x.name == y.name && (x.thickness > 0.0) == (y.thickness > 0.0))
+}
+
 fn wall_section(
     ui: &mut egui::Ui,
     d: &Drawing,
@@ -119,6 +125,30 @@ fn wall_section(
     });
     let thickness = shared(&walls.iter().map(|w| format!("{:.0} mm", w.style.thickness())).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
     prop_row(ui, "Thickness", |ui| read_only(ui, &thickness));
+    // The layers, each with its own thickness: a change is for these walls only, the button gives
+    // the whole style the thicknesses shown. Walls of different layers are not listed together.
+    if let Some(first) = walls.first().filter(|f| walls.iter().all(|w| same_layers(w, f))) {
+        let mut current: Vec<Value> = Vec::new();
+        for (i, c) in first.style.components.iter().enumerate().filter(|(_, c)| c.thickness > 0.0) {
+            let value = shared(&walls.iter().map(|w| format!("{:.0}", w.style.components.get(i).map_or(0.0, |x| x.thickness))).collect::<Vec<_>>())
+                .unwrap_or_else(|| VARIES.into());
+            if let Ok(t) = value.parse::<f64>() {
+                current.push(json!({ "index": i, "thickness": t }));
+            }
+            prop_row(ui, &c.name, |ui| {
+                if let Some(t) = number(edit_field(ui, ui.scope_id().with(("wall_layer", &ids, i)), value), bad) {
+                    action = Some(("walledit", json!({ "handles": ids, "layers": [{ "index": i, "thickness": t }] })));
+                }
+            });
+        }
+        if !current.is_empty() {
+            prop_row(ui, "Style", |ui| {
+                if ui.button(crate::i18n::t("Apply to the whole style")).clicked() {
+                    action = Some(("walledit", json!({ "handles": ids, "layers": current, "applyToStyle": true })));
+                }
+            });
+        }
+    }
     if let [w] = walls {
         let mut length = 0.0;
         let n = w.path.len();
@@ -623,6 +653,38 @@ mod tests {
         hn.run_steps(3);
         let w = cadcraft_doc::wall_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
         assert_eq!(w.height, 2700.0);
+    }
+
+    #[test]
+    fn a_wall_layer_typed_in_the_palette_changes_this_wall_and_the_button_gives_it_to_the_style() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        let style = "Brick 200 + mineral wool 120 + plasterboard";
+        let r = app.run("walladd", json!({ "points": [[0, 0], [4000, 0]], "style": style })).unwrap();
+        let other = app.run("walladd", json!({ "points": [[0, 3000], [4000, 3000]], "style": style })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+        let o = cadcraft_doc::Handle::parse_hex(other["handle"].as_str().unwrap()).unwrap();
+        app.session.set_selection(vec![h]);
+        let mut hn = palette(app);
+        let thick = |hn: &egui_kittest::Harness<'static, CadApp>, w| {
+            cadcraft_doc::wall_of(hn.state().session.doc().unwrap().entity(w).unwrap()).unwrap().style.components[1].thickness
+        };
+        // The mineral wool, 120 mm.
+        let field = hn.get_all_by_value("120").next().unwrap();
+        field.focus();
+        hn.run_steps(2);
+        hn.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        hn.run_steps(2);
+        hn.get_all_by_value("120").next().unwrap().type_text("80");
+        hn.run_steps(2);
+        hn.key_press(egui::Key::Enter);
+        hn.run_steps(3);
+        assert_eq!((thick(&hn, h), thick(&hn, o)), (80.0, 120.0), "this wall only");
+        // The button: the style and the other wall take 80 too.
+        hn.get_by_label("Apply to the whole style").click();
+        hn.run_steps(3);
+        assert_eq!(thick(&hn, o), 80.0);
+        assert_eq!(hn.state().session.doc().unwrap().wall_style(style).unwrap().components[1].thickness, 80.0);
     }
 }
 
