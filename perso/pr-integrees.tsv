@@ -653,3 +653,60 @@
 2975	PR2975: document chain seed ownership and Undo regressions	intégrée	
 2977	PR2977: document dimension associativity policy and tests	intégrée	
 2979	PR2979: document DIMASSOC persistence contracts	intégrée	
+# Ajout du 12 novembre 2026 (base upstream v0.20.1, ca87680f)
+1623	Gaps: add L5, legacy Vietnamese TCVN3/VNI drawing text	en conflit	conflit avec perso
+2062	Assistant palette: an in-app chat that drives CADCraft with the MCP tools (new `cadcraft-ai` crate)	en conflit	conflit avec perso
+2064	Markup Import and Markup Assist: a PDF annotation reader, MARKUPIMPORT, MARKUPASSIST and the `markup_import` t	en conflit	conflit avec perso
+2348	AutoSnap magnet: the crosshair locks onto the snap point (AUTOSNAP bit 2)	en conflit	conflit avec perso
+2351	geom: exact polyline OFFSET: arcs stay arcs, loops cleaned up, OFFSETGAPTYPE	en conflit	conflit avec perso
+2352	Selection: freeform lasso (window, crossing and fence; LASSOMODE) (gaps U6)	en conflit	conflit avec perso
+2353	Selection: isolation saved with the drawing (OBJECTISOLATIONMODE 1) and the status-bar isolate item (gaps U6)	en conflit	conflit avec perso
+2355	blocks: REFEDIT edits xrefs in place and writes their drawing back; nested references, faded drawing and Edit 	en conflit	conflit avec perso
+2357	Dimension styles: DIMALTTD/DIMALTTZ, DIMUPT, DIMTXTDIRECTION, jog height and break size (F7)	en conflit	conflit avec perso
+2358	Smart DIM: the dimension that suits the object, with hover preview, and DIMLAYER (F7)	en conflit	conflit avec perso
+2360	DIMBREAK: automatic breaks follow the objects that make them (F7)	en conflit	conflit avec perso
+2361	Dimension Style Manager: styles, New/Modify/Override/Compare and the seven tabs with preview (F7)	en conflit	conflit avec perso
+2363	MPOLYGON: make, convert, draw and keep it in DXF and DWG (F13)	en conflit	conflit avec perso
+2666	fix: angular dimension measures the angle and keeps group 42's unit	en conflit	conflit avec perso
+2857	Host panel for embedding apps, and a layer bar like AutoCAD's Layers panel	en conflit	conflit avec les PR déjà fusionnées (panneau hôte, menus)
+3023	Engine extension registries: add-on commands, drawing data, after-command passes and MCP tools (part of #1544)	en conflit	conflit avec les PR déjà fusionnées (registres du moteur)
+3025	chore(deps): bump the cargo-dependencies group across 1 directory with 9 updates	écartée	dépendances
+3026	MCP: find_text takes `query` as its filter; stylesmanager set replies with what changed	intégrée	fusionnée le 12 novembre (0.20.1)
+3027	LISP: ssget filters on the layout name (group 410) (#3008)	intégrée	fusionnée le 12 novembre (0.20.1)
+3028	LISP: ssget and entget see entities CADCraft keeps as raw groups (#3004)	en conflit	conflit avec perso
+3029	LISP: entmake makes a layer (part of #3007)	en conflit	conflit de tests LISP avec les PR déjà fusionnées
+3030	`findfile` and INSERT look in the drawing's folder and on a support search path (#3003)	en conflit	conflit LISP findfile
+3031	Opening a drawing reports missing SHX fonts; `SUPPORTPATH` sets the font search folders (#3009)	en conflit	conflit dans cmd/file.rs
+3034	LISP: write-line to a file ends lines with CR LF on Windows	en conflit	conflit avec perso
+3035	LISP: getvar returns a point list for point system variables (LIMMIN, SNAPBASE, INSBASE, ...)	en conflit	conflit avec perso
+3036	Header: USERI1-5 and USERR1-5 are saved to DXF and DWG and read back	en conflit	conflit (en-tête DWG/DXF)
+3037	DDATTE: asks for attribute values as ATTEDIT does; from a routine the pick finishes it	en conflit	conflit avec perso
+3038	TEXT from LISP command keeps the spaces of its text	en conflit	conflit (prompt.rs)
+3039	INSERT of a drawing file does not ask to redefine its block when EXPERT is 2 or more	intégrée	fusionnée le 12 novembre (0.20.1)
+3044	Allow deselecting entities with Shift during Stretch	intégrée	fusionnée le 12 novembre (0.20.1)
+3046	Options menu: scroll a list taller than the drawing area	intégrée	fusionnée le 12 novembre (0.20.1)
+3048	Grips: hidden objects paint no grips and take no grip hits	intégrée	fusionnée le 12 novembre (0.20.1)
+3049	Block Editor: BCONSTRUCTION marks construction geometry (stacked on #3047 and #3048)	en conflit	conflit (éditeur de blocs, 42 fichiers)
+3057	Updates: take craft-update from craft-libs main at e9829954	écartée	mise à jour craft-update
+3062	fix(io): read MULTILEADER text location as the corner 171 names	intégrée	fusionnée le 12 novembre (0.20.1)
+3063	fix(ui): typed SAVE and other file-command aliases open the file dialog	en conflit	conflit avec perso
+3064	GPU canvas: a fill drawn over earlier lines covers them (part of #1530)	intégrée	fusionnée le 12 novembre (0.20.1)
+3065	fix(geom): cap kept crossings, budget hub face tracing, floor the arc-length error	intégrée	fusionnée le 12 novembre (0.20.1)
+3066	fix(render): index layers once per list, band the clip triangles, triangulate disjoint outlines apart	en conflit	conflit avec perso
+3067	fix(engine): bound attribute extraction, NCOPY visits, xref bind lookups and PDFBOOK work; autoload from the s	en conflit	conflit de tests (modify2)
+3069	fix(constraints): one work allowance for AUTOCONSTRAIN, bound the Fix redundancy factorisation	intégrée	fusionnée le 12 novembre (0.20.1)
+3071	fix: do not copy MLINE style descriptions into every multiline; decode control params after authentication	intégrée	fusionnée le 12 novembre (0.20.1)
+3073	fix(plot): hand on only a device known here (unknown plotter DWG To PDF.pc3)	intégrée	fusionnée le 12 novembre (0.20.1)
+3077	fix(app): don't restore a saved main window below the minimum size	en conflit	conflit avec perso
+3083	fix(ui): Esc closes the Hatch and Gradient dialog	intégrée	fusionnée le 12 novembre (0.20.1)
+3086	Keyboard Shortcuts: a modifier or lock key pressed first waits for the shortcut's key	intégrée	fusionnée le 12 novembre (0.20.1)
+3089	CI: use the shared git-sources check	écartée	CI
+3090	Complex text shaping: a ligature glyph shows every character of its cluster (Thai ฐ with sara u)	intégrée	fusionnée le 12 novembre (0.20.1)
+3095	fix(io): skip sampling arcs for the tilt check when the extrusion is on the Z axis	intégrée	fusionnée le 12 novembre (0.20.1)
+3096	fix(io): read a DXF cut inside a group code / value pair, noting the truncation	intégrée	fusionnée le 12 novembre (0.20.1)
+3097	Options: turn off the update check at start	en conflit	conflit (options.rs)
+3099	Feed scripted inputs to LISP command pauses	en conflit	conflit (session interactive)
+3101	ci: lock workflow actions through an actions.lock lockfile	écartée	CI
+3104	fix(lisp): ordering comparisons take nil as below anything else (#2984)	intégrée	fusionnée le 12 novembre (0.20.1)
+3105	Add Tamil (ta) to the interface languages	écartée	langue
+3106	ci: craft-fonts c1db6d1, with Noto Sans for eight Indian scripts	écartée	CI

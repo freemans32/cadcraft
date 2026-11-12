@@ -57,7 +57,7 @@ Remotes : `origin` = ce fork, `upstream` = `storytold/cadcraft`. Ne pousse jamai
 
 Cette section sert à reprendre le travail dans une nouvelle conversation, avec n'importe quelle IA. Elle est mise à jour en continu (règle n° 2) : date, ce qui est fait, ce qui reste.
 
-*Dernière mise à jour : 12 novembre 2026 (murs : épaisseur des couches et ouvertures).*
+*Dernière mise à jour : 12 novembre 2026 (base 0.20.1, 18 nouvelles PR intégrées).*
 
 ### Fait
 
@@ -210,6 +210,11 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
      - **Interface** : rubrique « Ouvertures » de l'onglet Architecture (quatre boutons) ; groupe « Ouverture » de Propriétés (type, largeur, hauteur, allège, **distance depuis le début et depuis la fin**, côté et charnière).
      - Tests : `doc` (6), moteur (6 + 3 pour les couches), palette (2), aller-retour DXF et DWG des coupes et des ouvertures. Vérifié : fmt, clippy -D warnings, `cargo test --workspace` en debug, layers, assets, capture du CLI. Pas vérifié : wasm, interface graphique, AutoCAD.
      - **Pas fait, à faire ensuite** : cote depuis la **face du mur qui coupe** (et non l'axe) et cotes provisoires affichées en direct, comme AutoCAD ; recalcul automatique du mur après déplacement ou effacement d'une ouverture ; reconnaître comme ouvertures les blocs de porte et de fenêtre d'un plan d'architecte ; retours de menuiserie (doublage qui entoure l'ouverture, `returning`) ; ouvertures dans un mur à plusieurs segments hors de leur segment ; hauteur et allège sur les élévations.
+   - **Mise à jour sur l'officiel 0.20.1, 12 novembre** (demandé par Guillaume : « mets à jour à la dernière version et regarde les nouvelles PR sympa sans conflit »). `main` du fork avancé en fast-forward sur `ca87680f` (v0.20.1, 8 commits) et poussé ; fusionné dans `perso`.
+     - **`crates/dxf` n'existe plus** : upstream l'a déplacé dans `craft-libs` (`craft-dxf`, commit `c736e488`, #3040). Tout `cadcraft_dxf` est devenu `craft_dxf`. **Perdu** : la PR #1269 (tables de pages de code DOS pour le DXF), qui modifiait ce dossier ; elle devrait être portée dans `craft-libs`, pas ici. Les autres conflits : la correction de sauvegarde de #2743 est prise telle que l'officiel l'a fusionnée, le champ `objects` d'`EntityCodec` (une PR de perso) est gardé.
+     - **Nouvelles PR (56 depuis le 10 novembre)** : 35 se fusionnent seules avec `perso`, 21 sont en conflit. Parmi les 35, 6 écartées (CI, dépendances, langue, craft-update). **Intégrées : 18** (#3026 MCP find_text, #3027 LISP ssget, #3039 INSERT sans question avec EXPERT, #3044 Maj pour désélectionner dans STRETCH, #3046 menu Options défilant, #3048 poignées des objets cachés, #3062, #3064 remplissage du canevas GPU, #3065, #3069, #3071, #3073, #3083 Échap dans le dialogue de hachures, #3086 raccourcis clavier, #3090 ligatures, #3095, #3096, #3104) ; 11 se fusionnaient seules sur `perso` seul mais entrent en conflit une fois les précédentes fusionnées (#2857 panneau hôte et barre de calques, #3023, #3029, #3030, #3031, #3036, #3038, #3049 BCONSTRUCTION, #3067, #3097, #3099). Détail par PR dans `perso/pr-integrees.tsv`.
+     - Correctifs `perso:` : une dépendance de test en double dans `crates/ui-egui/Cargo.toml`, et `tilted()` (#3095) prend maintenant une fonction, adapté pour la PR qui l'appelait avec une liste.
+     - Vérifié : `cargo fmt`, `clippy -D warnings`, `cargo test --workspace` en debug (0 échec), layers, assets. Pas vérifié : wasm, interface graphique.
    - **À étudier plus tard (demandé par Guillaume)** : convertir un dessin existant (comme sur sa capture : symboles de bouches, gaines souples, cônes, étiquettes de débit) en objets CADCraft (gaines, bouches, CTA). Pistes : reconnaître les blocs et les polylignes par calque, nom de bloc et dimensions, proposer la conversion avec aperçu et validation, ne jamais modifier le dessin d'origine.
    - Ensuite : étape 4 (note de calcul et métré par local), puis les autres réseaux de l'étape 5 (frigo, condensats, eau glacée).
 5. **Export IFC** (BIM).
