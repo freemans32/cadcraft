@@ -224,6 +224,9 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         if row_button(ui, crate::i18n::t("Duct Crossing"), false, |_, _| {}) {
             start = Some("ductcross");
         }
+        if row_button(ui, crate::i18n::t("HVAC Quantities"), false, |_, _| {}) {
+            start = Some("hvactakeoff");
+        }
         if row_button(ui, crate::i18n::t("Connect Terminals"), false, |_, _| {}) {
             connect = true;
         }

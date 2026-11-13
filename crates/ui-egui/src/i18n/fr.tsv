@@ -1145,6 +1145,36 @@
 	Edit Height Zone	Modifier la zone de hauteur
 	Altitude of the underside (m)	Altitude du dessous (m)
 	Riser	Colonne
+	Quantities	Métré
+	HVAC Quantities	Métré CVC
+	Level	Niveau
+	Count again	Recompter
+	Export spreadsheet	Exporter vers un tableur
+	Written: {path}	Écrit : {path}
+	Size the ducts first: the sections are the ones sizing wrote.	Dimensionnez d'abord les gaines : les sections sont celles du dimensionnement.
+	Altitude (m)	Altitude (m)
+	Length (m)	Longueur (m)
+	Area (m²)	Surface (m²)
+	Total	Total
+	Fittings	Raccords
+	Size	Taille
+	Power	Puissance
+	Terminals	Bouches
+	Units	Centrales
+	Exhaust	Rejet
+	Risers	Colonnes
+	Way	Sens
+	From other floors (m³/h)	Venant des autres étages (m³/h)
+	Needed (m³/h)	Demandé (m³/h)
+	Supply (m³/h)	Soufflage (m³/h)
+	Extract terminals	Bouches de reprise
+	Extract (m³/h)	Reprise (m³/h)
+	Duct inside (m)	Gaine dans le local (m)
+	Elbow 90°	Coude 90°
+	Elbow 45°	Coude 45°
+	Tee, straight	Té, passage
+	Tee, branch	Té, dérivation
+	Reducer	Réducteur
 	Power (CV)	Puissance (CV)
 	Equipment	Équipement
 	Edit Equipment	Modifier l'équipement

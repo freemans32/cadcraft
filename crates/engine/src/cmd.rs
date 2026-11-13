@@ -24,6 +24,7 @@ mod griphot;
 pub(crate) mod groups;
 mod opening;
 mod riser;
+mod takeoff;
 mod zone;
 pub use duct::{AhuLastUsed, DuctLastUsed};
 pub use duct_acc::AccessoryLastUsed;
@@ -217,6 +218,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(zone::specs());
         v.extend(riser::specs());
         v.extend(equipment::specs());
+        v.extend(takeoff::specs());
         v.extend(duct_cross::specs());
         v.extend(opening::specs());
         v.extend(modify2::specs());

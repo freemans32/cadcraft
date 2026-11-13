@@ -1530,3 +1530,42 @@ fn the_lower_of_two_ducts_passes_under_by_their_altitudes_a_duct_inside_another_
     at(&mut o, thin, Some(2000.0));
     assert_eq!(o.cross_ducts_by_altitude(30.0).unwrap(), 1);
 }
+
+#[test]
+fn the_takeoff_counts_fittings_accessories_risers_and_units_of_the_level() {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    // A trunk with a tee: the run to the right, a branch going up from its middle, a terminal at the end of each.
+    add_duct(&mut d, (500.0, -300.0), (4000.0, -300.0));
+    add_terminal(&mut d, (4000.0, -300.0), 200.0);
+    add_duct(&mut d, (2250.0, -300.0), (2250.0, 2500.0));
+    add_terminal(&mut d, (2250.0, 2500.0), 150.0);
+    d.split_duct_taps(&Space::Model).unwrap();
+    let q = d.takeoff("R+2").unwrap();
+    assert_eq!(q.level, "R+2");
+    let count = |list: &[CountQuantity], name: &str| list.iter().filter(|c| c.name == name).map(|c| c.count).sum::<usize>();
+    assert_eq!((count(&q.fittings, "Tee, straight"), count(&q.fittings, "Tee, branch")), (1, 1), "{:?}", q.fittings);
+    assert!(
+        q.fittings.iter().any(|c| c.name == "Elbow 90°" || c.name == "Elbow 45°") || q.fittings.iter().all(|c| c.name.starts_with("Tee")),
+        "{:?}",
+        q.fittings
+    );
+    assert_eq!((q.totals.duct_count, q.totals.terminals), (3, 2), "the trunk was cut where the branch starts");
+    assert_eq!(q.terminals.len(), 1, "one model, two terminals: one line");
+    assert_eq!((q.terminals[0].count, q.terminals[0].flow_m3h), (2, 350.0));
+    assert_eq!(q.units.len(), 1);
+    assert_eq!(q.units[0].name, "CTA1");
+    // A reducer is counted with the sizes it joins; an accessory by kind and diameter.
+    let (mut p, ..) = d.duct_ends(d.model.iter().filter_map(|e| d.duct_ends(e.handle).map(|_| e.handle)).nth(1).unwrap()).unwrap();
+    p.reducer = Some(DuctReducer { from_mm: 315.0, at_end: false });
+    let h = d.model.iter().filter_map(|e| d.duct_ends(e.handle).map(|_| e.handle)).nth(1).unwrap();
+    d.regenerate_duct(h, &p).unwrap();
+    let q = d.takeoff("").unwrap();
+    assert!(q.fittings.iter().any(|c| c.name == "Reducer" && c.size.starts_with("315 → ")), "{:?}", q.fittings);
+    // CSV: cells separated by `;`, a cell with a `;` or a quote is quoted.
+    let csv = q.to_csv(false);
+    assert!(csv.starts_with("Level;\n") && csv.contains("Ducts\n"), "{csv}");
+    let mut odd = q.clone();
+    odd.level = "a;\"b\"".into();
+    assert!(odd.to_csv(true).starts_with("Level;\"a;\"\"b\"\"\"\n"));
+}

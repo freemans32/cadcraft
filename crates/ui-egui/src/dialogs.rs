@@ -24,6 +24,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         "hatch" => crate::hatchdlg::dialog(app, ctx, &mut open),
         "aliasedit" => crate::aliasdlg::dialog(app, ctx, &mut open),
         "wallstyles" => crate::wallstyledlg::dialog(app, ctx, &mut open),
+        "takeoff" => crate::takeoffdlg::dialog(app, ctx, &mut open),
         "find" => crate::finddlg::dialog(app, ctx, &mut open),
         crate::keys::DIALOG => crate::keys::dialog(app, ctx, &mut open),
         "about" => about(ctx, &mut open),

@@ -17,6 +17,7 @@ mod drafting_spacing;
 mod file_tab_titles;
 mod gpu_viewport_stencil;
 mod hidden_command_line;
+mod hvac_takeoff_dialog;
 mod instant_modals;
 mod layer_manager_tools;
 mod lisp_files;

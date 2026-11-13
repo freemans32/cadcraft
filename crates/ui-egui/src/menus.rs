@@ -591,6 +591,11 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             crate::aliasdlg::open(app);
             Ok(Value::Null)
         }
+        // Typed or from the HVAC tab (no parameters): the HVAC Quantities dialog. JSON calls keep the JSON form.
+        "hvactakeoff" if params.is_null() => {
+            crate::takeoffdlg::open(app);
+            Ok(Value::Null)
+        }
         // Typed or from the Architecture tab (no parameters): the Wall Styles dialog. JSON calls keep the JSON form.
         "wallstyleedit" if params.is_null() => {
             crate::wallstyledlg::open(app);
