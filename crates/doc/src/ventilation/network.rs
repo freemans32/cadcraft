@@ -41,6 +41,8 @@ pub struct DuctNetwork {
     pub bottoms_mm: Vec<Option<f64>>,
     /// Whether each duct is entered by its far end (the air runs from its end to its origin).
     pub entered_at_end: Vec<bool>,
+    /// For a duct that starts on a unit's collar whose orifice has a size, that size's width, mm: sizing joins them by a reducer.
+    pub collar_widths_mm: Vec<Option<f64>>,
     /// Ducts connected to the unit that lead to no terminal, so are left out of the sizing.
     pub dangling: Vec<Handle>,
     /// The risers the runs of this network end on (on the roof plan): they are sized for the flow typed on them.
@@ -109,8 +111,8 @@ struct Node {
     from: Vec2,
     to: Vec2,
     terminal: Option<(Handle, f64, f64)>,
-    /// The section the orifice of a unit's collar gives the run that starts on it.
-    forced_size: Option<RiserSize>,
+    /// The orifice of the unit's collar the run starts on: a reducer joins it to the run when their widths differ.
+    collar_size: Option<RiserSize>,
     /// The run ends in the open: no terminal, but the air leaves or comes in freely there.
     open: bool,
     fittings: Vec<Fitting>,
@@ -332,9 +334,11 @@ impl crate::Drawing {
             // A reducer where the run joins one of another diameter.
             // (the width a plan shows: the diameter of a round duct, the width of a rectangular one)
             let parent = net.network.segments.get(i).and_then(|s| s.parent).and_then(|k| report.segments.get(k));
-            p.reducer = parent
-                .filter(|q| (q.width_mm - r.width_mm).abs() > 0.5)
-                .map(|q| DuctReducer { from_mm: q.width_mm, at_end: net.entered_at_end.get(i).copied().unwrap_or(false) });
+            // The first run of a unit's collar with a size joins it the same way.
+            let from_mm = parent.map(|q| q.width_mm).or_else(|| net.collar_widths_mm.get(i).copied().flatten());
+            p.reducer = from_mm
+                .filter(|w| (w - r.width_mm).abs() > 0.5)
+                .map(|w| DuctReducer { from_mm: w, at_end: net.entered_at_end.get(i).copied().unwrap_or(false) });
             (p.elbow, p.trim_start_mm, p.trim_end_mm) = (None, 0.0, 0.0);
             p.bottom_mm = net.bottoms_mm.get(i).copied().flatten();
             // Supply and exhaust air leave the unit, extract and fresh air come to it: with the way the
@@ -610,13 +614,12 @@ impl Scan<'_> {
             if let Some(g) = gid {
                 claimed.push((g, k));
             }
-            // The orifice of the collar the duct starts on gives the run its section, unless it was set by hand.
+            // The orifice of the collar the duct starts on: the run is sized for its flow, with a reducer from the orifice.
             let mut tree = tree;
-            if !d.params.imposed
-                && let Some(size) = on.iter().flat_map(|(_, roles)| roles).find(|(a, _)| *a == airs[k]).and_then(|(_, s)| *s)
+            if let Some(size) = on.iter().flat_map(|(_, roles)| roles).find(|(a, _)| *a == airs[k]).and_then(|(_, s)| *s)
                 && let Some(first) = tree.first_mut()
             {
-                first.forced_size = Some(size);
+                first.collar_size = Some(size);
             }
             if let Some(slot) = by_air.get_mut(k) {
                 append_tree(slot, tree);
@@ -680,7 +683,7 @@ impl Scan<'_> {
             from,
             to,
             terminal: None,
-            forced_size: None,
+            collar_size: None,
             open: false,
             fittings: Vec::new(),
             terminals_below: 0,
@@ -725,7 +728,7 @@ impl Scan<'_> {
                     from: f,
                     to: t,
                     terminal: None,
-                    forced_size: None,
+                    collar_size: None,
                     open: false,
                     fittings,
                     terminals_below: 0,
@@ -780,6 +783,7 @@ impl Scan<'_> {
         let mut segments = Vec::with_capacity(kept.len());
         let mut handles = Vec::with_capacity(kept.len());
         let mut entered_at_end = Vec::with_capacity(kept.len());
+        let mut collar_widths_mm = Vec::with_capacity(kept.len());
         let mut elbow_turns_deg = Vec::with_capacity(kept.len());
         let mut bottoms_mm = Vec::with_capacity(kept.len());
         let mut main_chain = vec![false; nodes.len()];
@@ -804,14 +808,12 @@ impl Scan<'_> {
                 kind: segment_kind(d.params.kind, n.terminals_below, on_trunk, d.params.length_m()),
                 fittings: n.fittings.iter().copied().chain(std::iter::repeat_n(Fitting::Elbow45, 4 * d.params.jogs.len())).collect(),
                 terminal: n.terminal.map(|(_, flow, pa)| Terminal { flow_m3h: flow, pressure_drop_pa: pa }),
-                diameter_mm: (d.params.imposed && d.params.shape == DuctShape::Round).then_some(d.params.diameter_mm).or(
-                    match n.forced_size.or(riser_size) {
-                        Some(RiserSize::Round { diameter_mm }) => Some(diameter_mm),
-                        _ => None,
-                    },
-                ),
+                diameter_mm: (d.params.imposed && d.params.shape == DuctShape::Round).then_some(d.params.diameter_mm).or(match riser_size {
+                    Some(RiserSize::Round { diameter_mm }) => Some(diameter_mm),
+                    _ => None,
+                }),
                 rect_mm: (d.params.imposed && d.params.shape == DuctShape::Rectangular).then_some((d.params.width_mm, d.params.height_mm)).or(
-                    match n.forced_size.or(riser_size) {
+                    match riser_size {
                         Some(RiserSize::Rectangular { width_mm, height_mm }) => Some((width_mm, height_mm)),
                         _ => None,
                     },
@@ -821,6 +823,7 @@ impl Scan<'_> {
                 roughness_mm: d.params.flexible.then_some(FLEX_ROUGHNESS_MM),
             });
             entered_at_end.push(n.from == d.b && d.a != d.b);
+            collar_widths_mm.push(n.parent.is_none().then(|| n.collar_size.map(RiserSize::width_mm)).flatten());
             elbow_turns_deg.push(bare_elbow_turn(nodes, n));
             bottoms_mm.push(self.void_at(d.a.mid(d.b)).and_then(|(_, b)| b));
             handles.push(d.handle);
@@ -833,6 +836,7 @@ impl Scan<'_> {
             elbow_turns_deg,
             bottoms_mm,
             entered_at_end,
+            collar_widths_mm,
             dangling,
             riser_ends: kept
                 .iter()

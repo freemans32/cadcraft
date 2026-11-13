@@ -43,7 +43,7 @@ fn equipmentadd_takes_a_model_by_name_or_by_power_and_any_value_given() {
     // An indoor unit by kind and power.
     let r = s.execute("equipmentadd", &json!({"at": [0, 5000], "kind": "cassette", "capacity": 3})).unwrap();
     let e = equip(&s, &r["handle"]);
-    assert_eq!((e.kind, e.model.as_str(), e.name.as_str()), (EquipmentKind::Cassette, "Cassette 600 2.5-6 kW", "UI3"));
+    assert_eq!((e.kind, e.model.as_str(), e.name.as_str()), (EquipmentKind::Cassette, "Cassette 600 3.5 kW", "UI3"));
     // Refused.
     assert!(s.execute("equipmentadd", &json!({"at": [0, 0], "model": "nothing"})).is_err());
     assert!(s.execute("equipmentadd", &json!({"at": [0, 0], "kind": "boiler"})).is_err());
@@ -76,7 +76,7 @@ fn equipmentedit_changes_each_value_or_takes_another_model_and_keeps_the_name() 
     let e = equip(&s, &h);
     assert_eq!(
         (e.name.as_str(), e.model.as_str(), e.capacity_kw, e.length_mm, e.width_mm, e.weight_kg),
-        ("CH1", "Chiller 124 kW", Some(124.0), 2275.0, 2000.0, Some(743.0))
+        ("CH1", "Chiller 124 kW", Some(124.0), 2275.0, 2000.0, None)
     );
     assert!(s.execute("equipmentedit", &json!({"handle": h, "length": 0})).is_err());
     assert!(s.execute("equipmentedit", &json!({"handle": h, "model": "nothing"})).is_err());
@@ -87,13 +87,13 @@ fn equipmentedit_changes_each_value_or_takes_another_model_and_keeps_the_name() 
 #[test]
 fn equipmentadd_at_the_command_line_keeps_placing_under_the_next_name() {
     let mut s = metric();
-    for t in ["equipmentadd", "t", "vrv", "s", "28", "0,0", "3000,0", ""] {
+    for t in ["equipmentadd", "t", "vrv", "s", "10", "0,0", "3000,0", ""] {
         s.cmdline(t).unwrap();
     }
     assert!(s.running.is_none());
     let d = s.doc().unwrap();
     let all: Vec<_> = d.model.iter().filter_map(|e| equipment_of(e)).collect();
     assert_eq!(all.len(), 2);
-    assert!(all.iter().all(|e| e.kind == EquipmentKind::VrfOutdoor && e.model == "VRV outdoor 10 HP"), "{all:?}");
+    assert!(all.iter().all(|e| e.kind == EquipmentKind::VrfOutdoor && e.model == "VRV 10 CV"), "{all:?}");
     assert_eq!(all.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["UE1", "UE2"]);
 }

@@ -1435,7 +1435,10 @@ fn a_duct_running_inside_the_width_of_another_passes_under_it_along_the_stretch_
     assert_eq!(g, [2500.0, 2900.0].map(|v| v - 2500.0).map(|v| v), "along the narrower duct");
     assert_eq!(duct_of(d.entity(again).unwrap()).unwrap().gaps_mm.len(), 1);
     assert!(duct_of(d.entity(big).unwrap()).unwrap().gaps_mm.is_empty(), "the wide one is never drawn under the narrow one");
-    // A duct only partly inside the width cannot lie under it.
+    // A duct whose axis is inside the width lies under it, though a side sticks out a little (snapped to an edge) ...
+    let sticking = add_wide(&mut d, (250.0, 0.0), (250.0, -2000.0), 200.0);
+    assert!(d.pass_duct_under(sticking, big, 30.0).is_ok());
+    // ... one whose axis is outside does not.
     let aside = add_wide(&mut d, (400.0, 0.0), (400.0, -2000.0), 200.0);
     assert!(d.pass_duct_under(aside, big, 30.0).is_err());
     // Two ducts that cross can be swapped: the one drawn broken is whole again.

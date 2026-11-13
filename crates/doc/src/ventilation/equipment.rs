@@ -4,8 +4,7 @@
 //!
 //! Every value of an object is the user's to change (name, make and model, power, sizes, weight, number
 //! of fans, clearance, connections); the library only fills them in from a model, by size or power.
-//! The sizes of the standard models come from the public catalogues of the manufacturers, as numbers
-//! only: the symbols are drawn here, in code.
+//! The sizes of the standard models are plain numbers; the symbols are drawn here, in code.
 
 use cadcraft_geom::{PolyVertex, Vec2};
 use serde::{Deserialize, Serialize};
@@ -113,9 +112,9 @@ impl EquipmentKind {
 pub struct EquipmentModel {
     pub name: String,
     pub kind: EquipmentKind,
-    /// The make and series the sizes come from, free text, empty for none.
+    /// Free text; empty in the library.
     pub reference: String,
-    /// Nominal cooling power, kW, and heating power for a heat pump.
+    /// Nominal cooling power, kW (CV for a VRV outdoor unit), and heating power, kW, for a heat pump.
     pub capacity_kw: Option<f64>,
     pub heating_kw: Option<f64>,
     /// Length (along the block's x axis), width (its y axis) and height, mm.
@@ -237,11 +236,15 @@ impl EquipmentParams {
     /// The text under the equipment: its name and its power.
     pub fn text(&self) -> String {
         let mut t = self.name.clone();
-        match (self.capacity_kw, self.heating_kw) {
-            (Some(c), Some(h)) => t.push_str(&format!(" {c} / {h} kW")),
-            (Some(c), None) => t.push_str(&format!(" {c} kW")),
-            (None, Some(h)) => t.push_str(&format!(" {h} kW")),
-            (None, None) => {}
+        // The power in kW, or in CV for a VRV outdoor unit, whose name already says it when it came from the library.
+        let unit = if self.kind == EquipmentKind::VrfOutdoor { "CV" } else { "kW" };
+        if !self.name.contains(unit) {
+            match (self.capacity_kw, self.heating_kw) {
+                (Some(c), Some(h)) => t.push_str(&format!(" {c} / {h} {unit}")),
+                (Some(c), None) => t.push_str(&format!(" {c} {unit}")),
+                (None, Some(h)) => t.push_str(&format!(" {h} {unit}")),
+                (None, None) => {}
+            }
         }
         t
     }
@@ -423,155 +426,149 @@ impl crate::Drawing {
 fn model(
     name: String,
     kind: EquipmentKind,
-    reference: &str,
-    capacity_kw: f64,
+    capacity: f64,
     heating_kw: Option<f64>,
     (length_mm, width_mm, height_mm): (f64, f64, f64),
-    weight_kg: Option<f64>,
     fans: u32,
-    connections: &str,
 ) -> EquipmentModel {
     EquipmentModel {
         name,
         kind,
-        reference: reference.to_string(),
-        capacity_kw: Some(capacity_kw),
+        reference: String::new(),
+        capacity_kw: Some(capacity),
         heating_kw,
         length_mm,
         width_mm,
         height_mm,
-        weight_kg,
+        weight_kg: None,
         fans,
-        connections: connections.to_string(),
+        connections: String::new(),
     }
 }
 
-/// The models the library starts with, taken from the public catalogues (Carrier air-cooled chillers
-/// 30RB, 30RQ, 30RBM, 30RQP; Daikin split, multi-split, Sky Air, VRV and indoor units): sizes in
-/// millimetres, as length x width x height, weights and powers as published. They are a starting
-/// point, never a constraint: every value of a placed equipment can be changed.
+/// The models the library starts with: a name made of the kind and the power (kW; CV for a VRV unit),
+/// sizes in millimetres as length x width x height, and the number of fans drawn. They only fill the
+/// values in: nothing ties an equipment to them, and every value can be changed.
 pub fn standard_equipment_models() -> Vec<EquipmentModel> {
     use EquipmentKind::{Cassette, CeilingUnit, Chiller, Ducted, FloorUnit, SplitOutdoor, VrfOutdoor, WallUnit};
     let mut v = Vec::new();
-    // ---- Chillers (Carrier). 30RB R-32 cooling only, sizes 040R-160R.
-    let rb = [
-        ("040R", 41.7, 2109.0, 1090.0, 408.0, 0.0, 1),
-        ("045R", 47.3, 2109.0, 1090.0, 409.0, 0.0, 1),
-        ("050R", 52.9, 2109.0, 1090.0, 428.0, 0.0, 1),
-        ("055R", 56.1, 2109.0, 1090.0, 428.0, 0.0, 1),
-        ("060R", 63.6, 2109.0, 1090.0, 435.0, 0.0, 1),
-        ("070R", 71.2, 2109.0, 1090.0, 446.0, 0.0, 1),
-        ("080R", 81.1, 2109.0, 1090.0, 454.0, 0.0, 1),
-        ("090R", 93.4, 2275.0, 2125.0, 672.0, 0.0, 2),
-        ("100R", 107.0, 2275.0, 2125.0, 734.0, 0.0, 2),
-        ("120R", 124.0, 2275.0, 2125.0, 743.0, 0.0, 2),
-        ("140R", 140.0, 2275.0, 2125.0, 861.0, 0.0, 2),
-        ("160R", 160.0, 2275.0, 2125.0, 877.0, 0.0, 2),
+    // Chillers: cooling only, then heat pumps (cooling and heating powers), then the larger casings.
+    let cooling = [
+        (41.7, 2109.0, 1090.0, 1),
+        (47.3, 2109.0, 1090.0, 1),
+        (52.9, 2109.0, 1090.0, 1),
+        (56.1, 2109.0, 1090.0, 1),
+        (63.6, 2109.0, 1090.0, 1),
+        (71.2, 2109.0, 1090.0, 1),
+        (81.1, 2109.0, 1090.0, 1),
+        (93.4, 2275.0, 2125.0, 2),
+        (107.0, 2275.0, 2125.0, 2),
+        (124.0, 2275.0, 2125.0, 2),
+        (140.0, 2275.0, 2125.0, 2),
+        (160.0, 2275.0, 2125.0, 2),
     ];
-    for (size, kw, l, w, kg, _, fans) in rb {
-        v.push(model(format!("Chiller {kw} kW"), Chiller, &format!("30RB {size}"), kw, None, (l, w, 1330.0), Some(kg), fans, ""));
+    for (kw, l, w, fans) in cooling {
+        v.push(model(format!("Chiller {kw} kW"), Chiller, kw, None, (l, w, 1330.0), fans));
     }
-    // 30RQ heat pumps, sizes 040R-160R: cooling and heating (40/45 °C water) powers.
-    let rq = [
-        ("040R", 41.0, 42.7, 2109.0, 1090.0, 444.0, 1),
-        ("045R", 43.1, 47.0, 2109.0, 1090.0, 446.0, 1),
-        ("050R", 50.3, 53.5, 2109.0, 1090.0, 469.0, 1),
-        ("060R", 60.2, 59.5, 2109.0, 1090.0, 496.0, 1),
-        ("070R", 65.2, 67.2, 2109.0, 1090.0, 506.0, 1),
-        ("080R", 74.3, 75.7, 2109.0, 1090.0, 515.0, 1),
-        ("090R", 87.0, 91.7, 2275.0, 2125.0, 759.0, 2),
-        ("100R", 99.9, 105.0, 2275.0, 2125.0, 818.0, 2),
-        ("120R", 114.0, 118.0, 2275.0, 2125.0, 866.0, 2),
-        ("140R", 132.0, 135.0, 2275.0, 2125.0, 996.0, 2),
-        ("160R", 147.0, 150.0, 2275.0, 2125.0, 1000.0, 2),
+    let heat_pumps = [
+        (41.0, 42.7, 2109.0, 1090.0, 1),
+        (43.1, 47.0, 2109.0, 1090.0, 1),
+        (50.3, 53.5, 2109.0, 1090.0, 1),
+        (60.2, 59.5, 2109.0, 1090.0, 1),
+        (65.2, 67.2, 2109.0, 1090.0, 1),
+        (74.3, 75.7, 2109.0, 1090.0, 1),
+        (87.0, 91.7, 2275.0, 2125.0, 2),
+        (99.9, 105.0, 2275.0, 2125.0, 2),
+        (114.0, 118.0, 2275.0, 2125.0, 2),
+        (132.0, 135.0, 2275.0, 2125.0, 2),
+        (147.0, 150.0, 2275.0, 2125.0, 2),
     ];
-    for (size, cool, heat, l, w, kg, fans) in rq {
-        v.push(model(format!("Heat-pump chiller {cool} kW"), Chiller, &format!("30RQ {size}"), cool, Some(heat), (l, w, 1330.0), Some(kg), fans, ""));
+    for (cool, heat, l, w, fans) in heat_pumps {
+        v.push(model(format!("Heat-pump chiller {cool} kW"), Chiller, cool, Some(heat), (l, w, 1330.0), fans));
     }
-    // 30RBM sizes 160-520 (R-410A): three casings.
-    let rbm = [
-        ("160", 168.0, 2410.0, 1216.0, 3),
-        ("180", 181.0, 2410.0, 1257.0, 4),
-        ("200", 198.0, 2410.0, 1257.0, 4),
-        ("220", 216.0, 2410.0, 1387.0, 4),
-        ("260", 261.0, 2410.0, 1408.0, 4),
-        ("300", 300.0, 3604.0, 1865.0, 5),
-        ("330", 331.0, 3604.0, 1901.0, 5),
-        ("360", 365.0, 3604.0, 2069.0, 6),
-        ("400", 397.0, 3604.0, 2125.0, 6),
-        ("430", 430.0, 4797.0, 2545.0, 7),
-        ("470", 464.0, 4797.0, 2563.0, 7),
-        ("520", 523.0, 4797.0, 2761.0, 8),
+    let large = [
+        (168.0, 2410.0, 3),
+        (181.0, 2410.0, 4),
+        (198.0, 2410.0, 4),
+        (216.0, 2410.0, 4),
+        (261.0, 2410.0, 4),
+        (300.0, 3604.0, 5),
+        (331.0, 3604.0, 5),
+        (365.0, 3604.0, 6),
+        (397.0, 3604.0, 6),
+        (430.0, 4797.0, 7),
+        (464.0, 4797.0, 7),
+        (523.0, 4797.0, 8),
     ];
-    for (size, kw, l, kg, fans) in rbm {
-        v.push(model(format!("Chiller {kw} kW"), Chiller, &format!("30RBM {size}"), kw, None, (l, 2253.0, 2297.0), Some(kg), fans, ""));
+    for (kw, l, fans) in large {
+        v.push(model(format!("Chiller {kw} kW"), Chiller, kw, None, (l, 2253.0, 2297.0), fans));
     }
-    // 30RQP 570R, the heat pump of the larger casing (sizes from its dimension drawing).
-    v.push(model("Heat-pump chiller 570 kW".into(), Chiller, "30RQP 570R", 570.0, None, (7185.0, 2259.0, 2324.0), None, 10, "Victaulic 5\""));
+    v.push(model("Heat-pump chiller 570 kW".into(), Chiller, 570.0, None, (7185.0, 2259.0, 2324.0), 10));
 
-    // ---- VRV outdoor units (Daikin): the compact ones, then the single modules of 8 to 20 HP.
-    v.push(model("VRV outdoor 4-6 HP".into(), VrfOutdoor, "VRV IV-S 4-6", 15.5, None, (940.0, 500.0, 823.0), Some(89.0), 1, ""));
-    let vrv = [
-        (8, 22.4, 930.0, 194.0),
-        (10, 28.0, 930.0, 194.0),
-        (12, 33.5, 1240.0, 194.0),
-        (14, 40.0, 1240.0, 275.0),
-        (16, 45.0, 1240.0, 275.0),
-        (18, 50.4, 1240.0, 309.0),
-        (20, 56.0, 1240.0, 309.0),
-    ];
-    for (hp, kw, l, kg) in vrv {
-        let fans = if l > 1000.0 { 2 } else { 1 };
-        v.push(model(format!("VRV outdoor {hp} HP"), VrfOutdoor, &format!("VRV {hp} HP"), kw, None, (l, 765.0, 1685.0), Some(kg), fans, ""));
+    // VRV outdoor units, by power in CV (HP): the compact casing, then single modules.
+    for hp in [4.0, 5.0, 6.0] {
+        v.push(model(format!("VRV {hp} CV"), VrfOutdoor, hp, None, (940.0, 500.0, 823.0), 1));
     }
-    // ---- Split, multi-split and Sky Air outdoor units.
-    let split = [
-        ("Split outdoor 2-3.5 kW", "RXM 20-35", 3.5, (840.0, 350.0, 552.0), 33.0, 1, "1/4 - 3/8"),
-        ("Split outdoor 4.2-5 kW", "RXM 42-50", 5.0, (954.0, 408.0, 734.0), 49.0, 1, "1/4 - 1/2"),
-        ("Multi-split outdoor 2 ports 4-5 kW", "2MXM 40-50", 5.0, (852.0, 350.0, 552.0), 41.0, 1, ""),
-        ("Multi-split outdoor 2-5 ports 6.8-9 kW", "2-5MXM 68-90", 9.0, (974.0, 408.0, 734.0), 63.0, 1, ""),
-        ("Sky Air outdoor 7.1 kW", "RZAG 71", 7.1, (1100.0, 490.0, 870.0), 81.0, 1, ""),
-        ("Sky Air outdoor 10-14 kW", "RZAG 100-140", 14.0, (1100.0, 490.0, 870.0), 85.0, 1, ""),
-        ("Sky Air outdoor compact 7.1 kW", "RZASG 71", 7.1, (900.0, 350.0, 770.0), 60.0, 1, ""),
-        ("Sky Air outdoor compact 10-14 kW", "RZASG 100-140", 14.0, (940.0, 350.0, 990.0), 70.0, 1, ""),
-        ("Sky Air outdoor compact 10-14 kW (AZAS)", "AZAS 100-140", 14.0, (940.0, 350.0, 990.0), 70.0, 1, ""),
-        ("VRV-S outdoor 4-6 HP", "RXYSA 4-6", 15.5, (1100.0, 500.0, 869.0), 0.0, 1, ""),
-    ];
-    for (name, reference, kw, dims, kg, fans, conn) in split {
-        let kind = if name.starts_with("VRV") { VrfOutdoor } else { SplitOutdoor };
-        v.push(model(name.into(), kind, reference, kw, None, dims, (kg > 0.0).then_some(kg), fans, conn));
+    for (hp, l) in [(8.0, 930.0), (10.0, 930.0), (12.0, 1240.0), (14.0, 1240.0), (16.0, 1240.0), (18.0, 1240.0), (20.0, 1240.0)] {
+        v.push(model(format!("VRV {hp} CV"), VrfOutdoor, hp, None, (l, 765.0, 1685.0), if l > 1000.0 { 2 } else { 1 }));
     }
-    // ---- Indoor units.
-    let indoor = [
-        ("Cassette 600 2.5-6 kW", Cassette, "FFA 25-60", 6.0, (620.0, 620.0, 260.0), 0.0),
-        ("Cassette 840 7.1 kW", Cassette, "FCAG 71", 7.1, (950.0, 950.0, 288.0), 21.0),
-        ("Cassette 840 10-14 kW", Cassette, "FCAG 100-140", 14.0, (950.0, 950.0, 288.0), 24.0),
-        ("Cassette 950 7.1-12.5 kW", Cassette, "FUA 71-125", 12.5, (950.0, 950.0, 198.0), 25.0),
-        ("Slim ducted 2.5-3.5 kW", Ducted, "FDXM 25-35", 3.5, (750.0, 620.0, 200.0), 21.0),
-        ("Slim ducted 5-6 kW", Ducted, "FDXM 50-60", 6.0, (1150.0, 620.0, 200.0), 30.0),
-        ("Ducted 7.1 kW", Ducted, "FBA 71", 7.1, (1000.0, 800.0, 245.0), 35.0),
-        ("Ducted 10-14 kW", Ducted, "FBA 100-140", 14.0, (1400.0, 800.0, 245.0), 46.0),
-        ("High-pressure ducted 12.5 kW", Ducted, "FDA 125", 12.5, (1400.0, 700.0, 300.0), 45.0),
-        ("High-pressure ducted 20 kW", Ducted, "FDA 200", 20.0, (1490.0, 1100.0, 470.0), 104.0),
-        ("High-pressure ducted 25 kW", Ducted, "FDA 250", 25.0, (1490.0, 1100.0, 470.0), 115.0),
-        ("Wall unit 2-5 kW", WallUnit, "FTXM 20-50", 5.0, (804.0, 252.0, 298.0), 11.5),
-        ("Wall unit 6-7.1 kW", WallUnit, "FTXM 60-71", 7.1, (997.0, 292.0, 298.0), 14.5),
-        ("Slim wall unit 2-5 kW", WallUnit, "FTXJ 20-50", 5.0, (900.0, 212.0, 305.0), 12.0),
-        ("Sky Air wall unit 7.1 kW", WallUnit, "FAA 71", 7.1, (1050.0, 269.0, 290.0), 14.0),
-        ("Sky Air wall unit 10 kW", WallUnit, "FAA 100", 10.0, (1200.0, 262.0, 340.0), 18.0),
-        ("Ceiling unit 3.5-5 kW", CeilingUnit, "FHA 35-50", 5.0, (960.0, 690.0, 235.0), 0.0),
-        ("Ceiling unit 7.1 kW", CeilingUnit, "FHA 71", 7.1, (1270.0, 690.0, 235.0), 34.0),
-        ("Ceiling unit 10-14 kW", CeilingUnit, "FHA 100-140", 14.0, (1590.0, 690.0, 235.0), 0.0),
-        ("Console 2.5-3.5 kW", FloorUnit, "FVXM 25-35", 3.5, (750.0, 238.0, 600.0), 0.0),
-        ("Console 5 kW", FloorUnit, "FVXM 50", 5.0, (750.0, 238.0, 600.0), 0.0),
-        ("Ducted 2.5 kW", Ducted, "FDXM", 2.5, (750.0, 620.0, 200.0), 21.0),
-        ("Wall unit 2 kW", WallUnit, "FTXM 20", 2.0, (804.0, 252.0, 298.0), 11.5),
-        ("Wall unit 2.5 kW", WallUnit, "FTXM 25", 2.5, (804.0, 252.0, 298.0), 11.5),
-        ("Wall unit 3.5 kW", WallUnit, "FTXM 35", 3.5, (804.0, 252.0, 298.0), 11.5),
-        ("Wall unit 5 kW", WallUnit, "FTXM 50", 5.0, (804.0, 252.0, 298.0), 11.5),
-    ];
-    for (name, kind, reference, kw, dims, kg) in indoor {
-        v.push(model(name.into(), kind, reference, kw, None, dims, (kg > 0.0).then_some(kg), 0, ""));
+    // Split and multi-split outdoor units, by power in kW.
+    for kw in [2.0, 2.5, 3.5] {
+        v.push(model(format!("Split outdoor {kw} kW"), SplitOutdoor, kw, None, (840.0, 350.0, 552.0), 1));
+    }
+    for kw in [4.2, 5.0] {
+        v.push(model(format!("Split outdoor {kw} kW"), SplitOutdoor, kw, None, (954.0, 401.0, 734.0), 1));
+    }
+    for kw in [7.1, 10.0, 12.5, 14.0] {
+        v.push(model(format!("Split outdoor {kw} kW"), SplitOutdoor, kw, None, (1100.0, 490.0, 870.0), 1));
+    }
+    v.push(model("Split outdoor compact 7.1 kW".into(), SplitOutdoor, 7.1, None, (900.0, 350.0, 770.0), 1));
+    for kw in [10.0, 12.5, 14.0] {
+        v.push(model(format!("Split outdoor compact {kw} kW"), SplitOutdoor, kw, None, (940.0, 350.0, 990.0), 1));
+    }
+    for kw in [4.0, 5.0] {
+        v.push(model(format!("Multi-split outdoor {kw} kW"), SplitOutdoor, kw, None, (852.0, 350.0, 552.0), 1));
+    }
+    for kw in [6.8, 8.0, 9.0] {
+        v.push(model(format!("Multi-split outdoor {kw} kW"), SplitOutdoor, kw, None, (974.0, 408.0, 734.0), 1));
+    }
+    // Indoor units, by power in kW.
+    for kw in [2.5, 3.5, 5.0, 6.0] {
+        v.push(model(format!("Cassette 600 {kw} kW"), Cassette, kw, None, (620.0, 620.0, 260.0), 0));
+    }
+    for kw in [7.1, 10.0, 12.5, 14.0] {
+        v.push(model(format!("Cassette 950 {kw} kW"), Cassette, kw, None, (950.0, 950.0, 288.0), 0));
+    }
+    for kw in [2.5, 3.5] {
+        v.push(model(format!("Slim ducted {kw} kW"), Ducted, kw, None, (750.0, 620.0, 200.0), 0));
+    }
+    for kw in [5.0, 6.0] {
+        v.push(model(format!("Slim ducted {kw} kW"), Ducted, kw, None, (1150.0, 620.0, 200.0), 0));
+    }
+    v.push(model("Ducted 7.1 kW".into(), Ducted, 7.1, None, (1000.0, 800.0, 245.0), 0));
+    for kw in [10.0, 12.5, 14.0] {
+        v.push(model(format!("Ducted {kw} kW"), Ducted, kw, None, (1400.0, 800.0, 245.0), 0));
+    }
+    v.push(model("High-pressure ducted 12.5 kW".into(), Ducted, 12.5, None, (1400.0, 700.0, 300.0), 0));
+    for kw in [20.0, 25.0] {
+        v.push(model(format!("High-pressure ducted {kw} kW"), Ducted, kw, None, (1490.0, 1100.0, 470.0), 0));
+    }
+    for kw in [2.0, 2.5, 3.5, 5.0] {
+        v.push(model(format!("Wall unit {kw} kW"), WallUnit, kw, None, (804.0, 252.0, 298.0), 0));
+    }
+    for kw in [6.0, 7.1] {
+        v.push(model(format!("Wall unit {kw} kW"), WallUnit, kw, None, (997.0, 292.0, 298.0), 0));
+    }
+    v.push(model("Wall unit 10 kW".into(), WallUnit, 10.0, None, (1200.0, 262.0, 340.0), 0));
+    for kw in [3.5, 5.0] {
+        v.push(model(format!("Ceiling unit {kw} kW"), CeilingUnit, kw, None, (960.0, 690.0, 235.0), 0));
+    }
+    v.push(model("Ceiling unit 7.1 kW".into(), CeilingUnit, 7.1, None, (1270.0, 690.0, 235.0), 0));
+    for kw in [10.0, 12.5, 14.0] {
+        v.push(model(format!("Ceiling unit {kw} kW"), CeilingUnit, kw, None, (1590.0, 690.0, 235.0), 0));
+    }
+    for kw in [2.5, 3.5, 5.0] {
+        v.push(model(format!("Floor unit {kw} kW"), FloorUnit, kw, None, (750.0, 238.0, 600.0), 0));
     }
     v
 }
@@ -583,10 +580,10 @@ pub fn equipment_models_of(models: &[EquipmentModel], kind: EquipmentKind) -> Ve
     v
 }
 
-/// The smallest model of `kind` that gives `kw` or more, else the largest one.
-pub fn equipment_model_for(models: &[EquipmentModel], kind: EquipmentKind, kw: f64) -> Option<EquipmentModel> {
+/// The smallest model of `kind` that gives `power` or more, else the largest one.
+pub fn equipment_model_for(models: &[EquipmentModel], kind: EquipmentKind, power: f64) -> Option<EquipmentModel> {
     let of = equipment_models_of(models, kind);
-    of.iter().find(|m| m.capacity_kw.is_some_and(|c| c >= kw)).or(of.last()).cloned()
+    of.iter().find(|m| m.capacity_kw.is_some_and(|c| c >= power)).or(of.last()).cloned()
 }
 
 /// The model named `name` (case-insensitive).

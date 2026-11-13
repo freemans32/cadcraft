@@ -39,7 +39,7 @@ fn cross_point(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> Option<(Vec2, f64, f64)> {
     (range.contains(&t) && range.contains(&u)).then(|| (a + r * t, t.max(0.0) * r.len(), u.max(0.0) * s.len()))
 }
 
-/// Where duct `a`–`b` (of width `wa`) lies wholly inside the width `wc` of the parallel duct `c`–`d`:
+/// Where duct `a`–`b` (of width `wa`) lies in the width `wc` of the parallel duct `c`–`d` (its axis inside it, itself the narrower):
 /// the stretch of `a`–`b` they share, drawing units from `a`. `None` when they are not parallel, not
 /// one inside the other, or share less than `min`.
 fn overlap_stretch(a: Vec2, b: Vec2, wa: f64, c: Vec2, d: Vec2, wc: f64, min: f64) -> Option<(f64, f64)> {
@@ -47,8 +47,10 @@ fn overlap_stretch(a: Vec2, b: Vec2, wa: f64, c: Vec2, d: Vec2, wc: f64, min: f6
     if u.cross(v).abs() > 0.02 {
         return None;
     }
+    // The narrower duct's axis is inside the width of the wider (a click that snapped to an edge leaves it a few
+    // centimetres off the axis, its side sticking out a little): it lies under.
     let offset = (c - a).cross(u).abs();
-    if offset + wa / 2.0 > wc / 2.0 + 1e-6 {
+    if offset > wc / 2.0 + 1e-6 || wa > wc + 1e-6 {
         return None;
     }
     let (tc, td) = ((c - a).dot(u), (d - a).dot(u));

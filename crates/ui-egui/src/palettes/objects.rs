@@ -563,10 +563,11 @@ fn equipment_section(ui: &mut egui::Ui, sel: &[Handle], items: &[cadcraft_doc::E
             action = edit("reference", json!(r));
         }
     });
-    // Numbers: empty clears a power or the weight.
+    // Numbers: empty clears a power or the weight. A VRV outdoor unit's power is in CV.
+    let all_vrv = items.iter().all(|e| e.kind == EquipmentKind::VrfOutdoor);
     type Get = fn(&cadcraft_doc::EquipmentParams) -> Option<f64>;
     let numbers: [(&str, &str, Get, bool); 8] = [
-        ("Power (kW)", "capacityKw", |e| e.capacity_kw, true),
+        (if all_vrv { "Power (CV)" } else { "Power (kW)" }, "capacityKw", |e| e.capacity_kw, true),
         ("Heating power (kW)", "heatingKw", |e| e.heating_kw, true),
         ("Length (mm)", "length", |e| Some(e.length_mm), false),
         ("Width (mm)", "width", |e| Some(e.width_mm), false),

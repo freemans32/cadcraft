@@ -31,14 +31,31 @@ fn the_standard_models_are_valid_unique_and_cover_every_kind() {
 }
 
 #[test]
+fn nothing_of_a_maker_is_left_in_the_library_but_the_sizes() {
+    for m in standard_equipment_models() {
+        assert!(m.reference.is_empty() && m.connections.is_empty() && m.weight_kg.is_none(), "{}", m.name);
+        for brand in ["Carrier", "Daikin", "Sky Air", "AquaSnap", "Victaulic", "30R", "FTX", "RXY", "VRV IV"] {
+            assert!(!m.name.contains(brand), "{}", m.name);
+        }
+        // The name is the kind and the power: kW, or CV for a VRV outdoor unit.
+        let unit = if m.kind == EquipmentKind::VrfOutdoor { "CV" } else { "kW" };
+        assert!(m.name.ends_with(unit), "{}", m.name);
+    }
+    let vrv = equipment_model_named(&standard_equipment_models(), "VRV 14 CV").unwrap();
+    assert_eq!(EquipmentParams::from_model(&vrv, "UE1", units()).text(), "UE1 14 CV");
+    let chiller = equipment_model_named(&standard_equipment_models(), "Chiller 107 kW").unwrap();
+    assert_eq!(EquipmentParams::from_model(&chiller, "GE1", units()).text(), "GE1 107 kW");
+}
+
+#[test]
 fn the_carrier_sizes_follow_their_powers() {
     let models = standard_equipment_models();
     let named = |n: &str| equipment_model_named(&models, n).unwrap_or_else(|| panic!("{n}"));
-    // 30RB 040R: one fan, 2109 x 1090 x 1330, 408 kg; 090R: two fans on the larger casing.
+    // The smallest chiller: one fan, 2109 x 1090 x 1330; at 93.4 kW two fans on the larger casing.
     let m = named("Chiller 41.7 kW");
-    assert_eq!((m.length_mm, m.width_mm, m.height_mm, m.weight_kg, m.fans), (2109.0, 1090.0, 1330.0, Some(408.0), 1));
+    assert_eq!((m.length_mm, m.width_mm, m.height_mm, m.fans), (2109.0, 1090.0, 1330.0, 1));
     let m = named("Chiller 93.4 kW");
-    assert_eq!((m.length_mm, m.width_mm, m.weight_kg, m.fans), (2275.0, 2125.0, Some(672.0), 2));
+    assert_eq!((m.length_mm, m.width_mm, m.fans), (2275.0, 2125.0, 2));
     // 30RBM 160-520: three casings, 2253 wide.
     assert_eq!(named("Chiller 168 kW").length_mm, 2410.0);
     assert_eq!(named("Chiller 365 kW").length_mm, 3604.0);
@@ -59,6 +76,7 @@ fn every_kind_is_drawn_from_above_with_its_symbol_its_clearance_and_its_text() {
         let texts: Vec<_> = pieces.iter().filter_map(|x| if let EntityKind::Text(t) = &x.kind { Some(t.value.clone()) } else { None }).collect();
         assert!(texts.iter().any(|t| t.starts_with("G1")), "{kind:?}: {texts:?}");
         assert!(texts.iter().any(|t| t.starts_with("Dim. ")), "{kind:?}: the sizes are written");
+        assert!(!texts.iter().any(|t| t.contains("Poids")), "{kind:?}: no weight unless it is given");
         let zone = pieces.iter().filter(|x| x.layer == EQUIPMENT_ZONE_LAYER).count();
         assert_eq!(zone > 0, kind.is_outdoor(), "{kind:?}: only outdoor units show a service clearance by default");
     }

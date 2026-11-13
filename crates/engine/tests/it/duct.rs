@@ -937,7 +937,7 @@ fn ductsize_records_the_type_it_gave_a_run_left_on_auto_and_the_kind_edit_forget
 }
 
 #[test]
-fn the_orifice_of_a_collar_gives_the_duct_that_starts_on_it_its_section_unless_it_was_set_by_hand() {
+fn the_orifice_of_a_collar_is_joined_to_the_duct_that_starts_on_it_by_a_reducer_sized_for_the_flow() {
     let mut s = metric();
     let u = s.execute("ahuadd", &json!({"at": [0, 0], "type": "supplyUnit"})).unwrap();
     // The supply collar (right) is 800 x 400, the fresh air one (left) 315.
@@ -948,16 +948,20 @@ fn the_orifice_of_a_collar_gives_the_duct_that_starts_on_it_its_section_unless_i
     s.execute("airterminaladd", &json!({"at": [6000, 0], "flow": 300, "air": "supply"})).unwrap();
     s.execute("ductsize", &json!({})).unwrap();
     let p = duct_of(s.doc().unwrap().entity(hd(&d["handles"][0])).unwrap()).unwrap();
-    assert_eq!(
-        (p.shape, p.width_mm, p.height_mm),
-        (cadcraft_doc::DuctShape::Rectangular, 800.0, 400.0),
-        "the orifice's section, not the 300 m³/h one"
-    );
-    // A size set by hand wins over the orifice.
+    // The duct is the size its 300 m³/h ask, not the orifice's; the reducer takes the orifice's width down to it.
+    assert!(p.width_mm < 800.0 && p.diameter_mm < 400.0, "{:?} {} {}", p.shape, p.width_mm, p.diameter_mm);
+    let red = p.reducer.expect("a reducer between the unit and the duct");
+    assert_eq!(red.from_mm, 800.0);
+    assert!(!red.at_end, "at the unit's end, the duct's start");
+    // A size set by hand is kept, and the reducer goes to it.
     s.execute("ductedit", &json!({"handle": d["handles"][0], "diameter": 250})).unwrap();
     s.execute("ductsize", &json!({})).unwrap();
     let p = duct_of(s.doc().unwrap().entity(hd(&d["handles"][0])).unwrap()).unwrap();
-    assert_eq!((p.shape, p.diameter_mm), (cadcraft_doc::DuctShape::Round, 250.0));
+    assert_eq!((p.shape, p.diameter_mm, p.reducer.map(|r| r.from_mm)), (cadcraft_doc::DuctShape::Round, 250.0, Some(800.0)));
+    // An orifice of the duct's own width needs none.
+    s.execute("ahuedit", &json!({"handle": u["handle"], "portSizes": [315, 250]})).unwrap();
+    s.execute("ductsize", &json!({})).unwrap();
+    assert!(duct_of(s.doc().unwrap().entity(hd(&d["handles"][0])).unwrap()).unwrap().reducer.is_none());
     assert!(s.execute("ahuedit", &json!({"handle": u["handle"], "portSizes": ["wide"]})).is_err());
     assert!(s.execute("ahuedit", &json!({"handle": u["handle"], "portSizes": [1, 2, 3]})).is_err(), "a supply unit has two collars");
 }
