@@ -819,3 +819,34 @@ fn ahuadd_and_ahuedit_take_the_height_the_make_and_the_weight_of_the_unit() {
     assert_eq!((a.height_mm, a.weight_kg, a.depth_mm), (Some(1800.0), None, 1400.0));
     assert!(s.execute("ahuedit", &json!({"handle": r["handle"], "height": -3})).is_err());
 }
+
+#[test]
+fn ductsize_shares_the_flow_a_space_asks_between_its_terminals_and_leaves_unequal_ones() {
+    let mut s = metric();
+    s.execute("ahuadd", &json!({"at": [-3000, 2500]})).unwrap();
+    let room = [[0, 0], [6000, 0], [6000, 5000], [0, 5000]];
+    let sp = s.execute("spaceadd", &json!({"points": room, "name": "RDC", "flow": 790})).unwrap();
+    let placed = s.execute("airterminaladd", &json!({"space": sp["handle"], "count": 9})).unwrap();
+    let handles: Vec<Handle> = placed["handles"].as_array().unwrap().iter().map(hd).collect();
+    let flows = |s: &Session| -> Vec<f64> {
+        handles.iter().map(|h| cadcraft_doc::air_terminal_of(s.doc().unwrap().entity(*h).unwrap()).unwrap().flow_m3h).collect()
+    };
+    assert!(flows(&s).iter().all(|f| (f - 790.0 / 9.0).abs() < 1e-6));
+    // The space is asked for more afterwards: sizing shares 3500 m³/h between the 9, rounded up to 10.
+    s.execute("spaceedit", &json!({"handle": sp["handle"], "flow": 3500})).unwrap();
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    assert_eq!(flows(&s), vec![390.0; 9], "{r}");
+    let done = r["rebalanced"].as_array().unwrap();
+    assert_eq!((done.len(), done[0]["terminals"].as_u64(), done[0]["to"].as_f64()), (1, Some(9), Some(390.0)), "{r}");
+    assert!(done[0].get("error").is_none(), "{r}");
+    // Done once: a second sizing has nothing to change.
+    assert!(s.execute("ductsize", &json!({})).unwrap()["rebalanced"].as_array().unwrap().is_empty());
+    // One terminal set apart is a choice: the others stay too, and `balanceTerminals: false` leaves all.
+    s.execute("airterminaledit", &json!({"handle": placed["handles"][0], "flow": 100})).unwrap();
+    s.execute("spaceedit", &json!({"handle": sp["handle"], "flow": 2000})).unwrap();
+    assert!(s.execute("ductsize", &json!({})).unwrap()["rebalanced"].as_array().unwrap().is_empty());
+    assert_eq!(flows(&s)[0], 100.0);
+    s.execute("airterminaledit", &json!({"handles": placed["handles"], "flow": 150})).unwrap();
+    assert!(s.execute("ductsize", &json!({"balanceTerminals": false})).unwrap()["rebalanced"].as_array().unwrap().is_empty());
+    assert_eq!(flows(&s), vec![150.0; 9]);
+}

@@ -1029,6 +1029,62 @@ fn edit_terminals(s: &mut Session, hs: &[Handle], c: &TerminalChange) -> Result<
     Ok(next.len())
 }
 
+/// Gives the terminals of each space the flow it asks, shared between them: what DUCTSIZE does first,
+/// so the flow set on a space after its terminals were placed reaches them. Only the terminals of a
+/// direction (supply, extract) that all carry the same flow are changed: unequal flows are a choice
+/// and stay. The share is rounded up to 10 m³/h, and a terminal whose model can't carry it takes the
+/// smallest one that can. What it did, by space and direction.
+pub(super) fn rebalance_terminals(s: &mut Session) -> Result<Vec<Value>> {
+    let d = s.doc()?;
+    let terminals: Vec<(Handle, Vec2, TerminalParams)> = d
+        .model
+        .iter()
+        .filter_map(|e| match (&e.kind, cadcraft_doc::air_terminal_of(e)) {
+            (EntityKind::Insert(i), Some(t)) => Some((e.handle, Vec2::new(i.insert.x, i.insert.y), t)),
+            _ => None,
+        })
+        .collect();
+    let mut done = vec![false; terminals.len()];
+    let mut plan: Vec<(String, AirDirection, Vec<(Handle, bool)>, f64, f64)> = Vec::new();
+    for e in d.model.iter() {
+        let Some((sp, outline)) = d.space_outline(e.handle) else { continue };
+        let Ok(need) = sp.flow() else { continue };
+        for air in [AirDirection::Supply, AirDirection::Extract] {
+            let group: Vec<usize> = (0..terminals.len())
+                .filter(|&i| !done[i] && terminals[i].2.air == air && cadcraft_geom::point_in_polygon(&outline, terminals[i].1))
+                .collect();
+            for &i in &group {
+                done[i] = true;
+            }
+            let flows: Vec<f64> = group.iter().map(|&i| terminals[i].2.flow_m3h).collect();
+            let (Some(lo), Some(hi)) = (flows.iter().copied().reduce(f64::min), flows.iter().copied().reduce(f64::max)) else { continue };
+            let each = ((need / flows.len() as f64) / 10.0 - 1e-9).ceil() * 10.0;
+            if hi - lo > 0.01 * hi || (each - lo).abs() < 0.5 || !(each > 0.0 && each <= cadcraft_doc::MAX_TERMINAL_FLOW_M3H) {
+                continue;
+            }
+            let members = group.iter().map(|&i| (terminals[i].0, terminals[i].2.model.max_flow_m3h < each)).collect();
+            plan.push((sp.name.clone(), air, members, lo, each));
+        }
+    }
+    let mut report = Vec::new();
+    for (space, air, members, from, to) in plan {
+        let mut error = None;
+        for (h, bigger) in &members {
+            let c = TerminalChange { model: bigger.then(|| "auto".to_string()), flow: Some(to), ..TerminalChange::default() };
+            if let Err(e) = edit_terminals(s, &[*h], &c) {
+                error = Some(e.to_string());
+                break;
+            }
+        }
+        let mut entry = json!({ "space": space, "air": air.name(), "terminals": members.len(), "from": from, "to": to });
+        if let Some(e) = error {
+            entry["error"] = json!(e);
+        }
+        report.push(entry);
+    }
+    Ok(report)
+}
+
 fn run_airterminaledit(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "airterminaledit";
     let hs = super::arch::handles_param(CMD, p)?;

@@ -40,7 +40,7 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         CommandSpec::new("ductsize", "Size Ducts", run_ductsize).menu(&["Draw", "HVAC", "Size Ducts"]).params(
             "{ahu? (handle; default every unit), maxVelocityMain? (m/s), maxVelocityBranch?, maxVelocityConnection?, \
-             maxGradient? (Pa/m), margin? (mm kept back from the height available, default 100), maxAspect? (width / height of a rectangular duct, default 4), sideStep? (mm, default 50), \
+             balanceTerminals? (false keeps the terminals' flows; default true: a space's flow is shared between its terminals first), maxGradient? (Pa/m), margin? (mm kept back from the height available, default 100), maxAspect? (width / height of a rectangular duct, default 4), sideStep? (mm, default 50), \
              minSide? (mm, default 100), maxSide? (mm, default 2000)} → {networks: [{ahu, totalFlow (m³/h), requiredPressure (Pa), criticalPath, segments, warnings}]}",
         ),
     ]
@@ -1026,6 +1026,9 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => None,
         Some(v) => Some(v.as_str().and_then(Handle::parse_hex).ok_or_else(|| bad(CMD, "`ahu` must be a handle"))?),
     };
+    // The flow a space asks is shared between its terminals first (`balanceTerminals: false` leaves them).
+    let rebalanced =
+        if p.get("balanceTerminals").and_then(Value::as_bool).unwrap_or(true) { super::hvac::rebalance_terminals(s)? } else { Vec::new() };
     // Ducts drawn across one another, or a terminal on a run, are cut so their ends meet.
     let space = s.space();
     let cuts = s.doc_mut()?.split_duct_taps(&space).map_err(doc_err)?;
@@ -1089,5 +1092,7 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let ducts = nets.first().map_or(0, |n| n.duct_count);
     let isolated = nets.first().map_or(0, |n| n.isolated.len());
-    Ok(json!({ "networks": out, "cuts": cuts, "spaces": mismatches, "balance": balance, "ducts": ducts, "reached": ducts - isolated }))
+    Ok(
+        json!({ "networks": out, "cuts": cuts, "rebalanced": rebalanced, "spaces": mismatches, "balance": balance, "ducts": ducts, "reached": ducts - isolated }),
+    )
 }

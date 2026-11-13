@@ -335,6 +335,17 @@ impl crate::Drawing {
                 self.regenerate_duct(*h, p)?;
             }
         }
+        // A stub hanging on the network that leads to no terminal is left out of the sizing but takes its
+        // direction, so it is not left in the default colour.
+        for h in &net.dangling {
+            if let Some((mut p, ..)) = self.duct_ends(*h)
+                && !p.air_set
+                && p.air != net.air
+            {
+                p.air = net.air;
+                self.regenerate_duct(*h, &p)?;
+            }
+        }
         let e = self.entity(net.ahu).ok_or(crate::DocError::NoEntity(net.ahu))?;
         if let Some(mut a) = ahu_of(e) {
             a.set_figures(net.air, report.total_flow_m3h, report.required_pressure_pa);

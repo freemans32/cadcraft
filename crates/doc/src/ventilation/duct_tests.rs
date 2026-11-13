@@ -1250,3 +1250,21 @@ fn on_the_roof_the_ducts_of_a_unit_end_on_the_riser_with_the_flow_typed_on_it() 
     assert_eq!(nets[0].network.segments[0].terminal.map(|t| t.flow_m3h), Some(900.0));
     assert_ne!(nets[0].ahu, r);
 }
+
+#[test]
+fn a_stub_past_a_tee_leads_nowhere_but_takes_the_direction_of_the_network_it_hangs_on() {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    // An extract run from the lower right collar to a terminal, with a dead stub of 100 mm drawn
+    // past a tee (left on the default, supply direction).
+    add_duct(&mut d, (500.0, -300.0), (4000.0, -300.0));
+    extract_terminal(&mut d, (4000.0, -300.0), 250.0);
+    let stub = add_duct(&mut d, (2000.0, -300.0), (2000.0, -200.0));
+    d.split_duct_taps(&Space::Model).unwrap();
+    let net = d.duct_networks().unwrap().remove(0);
+    assert_eq!((net.air, net.dangling.as_slice()), (AirDirection::Extract, [stub].as_slice()));
+    let report = cadcraft_hvac::size_network(&net.network, &DesignCriteria::default()).unwrap();
+    assert_eq!(duct_of(d.entity(stub).unwrap()).unwrap().air, AirDirection::Supply, "it is not read yet");
+    d.apply_duct_report(&net, &report).unwrap();
+    assert_eq!(duct_of(d.entity(stub).unwrap()).unwrap().air, AirDirection::Extract, "it takes the colour of its network");
+}
