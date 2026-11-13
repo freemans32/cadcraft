@@ -204,6 +204,7 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
             (AhuKind::SupplyUnit, "Supply unit"),
             (AhuKind::ExtractUnit, "Extract unit"),
             (AhuKind::VmcBox, "Ventilation box"),
+            (AhuKind::StackedDoubleFlow, "Compact double-flow unit"),
         ] {
             if row_button(ui, crate::i18n::t(label), kind == unit, |_, _| {}) {
                 chosen_unit = Some(kind);

@@ -1147,3 +1147,25 @@ fn a_unit_writes_its_make_dimensions_and_weight_beside_it_and_keeps_them_in_its_
     assert!(AhuParams { height_mm: Some(0.0), ..ahu() }.validate().is_err());
     assert!(AhuParams { weight_kg: Some(-1.0), ..ahu() }.validate().is_err());
 }
+
+#[test]
+fn a_compact_unit_has_its_collars_stacked_at_each_end_and_a_duct_on_one_takes_its_direction() {
+    let compact = AhuParams { kind: AhuKind::StackedDoubleFlow, width_mm: 1600.0, depth_mm: 1510.0, ..ahu() };
+    assert_eq!(AhuKind::parse("verticale"), Some(AhuKind::StackedDoubleFlow));
+    // Exhaust over fresh air on the left, extract over supply on the right.
+    assert_eq!(compact.roles(), [AirDirection::Exhaust, AirDirection::Fresh, AirDirection::Extract, AirDirection::Supply]);
+    let tips = compact.port_tips();
+    assert_eq!((tips[0].0.x, tips[1].0.x), (tips[0].0.x, tips[0].0.x), "the two collars of an end share its face");
+    assert!(tips[0].0.y > tips[1].0.y && tips[2].0.y > tips[3].0.y, "the upper one is drawn first");
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &compact, Vec2::ZERO, 0.0).unwrap();
+    // A duct to a supply terminal on the lower right collar, one to an extract terminal on the upper right.
+    let y = 0.22 * 1510.0 / 2.0;
+    add_duct(&mut d, (800.0, -y), (4000.0, -y));
+    add_terminal(&mut d, (4000.0, -y), 300.0);
+    add_duct(&mut d, (800.0, y), (4000.0, y));
+    extract_terminal(&mut d, (4000.0, y), 250.0);
+    let nets = d.duct_networks().unwrap();
+    assert_eq!(nets.iter().map(|n| n.air).collect::<Vec<_>>(), [AirDirection::Supply, AirDirection::Extract]);
+    assert!(nets.iter().all(|n| n.network.segments.len() == 1 && n.dangling.is_empty()));
+}

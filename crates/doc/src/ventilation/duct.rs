@@ -49,10 +49,14 @@ pub enum AhuKind {
     ExtractUnit,
     /// A ventilation box (caisson VMC).
     VmcBox,
+    /// A compact double-flux unit with its collars stacked at each end (CTA double flux compacte,
+    /// "verticale"): at each end the upper collar is over the lower one, which a plan shows side
+    /// by side and close together. Extract over supply on one end, exhaust over fresh air on the other.
+    StackedDoubleFlow,
 }
 
 impl AhuKind {
-    pub const ALL: [AhuKind; 4] = [AhuKind::DoubleFlow, AhuKind::SupplyUnit, AhuKind::ExtractUnit, AhuKind::VmcBox];
+    pub const ALL: [AhuKind; 5] = [AhuKind::DoubleFlow, AhuKind::SupplyUnit, AhuKind::ExtractUnit, AhuKind::VmcBox, AhuKind::StackedDoubleFlow];
 
     pub fn parse(text: &str) -> Option<AhuKind> {
         match text.trim().to_ascii_lowercase().as_str() {
@@ -60,6 +64,7 @@ impl AhuKind {
             "supplyunit" | "supply" | "soufflage" | "s" => Some(AhuKind::SupplyUnit),
             "extractunit" | "extract" | "extraction" | "e" => Some(AhuKind::ExtractUnit),
             "vmcbox" | "vmc" | "box" | "caisson" => Some(AhuKind::VmcBox),
+            "stackeddoubleflow" | "stacked" | "compact" | "compacte" | "vertical" | "verticale" => Some(AhuKind::StackedDoubleFlow),
             _ => None,
         }
     }
@@ -71,6 +76,7 @@ impl AhuKind {
             AhuKind::SupplyUnit => "supplyUnit",
             AhuKind::ExtractUnit => "extractUnit",
             AhuKind::VmcBox => "vmcBox",
+            AhuKind::StackedDoubleFlow => "stackedDoubleFlow",
         }
     }
 
@@ -81,13 +87,14 @@ impl AhuKind {
             AhuKind::SupplyUnit => "CTA S",
             AhuKind::ExtractUnit => "CTA E",
             AhuKind::VmcBox => "VMC",
+            AhuKind::StackedDoubleFlow => "CTA DF",
         }
     }
 
     /// The names of its connections, in the order [`AhuParams::ports`] lists them.
     pub fn port_names(self) -> &'static [&'static str] {
         match self {
-            AhuKind::DoubleFlow => &["Left top", "Left bottom", "Right top", "Right bottom"],
+            AhuKind::DoubleFlow | AhuKind::StackedDoubleFlow => &["Left top", "Left bottom", "Right top", "Right bottom"],
             AhuKind::SupplyUnit | AhuKind::ExtractUnit => &["Left", "Right"],
             AhuKind::VmcBox => &["Left", "Right", "Top left", "Top right"],
         }
@@ -102,6 +109,7 @@ impl AhuKind {
             AhuKind::SupplyUnit => vec![Fresh, Supply],
             AhuKind::ExtractUnit => vec![Extract, Exhaust],
             AhuKind::VmcBox => vec![Fresh, Exhaust, Supply, Extract],
+            AhuKind::StackedDoubleFlow => vec![Exhaust, Fresh, Extract, Supply],
         }
     }
 
@@ -111,6 +119,7 @@ impl AhuKind {
             AhuKind::DoubleFlow => (2000.0, 1000.0),
             AhuKind::SupplyUnit | AhuKind::ExtractUnit => (2500.0, 900.0),
             AhuKind::VmcBox => (700.0, 550.0),
+            AhuKind::StackedDoubleFlow => (1600.0, 1510.0),
         }
     }
 }
@@ -187,6 +196,13 @@ impl AhuParams {
                 (Vec2::new(hx + stick, -0.5 * hy), r),
             ],
             AhuKind::SupplyUnit | AhuKind::ExtractUnit => vec![(Vec2::new(-hx - stick, 0.0), l), (Vec2::new(hx + stick, 0.0), r)],
+            // The two collars of an end are one over the other: the plan shows them close together.
+            AhuKind::StackedDoubleFlow => vec![
+                (Vec2::new(-hx - stick, 0.22 * hy), l),
+                (Vec2::new(-hx - stick, -0.22 * hy), l),
+                (Vec2::new(hx + stick, 0.22 * hy), r),
+                (Vec2::new(hx + stick, -0.22 * hy), r),
+            ],
             AhuKind::VmcBox => {
                 vec![
                     (Vec2::new(-hx - stick, 0.0), l),
@@ -306,7 +322,7 @@ impl AhuParams {
         // The kind's code inside the first compartment, at the top (above a box, which has no room);
         // the name and the figures below the unit.
         let code_at = match self.kind {
-            AhuKind::DoubleFlow => Vec2::new(-half.x / 2.0, half.y * 0.8),
+            AhuKind::DoubleFlow | AhuKind::StackedDoubleFlow => Vec2::new(-half.x / 2.0, half.y * 0.8),
             AhuKind::VmcBox => Vec2::new(0.0, half.y + 1.6 * h),
             _ => Vec2::new(0.0, half.y * 0.8),
         };
@@ -373,7 +389,7 @@ impl AhuParams {
         let inset = 0.04 * hy.min(hx);
         let mut v = vec![rect(0.0, 0.0, hx, hy), rect(0.0, 0.0, hx - inset, hy - inset)];
         match self.kind {
-            AhuKind::DoubleFlow => {
+            AhuKind::DoubleFlow | AhuKind::StackedDoubleFlow => {
                 // Two compartments, a fan in each, and two collars on each short side.
                 v.push(line(Vec2::new(0.0, -(hy - inset)), Vec2::new(0.0, hy - inset)));
                 let r = 0.3 * hy.min(hx / 2.0);

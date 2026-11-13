@@ -1164,6 +1164,7 @@
 	Supply unit	CTA simple flux soufflage
 	Extract unit	CTA simple flux extraction
 	Ventilation box	Caisson VMC
+	Compact double-flow unit	CTA double flux compacte
 	Enter unit type	Entrez le type de centrale
 	Ducts reached from a unit: {reached} of {ducts}	Gaines reliées à une CTA : {reached} sur {ducts}
 	Terminals connected: {n}	Bouches raccordées : {n}

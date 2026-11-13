@@ -599,9 +599,15 @@ fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams], bad: &mut
             AhuKind::SupplyUnit => "Supply unit",
             AhuKind::ExtractUnit => "Extract unit",
             AhuKind::VmcBox => "Ventilation box",
+            AhuKind::StackedDoubleFlow => "Compact double-flow unit",
         };
-        let items =
-            [("doubleFlow", "Double-flow unit"), ("supplyUnit", "Supply unit"), ("extractUnit", "Extract unit"), ("vmcBox", "Ventilation box")];
+        let items = [
+            ("doubleFlow", "Double-flow unit"),
+            ("supplyUnit", "Supply unit"),
+            ("extractUnit", "Extract unit"),
+            ("vmcBox", "Ventilation box"),
+            ("stackedDoubleFlow", "Compact double-flow unit"),
+        ];
         if let Some(k) = choice(ui, kind.map_or(VARIES, label), &items) {
             action = edit("type", json!(k));
         }

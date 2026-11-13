@@ -17,13 +17,13 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("ahuadd", "Air Handling Unit", run_ahuadd)
             .menu(&["Draw", "HVAC", "Air Handling Unit"])
             .params(
-                "{at, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox (default doubleFlow), width? (mm), depth? (mm), height? (mm), model?, weight? (kg), rotation? (degrees), \
+                "{at, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox|stackedDoubleFlow (default doubleFlow), width? (mm), depth? (mm), height? (mm), model?, weight? (kg), rotation? (degrees), \
                  labelHeight? (mm)} → {handle, name} (its ducts and terminals say supply or extract)",
             )
             .interactive(|s| Ok(Box::new(AhuAddM::new(s)))),
         CommandSpec::new("ahuedit", "Edit Air Handling Unit", run_ahuedit)
             .params(
-                "{handle | handles, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox, width? (mm), depth? (mm), height? (mm or null), model?, weight? (kg or null), \
+                "{handle | handles, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox|stackedDoubleFlow, width? (mm), depth? (mm), height? (mm or null), model?, weight? (kg or null), \
                  ports? (the direction of the air at each collar, supply|extract|fresh|exhaust, one per collar: four for a double-flux unit or a box, two for a single-flux unit; [] restores the kind's)} → {changed}",
             ),
         CommandSpec::new("ductadd", "Duct", run_ductadd)
@@ -155,7 +155,9 @@ fn duct_air_param(cmd: &str, p: &Value) -> Result<Option<Option<AirDirection>>> 
 
 fn ahu_kind_param(cmd: &str, p: &Value) -> Result<Option<AhuKind>> {
     match str_param(p, "type") {
-        Some(t) => AhuKind::parse(t).map(Some).ok_or_else(|| bad(cmd, "`type` must be doubleFlow, supplyUnit, extractUnit or vmcBox")),
+        Some(t) => {
+            AhuKind::parse(t).map(Some).ok_or_else(|| bad(cmd, "`type` must be doubleFlow, supplyUnit, extractUnit, vmcBox or stackedDoubleFlow"))
+        }
         None => Ok(None),
     }
 }
