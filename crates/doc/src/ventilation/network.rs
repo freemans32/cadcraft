@@ -312,6 +312,11 @@ impl crate::Drawing {
             }
             p.flow_m3h = Some(r.flow_m3h);
             p.velocity = Some(r.velocity);
+            p.kind_found = net.network.segments.get(i).map(|s| match s.kind {
+                SegmentKind::Main => DuctKind::Main,
+                SegmentKind::Branch => DuctKind::Branch,
+                SegmentKind::Connection => DuctKind::Connection,
+            });
             // A duct whose direction was not fixed takes that of the network it serves.
             if !p.air_set {
                 p.air = net.air;

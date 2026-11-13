@@ -918,3 +918,20 @@ fn a_long_run_to_a_single_terminal_is_a_branch_not_a_connection_so_it_is_not_siz
     assert_eq!(diameter(8000.0, Some("connection")), 250.0);
     assert_eq!(diameter(1500.0, Some("branch")), 200.0);
 }
+
+#[test]
+fn ductsize_records_the_type_it_gave_a_run_left_on_auto_and_the_kind_edit_forgets_it() {
+    let mut s = metric();
+    s.execute("ahuadd", &json!({"at": [-3000, 0], "type": "supplyUnit"})).unwrap();
+    let long = s.execute("ductadd", &json!({"points": [[-1700, 0], [-1700, 8000]]})).unwrap();
+    let short = s.execute("ductadd", &json!({"points": [[-2500, 0], [-2500, 1500]]})).unwrap();
+    s.execute("airterminaladd", &json!({"at": [-1700, 8000], "flow": 350, "air": "supply"})).unwrap();
+    s.execute("airterminaladd", &json!({"at": [-2500, 1500], "flow": 350, "air": "supply"})).unwrap();
+    let found = |s: &Session, h: &Value| cadcraft_doc::duct_of(s.doc().unwrap().entity(hd(h)).unwrap()).unwrap().kind_found;
+    assert_eq!(found(&s, &long["handles"][0]), None, "not sized yet");
+    s.execute("ductsize", &json!({})).unwrap();
+    assert_eq!(found(&s, &long["handles"][0]), Some(DuctKind::Main), "a long run on the trunk");
+    assert_eq!(found(&s, &short["handles"][0]), Some(DuctKind::Connection));
+    s.execute("ductedit", &json!({"handle": long["handles"][0], "kind": "main"})).unwrap();
+    assert_eq!(found(&s, &long["handles"][0]), None, "the type was set by hand");
+}

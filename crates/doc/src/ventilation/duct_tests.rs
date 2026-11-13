@@ -33,6 +33,7 @@ fn duct(diameter_mm: f64) -> DuctParams {
         diameter_mm,
         imposed: false,
         kind: DuctKind::Auto,
+        kind_found: None,
         air: AirDirection::Supply,
         air_set: false,
         flow_m3h: None,

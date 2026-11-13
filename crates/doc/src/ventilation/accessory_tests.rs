@@ -100,6 +100,7 @@ fn ducted(accessory_at: Option<(AccessoryKind, f64, f64)>) -> (Drawing, Option<H
         diameter_mm: 250.0,
         imposed: true,
         kind: DuctKind::Auto,
+        kind_found: None,
         air: AirDirection::Supply,
         air_set: false,
         flow_m3h: None,

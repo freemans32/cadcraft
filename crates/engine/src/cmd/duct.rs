@@ -482,6 +482,7 @@ fn duct_params(s: &Session, last: &DuctLastUsed, label_mm: f64) -> Result<DuctPa
         diameter_mm: last.diameter_mm,
         imposed: false,
         kind: last.kind,
+        kind_found: None,
         air: last.air.unwrap_or_default(),
         air_set: last.air.is_some(),
         flow_m3h: None,
@@ -743,7 +744,9 @@ fn run_ductedit(s: &mut Session, p: &Value) -> Result<Value> {
             Some(None) => dp.imposed = false,
             None => {}
         }
-        dp.kind = kind.unwrap_or(dp.kind);
+        if let Some(k) = kind {
+            (dp.kind, dp.kind_found) = (k, None);
+        }
         match air {
             Some(Some(a)) => (dp.air, dp.air_set) = (a, true),
             Some(None) => dp.air_set = false,
@@ -842,6 +845,7 @@ fn run_ductconnect(s: &mut Session, p: &Value) -> Result<Value> {
             diameter_mm: t.model.neck_mm,
             imposed: true,
             kind: DuctKind::Connection,
+            kind_found: None,
             air: t.air,
             air_set: true,
             flow_m3h: None,

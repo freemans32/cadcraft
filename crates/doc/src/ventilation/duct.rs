@@ -563,6 +563,10 @@ pub struct DuctParams {
     pub imposed: bool,
     #[serde(default)]
     pub kind: DuctKind,
+    /// The type sizing gave the run when its own is Auto (main, branch or connection), set at the
+    /// last sizing: what Properties shows beside "Auto".
+    #[serde(default)]
+    pub kind_found: Option<DuctKind>,
     #[serde(default)]
     pub air: AirDirection,
     /// Whether the user fixed the air direction. When not, sizing sets it from the terminals the

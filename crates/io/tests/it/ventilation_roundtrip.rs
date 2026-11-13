@@ -87,6 +87,7 @@ fn ducted() -> Drawing {
         diameter_mm: 250.0,
         imposed: false,
         kind: DuctKind::Auto,
+        kind_found: None,
         air: AirDirection::Supply,
         air_set: true,
         flow_m3h: Some(500.0),

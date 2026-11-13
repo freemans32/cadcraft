@@ -220,8 +220,13 @@ fn use_label(key: &str) -> &'static str {
 
 /// A menu of `items` (value, label) showing `current`; returns the value clicked.
 fn choice(ui: &mut egui::Ui, current: &str, items: &[(&'static str, &'static str)]) -> Option<&'static str> {
+    choice_text(ui, crate::i18n::t(current), items)
+}
+
+/// [`choice`] with the shown text already in the interface language.
+fn choice_text(ui: &mut egui::Ui, shown: impl Into<egui::WidgetText>, items: &[(&'static str, &'static str)]) -> Option<&'static str> {
     let mut out = None;
-    ui.menu_button(crate::i18n::t(current), |ui| {
+    ui.menu_button(shown, |ui| {
         for (value, label) in items {
             if ui.button(crate::i18n::t(label)).clicked() {
                 out = Some(*value);
@@ -737,7 +742,16 @@ fn duct_section(ui: &mut egui::Ui, sel: &[Handle], ds: &[DuctParams], len: &dyn 
     let kind = shared(&ds.iter().map(|p| p.kind).collect::<Vec<_>>());
     prop_row(ui, "Kind", |ui| {
         let items = [("auto", "Auto"), ("main", "Main"), ("branch", "Branch"), ("connection", "Connection")];
-        if let Some(k) = choice(ui, kind.map_or(VARIES, duct_kind_label), &items) {
+        // On Auto, the type sizing gave the run is shown beside it, once it has been sized.
+        let found = match (kind, ds) {
+            (Some(DuctKind::Auto), [p]) => p.kind_found,
+            _ => None,
+        };
+        let shown = match (kind, found) {
+            (Some(DuctKind::Auto), Some(f)) => format!("{} ({})", crate::i18n::t("Auto"), crate::i18n::t(duct_kind_label(f))),
+            (k, _) => crate::i18n::t(k.map_or(VARIES, duct_kind_label)).to_string(),
+        };
+        if let Some(k) = choice_text(ui, shown, &items) {
             action = edit("kind", json!(k));
         }
     });
@@ -751,15 +765,21 @@ fn duct_section(ui: &mut egui::Ui, sel: &[Handle], ds: &[DuctParams], len: &dyn 
     // The direction of a duct is its own when the user fixed it, else the one sizing found.
     let air = shared(&ds.iter().map(|p| (p.air_set, p.air)).collect::<Vec<_>>());
     prop_row(ui, "Air", |ui| {
-        let shown = air.map_or(VARIES, |(set, a)| match (set, a) {
-            (false, _) => "Auto",
-            (true, AirDirection::Supply) => "Supply",
-            (true, AirDirection::Extract) => "Extract",
-            (true, AirDirection::Fresh) => "Fresh air",
-            (true, AirDirection::Exhaust) => "Exhaust air",
-        });
+        let name = |a: AirDirection| match a {
+            AirDirection::Supply => "Supply",
+            AirDirection::Extract => "Extract",
+            AirDirection::Fresh => "Fresh air",
+            AirDirection::Exhaust => "Exhaust air",
+        };
+        // On Auto, the direction sizing found is shown beside it.
+        let shown = match air {
+            None => crate::i18n::t(VARIES).to_string(),
+            Some((false, a)) if ds.iter().all(|p| p.flow_m3h.is_some()) => format!("{} ({})", crate::i18n::t("Auto"), crate::i18n::t(name(a))),
+            Some((false, _)) => crate::i18n::t("Auto").to_string(),
+            Some((true, a)) => crate::i18n::t(name(a)).to_string(),
+        };
         let items = [("auto", "Auto"), ("supply", "Supply"), ("extract", "Extract"), ("fresh", "Fresh air"), ("exhaust", "Exhaust air")];
-        if let Some(a) = choice(ui, shown, &items) {
+        if let Some(a) = choice_text(ui, shown, &items) {
             action = edit("air", json!(a));
         }
     });
@@ -1076,5 +1096,23 @@ mod hvac_tests {
         type_into(&mut hn, "600", "800");
         let p = cadcraft_doc::riser_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
         assert_eq!(p.shaft_mm(), (800.0, 400.0));
+    }
+
+    #[test]
+    fn a_duct_on_auto_shows_the_type_and_the_air_direction_sizing_gave_it() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        app.run("ahuadd", json!({ "at": [-3000, 0], "type": "supplyUnit" })).unwrap();
+        let r = app.run("ductadd", json!({ "points": [[-1700, 0], [-1700, 8000]] })).unwrap();
+        app.run("airterminaladd", json!({ "at": [-1700, 8000], "flow": 350, "air": "supply" })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handles"][0].as_str().unwrap()).unwrap();
+        app.session.set_selection(vec![h]);
+        let hn = palette(app);
+        assert!(hn.query_all_by_label("Auto").count() >= 1 && hn.query_all_by_label_contains("Auto (").count() == 0, "not sized yet: Auto only");
+        let mut app = hn.into_state();
+        app.run("ductsize", json!({})).unwrap();
+        let hn = palette(app);
+        assert!(hn.query_by_label("Auto (Main)").is_some(), "the type sizing gave");
+        assert!(hn.query_by_label("Auto (Supply)").is_some(), "the direction sizing found");
     }
 }
