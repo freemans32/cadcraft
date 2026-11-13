@@ -196,13 +196,15 @@ impl AhuParams {
                 (Vec2::new(hx + stick, -0.5 * hy), r),
             ],
             AhuKind::SupplyUnit | AhuKind::ExtractUnit => vec![(Vec2::new(-hx - stick, 0.0), l), (Vec2::new(hx + stick, 0.0), r)],
-            // The two collars of an end are one over the other: the plan shows them close together.
-            AhuKind::StackedDoubleFlow => vec![
-                (Vec2::new(-hx - stick, 0.22 * hy), l),
-                (Vec2::new(-hx - stick, -0.22 * hy), l),
-                (Vec2::new(hx + stick, 0.22 * hy), r),
-                (Vec2::new(hx + stick, -0.22 * hy), r),
-            ],
+            // The two collars of an end are one over the other: a plan sees them at the same point.
+            AhuKind::StackedDoubleFlow => {
+                vec![
+                    (Vec2::new(-hx - stick, 0.0), l),
+                    (Vec2::new(-hx - stick, 0.0), l),
+                    (Vec2::new(hx + stick, 0.0), r),
+                    (Vec2::new(hx + stick, 0.0), r),
+                ]
+            }
             AhuKind::VmcBox => {
                 vec![
                     (Vec2::new(-hx - stick, 0.0), l),
@@ -221,7 +223,11 @@ impl AhuParams {
         let len = 0.45 * half.y.min(half.x);
         let gap = 0.1 * half.y.min(half.x);
         let mut v = Vec::new();
-        for ((tip, normal), role) in self.port_tips().into_iter().zip(self.roles()) {
+        for (idx, ((mut tip, normal), role)) in self.port_tips().into_iter().zip(self.roles()).enumerate() {
+            // Stacked collars share a point, so their marks are drawn apart: the upper one above, the lower one below.
+            if self.kind == AhuKind::StackedDoubleFlow {
+                tip.y += if idx % 2 == 0 { 0.22 * half.y } else { -0.22 * half.y };
+            }
             let layer = match role {
                 AirDirection::Supply => super::AIR_SUPPLY_LAYER,
                 AirDirection::Extract => super::AIR_EXTRACT_LAYER,

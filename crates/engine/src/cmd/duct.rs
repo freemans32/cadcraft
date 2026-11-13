@@ -1032,7 +1032,7 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
     let nets: Vec<_> =
         s.doc()?.duct_networks_with_margin(margin_mm).map_err(doc_err)?.into_iter().filter(|n| only.is_none_or(|h| h == n.ahu)).collect();
     if nets.is_empty() {
-        return Err(other("There is no air handling unit to size: place one with AHUADD."));
+        return Err(other("There is no air handling unit or riser to size: place one with AHUADD or RISERADD."));
     }
     let mut out = Vec::new();
     let mut sized = Vec::new();

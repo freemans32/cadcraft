@@ -79,3 +79,24 @@ fn riseradd_at_the_command_line_takes_the_options_then_the_shaft_points() {
     let q = riser(&s, hd(&r["handle"]));
     assert_eq!((q.air, q.up), (AirDirection::Fresh, false));
 }
+
+#[test]
+fn ductsize_reads_a_floor_from_its_riser_and_writes_back_the_flow_it_carries_and_its_size() {
+    let mut s = metric();
+    // The shaft, 600 x 400, extract, 660 m³/h coming from the floors below; two extract terminals of this floor.
+    let r =
+        s.execute("riseradd", &json!({"at": [300, 200], "width": 600, "depth": 400, "name": "A.R", "air": "extract", "incomingFlow": 660})).unwrap();
+    s.execute("ductadd", &json!({"points": [[600, 200], [5000, 200]], "air": "extract"})).unwrap();
+    s.execute("airterminaladd", &json!({"at": [5000, 200], "flow": 250, "air": "extract", "type": "squareCeiling"})).unwrap();
+    let out = s.execute("ductsize", &json!({})).unwrap();
+    let nets = out["networks"].as_array().unwrap();
+    assert_eq!((nets.len(), nets[0]["air"].as_str(), nets[0]["totalFlow"].as_f64()), (1, Some("extract"), Some(250.0)), "{out}");
+    let p = riser(&s, hd(&r["handle"]));
+    assert_eq!(p.flow_m3h, Some(910.0), "this floor's 250 and the 660 from below");
+    assert!(p.size.is_some(), "the riser is sized for that flow in its shaft");
+    assert!(p.text().contains("910 m³/h"), "{}", p.text());
+    // A size typed on the riser is kept by the next sizing.
+    s.execute("riseredit", &json!({"handle": r["handle"], "size": 250})).unwrap();
+    s.execute("ductsize", &json!({})).unwrap();
+    assert_eq!(riser(&s, hd(&r["handle"])).size, Some(RiserSize::Round { diameter_mm: 250.0 }));
+}

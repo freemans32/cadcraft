@@ -89,6 +89,9 @@ pub struct RiserParams {
     pub flow_m3h: Option<f64>,
     #[serde(default)]
     pub size: Option<RiserSize>,
+    /// Whether the size was typed: sizing leaves it as it is.
+    #[serde(default)]
+    pub size_set: bool,
     #[serde(default = "default_label_mm")]
     pub label_height_mm: f64,
     #[serde(default)]

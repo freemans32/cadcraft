@@ -134,6 +134,7 @@ fn run_add(s: &mut Session, p: &Value) -> Result<Value> {
                 incoming_flow_m3h: None,
                 flow_m3h: None,
                 size: None,
+                size_set: false,
                 label_height_mm: 100.0,
                 units,
             };
@@ -152,6 +153,7 @@ fn run_add(s: &mut Session, p: &Value) -> Result<Value> {
         incoming_flow_m3h: number(CMD, p, "incomingFlow")?,
         flow_m3h: number(CMD, p, "flow")?,
         size: size_param(CMD, p)?.flatten(),
+        size_set: size_param(CMD, p)?.flatten().is_some(),
         label_height_mm: number(CMD, p, "labelHeight")?.unwrap_or(100.0),
         units,
     };
@@ -185,7 +187,7 @@ fn run_edit(s: &mut Session, p: &Value) -> Result<Value> {
             r.flow_m3h = v;
         }
         if let Some(v) = size {
-            r.size = v;
+            (r.size, r.size_set) = (v, v.is_some());
         }
         match shaft {
             (None, None) => {}
@@ -237,6 +239,7 @@ impl RiserAddM {
             incoming_flow_m3h: None,
             flow_m3h: None,
             size: None,
+            size_set: false,
             label_height_mm: 100.0,
             units: HvacUnits::of(s.doc()?),
         })

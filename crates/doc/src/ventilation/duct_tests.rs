@@ -1149,23 +1149,104 @@ fn a_unit_writes_its_make_dimensions_and_weight_beside_it_and_keeps_them_in_its_
 }
 
 #[test]
-fn a_compact_unit_has_its_collars_stacked_at_each_end_and_a_duct_on_one_takes_its_direction() {
+fn a_compact_unit_has_its_collars_stacked_at_one_point_and_the_terminals_say_which_duct_is_which() {
     let compact = AhuParams { kind: AhuKind::StackedDoubleFlow, width_mm: 1600.0, depth_mm: 1510.0, ..ahu() };
     assert_eq!(AhuKind::parse("verticale"), Some(AhuKind::StackedDoubleFlow));
     // Exhaust over fresh air on the left, extract over supply on the right.
     assert_eq!(compact.roles(), [AirDirection::Exhaust, AirDirection::Fresh, AirDirection::Extract, AirDirection::Supply]);
     let tips = compact.port_tips();
-    assert_eq!((tips[0].0.x, tips[1].0.x), (tips[0].0.x, tips[0].0.x), "the two collars of an end share its face");
-    assert!(tips[0].0.y > tips[1].0.y && tips[2].0.y > tips[3].0.y, "the upper one is drawn first");
+    assert_eq!(tips[0].0, tips[1].0, "the two collars of the left end are at one point");
+    assert_eq!(tips[2].0, tips[3].0, "and those of the right end");
     let mut d = Drawing::new_metric();
     d.add_ahu(&Space::Model, Common::default(), &compact, Vec2::ZERO, 0.0).unwrap();
-    // A duct to a supply terminal on the lower right collar, one to an extract terminal on the upper right.
-    let y = 0.22 * 1510.0 / 2.0;
-    add_duct(&mut d, (800.0, -y), (4000.0, -y));
-    add_terminal(&mut d, (4000.0, -y), 300.0);
-    add_duct(&mut d, (800.0, y), (4000.0, y));
-    extract_terminal(&mut d, (4000.0, y), 250.0);
+    // Two ducts leave the same point, the first to an extract terminal, the second to a supply one.
+    add_duct(&mut d, (800.0, 0.0), (4000.0, 300.0));
+    extract_terminal(&mut d, (4000.0, 300.0), 250.0);
+    add_duct(&mut d, (800.0, 0.0), (4000.0, -300.0));
+    add_terminal(&mut d, (4000.0, -300.0), 300.0);
     let nets = d.duct_networks().unwrap();
-    assert_eq!(nets.iter().map(|n| n.air).collect::<Vec<_>>(), [AirDirection::Supply, AirDirection::Extract]);
+    let mut airs: Vec<_> = nets.iter().map(|n| n.air).collect();
+    airs.sort_by_key(|a| a.name());
+    assert_eq!(airs, [AirDirection::Extract, AirDirection::Supply]);
     assert!(nets.iter().all(|n| n.network.segments.len() == 1 && n.dangling.is_empty()));
+}
+
+#[test]
+fn two_open_ducts_on_stacked_collars_take_the_upper_and_the_lower_direction_in_turn() {
+    let compact = AhuParams { kind: AhuKind::StackedDoubleFlow, width_mm: 1600.0, depth_mm: 1510.0, ..ahu() };
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &compact, Vec2::ZERO, 0.0).unwrap();
+    // Extract and supply, each with a flow set on its open end: the first duct takes the upper collar's direction.
+    let a = add_duct(&mut d, (800.0, 0.0), (4000.0, 300.0));
+    let b = add_duct(&mut d, (800.0, 0.0), (4000.0, -300.0));
+    for h in [a, b] {
+        let (mut p, ..) = d.duct_ends(h).unwrap();
+        p.open_flow_m3h = Some(400.0);
+        d.regenerate_duct(h, &p).unwrap();
+    }
+    let nets = d.duct_networks().unwrap();
+    let got: Vec<_> = nets.iter().map(|n| (n.air, n.ducts.clone())).collect();
+    assert_eq!(got, [(AirDirection::Supply, vec![b]), (AirDirection::Extract, vec![a])]);
+}
+
+fn riser_at(d: &mut Drawing, at: (f64, f64), air: AirDirection, incoming: Option<f64>) -> Handle {
+    let mut p = RiserParams {
+        name: "VMC 3".into(),
+        air,
+        up: true,
+        outline: vec![Vec2::new(0.0, 0.0), Vec2::new(600.0, 0.0), Vec2::new(600.0, 400.0), Vec2::new(0.0, 400.0)],
+        incoming_flow_m3h: incoming,
+        flow_m3h: None,
+        size: None,
+        size_set: false,
+        label_height_mm: 100.0,
+        units: HvacUnits::default(),
+    };
+    for v in &mut p.outline {
+        *v += Vec2::new(at.0, at.1);
+    }
+    d.add_riser(&Space::Model, Common::default(), p).unwrap()
+}
+
+#[test]
+fn a_riser_is_where_the_ducts_of_a_floor_start_and_it_carries_the_floor_plus_the_other_floors() {
+    let mut d = Drawing::new_metric();
+    let r = riser_at(&mut d, (0.0, 0.0), AirDirection::Extract, Some(660.0));
+    // Two extract terminals on a duct that starts in the shaft: 250 + 150 m³/h on this floor.
+    add_duct(&mut d, (600.0, 200.0), (5000.0, 200.0));
+    extract_terminal(&mut d, (5000.0, 200.0), 250.0);
+    add_duct(&mut d, (3000.0, 200.0), (3000.0, 2000.0));
+    extract_terminal(&mut d, (3000.0, 2000.0), 150.0);
+    d.split_duct_taps(&Space::Model).unwrap();
+    let nets = d.duct_networks().unwrap();
+    assert_eq!(nets.len(), 1, "the riser is the only origin, and it has no empty twin");
+    assert_eq!((nets[0].ahu, nets[0].air, nets[0].dangling.len()), (r, AirDirection::Extract, 0));
+    // Sizing: the report's flow is the floor's, the riser adds the one typed from the other floors.
+    let report = cadcraft_hvac::size_network(&nets[0].network, &DesignCriteria::default()).unwrap();
+    assert_eq!(report.total_flow_m3h, 400.0);
+    d.apply_duct_report(&nets[0], &report).unwrap();
+    let p = riser_of(d.entity(r).unwrap()).unwrap();
+    assert_eq!(p.flow_m3h, Some(1060.0));
+    // 1060 m³/h in a 600 x 400 shaft less the margin: a round duct of the short side's room or a flat one.
+    assert!(p.size.is_some_and(|s| s.width_mm() <= 500.0 || matches!(s, RiserSize::Rectangular { .. })), "{:?}", p.size);
+    // A size typed is kept.
+    let mut typed = p.clone();
+    (typed.size, typed.size_set) = (Some(RiserSize::Round { diameter_mm: 250.0 }), true);
+    d.regenerate_riser(r, &typed).unwrap();
+    d.apply_duct_report(&nets[0], &report).unwrap();
+    assert_eq!(riser_of(d.entity(r).unwrap()).unwrap().size, Some(RiserSize::Round { diameter_mm: 250.0 }));
+}
+
+#[test]
+fn on_the_roof_the_ducts_of_a_unit_end_on_the_riser_with_the_flow_typed_on_it() {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    // The unit's extract collar (right, bottom of the default double-flux) to a riser that takes 900 m³/h.
+    let r = riser_at(&mut d, (4000.0, -500.0), AirDirection::Extract, Some(900.0));
+    add_duct(&mut d, (500.0, -300.0), (4100.0, -300.0));
+    let nets = d.duct_networks().unwrap();
+    assert_eq!(nets.len(), 1, "the unit reads the duct, the riser has none left: {nets:?}");
+    assert_eq!((nets[0].air, nets[0].network.segments.len(), nets[0].dangling.len()), (AirDirection::Extract, 1, 0));
+    assert_eq!(nets[0].network.segments[0].terminal.map(|t| t.flow_m3h), Some(900.0));
+    assert_ne!(nets[0].ahu, r);
 }
