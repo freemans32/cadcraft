@@ -660,20 +660,43 @@ fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams], bad: &mut
         let items = [("supply", "Supply"), ("extract", "Extract"), ("fresh", "Fresh air"), ("exhaust", "Exhaust air")];
         for (k, name) in u.kind.port_names().iter().enumerate() {
             let Some(role) = roles.get(k).copied() else { continue };
-            // The size of the orifice: a diameter or "800x400", empty for none; the duct that starts here takes it.
+            // The orifice of the collar: its shape (none, round, rectangular) and its size; the duct that
+            // starts here takes it.
             let size = u.port_sizes.get(k).copied().flatten();
             let text = size.map_or(String::new(), |s| s.label().replace('Ø', "").replace('×', "x"));
-            prop_row(ui, &format!("{} ({})", crate::i18n::t(name), crate::i18n::t("size")), |ui| {
-                if let Some(t) = edit_field(ui, ui.scope_id().with(("ahu_port_size", k, &ids)), text).filter(|t| t != VARIES) {
-                    let mut sizes: Vec<Value> = (0..u.kind.port_names().len())
-                        .map(|j| u.port_sizes.get(j).copied().flatten().map_or(Value::Null, |s| json!(s.label().replace('Ø', "").replace('×', "x"))))
-                        .collect();
-                    if let Some(slot) = sizes.get_mut(k) {
-                        *slot = if t.trim().is_empty() { Value::Null } else { json!(t.trim()) };
+            let with = |value: Value| -> Value {
+                let mut sizes: Vec<Value> = (0..u.kind.port_names().len())
+                    .map(|j| u.port_sizes.get(j).copied().flatten().map_or(Value::Null, |s| json!(s.label().replace('Ø', "").replace('×', "x"))))
+                    .collect();
+                if let Some(slot) = sizes.get_mut(k) {
+                    *slot = value;
+                }
+                json!(sizes)
+            };
+            prop_row(ui, &format!("{} ({})", crate::i18n::t(name), crate::i18n::t("section")), |ui| {
+                let shown = match size {
+                    None => crate::i18n::t("None"),
+                    Some(cadcraft_doc::RiserSize::Round { .. }) => crate::i18n::t("Round"),
+                    Some(cadcraft_doc::RiserSize::Rectangular { .. }) => crate::i18n::t("Rectangular"),
+                };
+                let (w, round) = size.map_or((250.0, true), |s| (s.width_mm(), matches!(s, cadcraft_doc::RiserSize::Round { .. })));
+                match choice_text(ui, shown, &[("none", "None"), ("round", "Round"), ("rectangular", "Rectangular")]) {
+                    Some("none") => action = edit("portSizes", with(Value::Null)),
+                    Some("round") if !(size.is_some() && round) => action = edit("portSizes", with(json!(w))),
+                    Some("rectangular") if !matches!(size, Some(cadcraft_doc::RiserSize::Rectangular { .. })) => {
+                        let h = ((w * 0.75 / 50.0).round() * 50.0).max(100.0);
+                        action = edit("portSizes", with(json!(format!("{w:.0}x{h:.0}"))));
                     }
-                    action = edit("portSizes", json!(sizes));
+                    _ => {}
                 }
             });
+            if size.is_some() {
+                prop_row(ui, &format!("{} ({})", crate::i18n::t(name), crate::i18n::t("size")), |ui| {
+                    if let Some(t) = edit_field(ui, ui.scope_id().with(("ahu_port_size", k, &ids)), text).filter(|t| t != VARIES) {
+                        action = edit("portSizes", with(if t.trim().is_empty() { Value::Null } else { json!(t.trim()) }));
+                    }
+                });
+            }
             prop_row(ui, name, |ui| {
                 if let Some(c) = choice(ui, items.iter().find(|i| AirDirection::parse(i.0) == Some(role)).map_or("", |i| i.1), &items)
                     && let Some(new) = AirDirection::parse(c)

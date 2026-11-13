@@ -1367,3 +1367,35 @@ fn the_four_elbows_of_a_jog_are_in_the_losses_of_the_run() {
     d.regenerate_duct(run, &p).unwrap();
     assert_eq!(elbows(&d), 4);
 }
+
+#[test]
+fn a_compact_unit_shows_one_collar_at_each_end_as_wide_as_its_orifices() {
+    let polys = |p: &AhuParams| -> Vec<Vec<Vec2>> {
+        p.generate()
+            .unwrap()
+            .into_iter()
+            .filter_map(|x| match x.kind {
+                EntityKind::LwPolyline(l) => Some(l.vertices.iter().map(|v| v.p).collect()),
+                _ => None,
+            })
+            .collect()
+    };
+    let double = AhuParams { kind: AhuKind::DoubleFlow, width_mm: 1600.0, depth_mm: 1510.0, ..ahu() };
+    let compact = AhuParams { kind: AhuKind::StackedDoubleFlow, ..double.clone() };
+    // The casing twice, then the collars: four on a double-flux unit, two (one per end) on a compact one.
+    assert_eq!((polys(&double).len(), polys(&compact).len()), (6, 4));
+    // The orifices (right end: 1000 x 400 over a round 250) make the right collar 1000 mm wide, as plans draw it.
+    let sized = AhuParams {
+        port_sizes: vec![
+            None,
+            None,
+            Some(RiserSize::Rectangular { width_mm: 1000.0, height_mm: 400.0 }),
+            Some(RiserSize::Round { diameter_mm: 250.0 }),
+        ],
+        ..compact.clone()
+    };
+    let right = polys(&sized).into_iter().find(|p| p.iter().all(|v| v.x >= 799.9)).unwrap();
+    let (lo, hi) = right.iter().fold((f64::MAX, f64::MIN), |(lo, hi), v| (lo.min(v.y), hi.max(v.y)));
+    assert_eq!(hi - lo, 1000.0);
+    assert!(AhuParams { port_sizes: vec![None; 5], ..compact }.validate().is_err(), "one size per collar");
+}

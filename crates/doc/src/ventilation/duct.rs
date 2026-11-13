@@ -447,9 +447,20 @@ impl AhuParams {
                 let r = 0.3 * hy.min(hx / 2.0);
                 v.extend(fan(Vec2::new(-hx / 2.0, 0.0), r));
                 v.extend(fan(Vec2::new(hx / 2.0, 0.0), r));
-                for right in [false, true] {
-                    for y in [-0.5 * hy, 0.5 * hy] {
-                        v.push(side_collar(right, y, 0.22 * hy));
+                if self.kind == AhuKind::StackedDoubleFlow {
+                    // The two collars of an end are one over the other: seen from above there is one,
+                    // as wide as the wider of the two when their sizes are given.
+                    for (right, pair) in [(false, [0, 1]), (true, [2, 3])] {
+                        let width_mm =
+                            pair.iter().filter_map(|i| self.port_sizes.get(*i).copied().flatten()).map(|s| s.width_mm()).fold(0.0, f64::max);
+                        let half_size = if width_mm > 0.0 { self.units.to_units(width_mm) / 2.0 } else { 0.22 * hy };
+                        v.push(side_collar(right, 0.0, half_size.min(0.9 * hy)));
+                    }
+                } else {
+                    for right in [false, true] {
+                        for y in [-0.5 * hy, 0.5 * hy] {
+                            v.push(side_collar(right, y, 0.22 * hy));
+                        }
                     }
                 }
             }
