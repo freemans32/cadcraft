@@ -848,13 +848,16 @@ pub(crate) const AXIS_REACH: f64 = 0.75;
 
 /// Where the duct from `a` to `b` of `diameter` (drawing units) is cut by a branch ending or
 /// starting at `at`: the foot of `at` on the axis, when `at` is within [`AXIS_REACH`] diameters (or
-/// `tol`) of the axis and more than `tol` from either end. `None` otherwise.
+/// `tol`) of the axis and farther than that from either end. A branch that starts nearer an end is
+/// at a corner, not a tee: ends that close already meet when the network is read, and a cut there
+/// would leave a short piece that leads nowhere. `None` otherwise.
 pub(super) fn interior_cut(a: Vec2, b: Vec2, diameter: f64, at: Vec2, tol: f64) -> Option<Vec2> {
     let length = a.dist(b);
     let along = (b - a).normalized();
     let t = (at - a).dot(along);
     let across = (at - a).cross(along).abs();
-    (across <= tol.max(AXIS_REACH * diameter) && t > tol && t < length - tol).then(|| a + along * t)
+    let reach = tol.max(AXIS_REACH * diameter);
+    (across <= reach && t > reach && t < length - reach).then(|| a + along * t)
 }
 
 impl crate::Drawing {

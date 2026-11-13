@@ -100,3 +100,31 @@ fn ductsize_reads_a_floor_from_its_riser_and_writes_back_the_flow_it_carries_and
     s.execute("ductsize", &json!({})).unwrap();
     assert_eq!(riser(&s, hd(&r["handle"])).size, Some(RiserSize::Round { diameter_mm: 250.0 }));
 }
+
+#[test]
+fn a_run_started_on_the_edge_of_another_near_its_corner_leaves_no_short_piece_out_of_the_sizing() {
+    // From the riser up, then right to the far end; then, from the corner facing the riser's outlet, to
+    // the left: the click lands on the edge of the run, a few centimetres from where the first one turns.
+    for start in [[300.0, 3000.0], [300.0, 3090.0], [330.0, 3090.0], [270.0, 3085.0], [380.0, 3090.0]] {
+        let mut s = metric();
+        s.execute("riseradd", &json!({"at": [300, 200], "width": 600, "depth": 400, "air": "extract", "name": "R"})).unwrap();
+        s.execute("ductadd", &json!({"points": [[300, 200], [300, 3000], [6000, 3000]], "diameter": 200})).unwrap();
+        s.execute("ductadd", &json!({"points": [start, [-4000, 3090]], "diameter": 200})).unwrap();
+        // Another run's end a hand's breadth before the end of the left one: it must not leave a stub either.
+        for at in [[6000, 3000], [-4000, 3090]] {
+            s.execute("airterminaladd", &json!({"at": at, "flow": 200, "air": "extract", "type": "squareCeiling"})).unwrap();
+        }
+        let r = s.execute("ductsize", &json!({})).unwrap();
+        let net = &r["networks"][0];
+        assert_eq!(net["totalFlow"].as_f64(), Some(400.0), "start {start:?}: {r}");
+        assert!(net["warnings"].as_array().unwrap().is_empty(), "start {start:?}: {net}");
+        assert_eq!((r["reached"].as_u64(), r["ducts"].as_u64()), (r["ducts"].as_u64(), r["ducts"].as_u64()), "{r}");
+        let d = s.doc().unwrap();
+        for e in d.model.iter() {
+            if let Some((p, a, b)) = d.duct_ends(e.handle) {
+                assert!(a.dist(b) > 100.0, "start {start:?}: a piece of {:.0} mm", a.dist(b));
+                assert_eq!(p.air, cadcraft_doc::AirDirection::Extract, "start {start:?}");
+            }
+        }
+    }
+}
