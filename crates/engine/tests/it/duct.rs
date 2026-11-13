@@ -979,3 +979,46 @@ fn a_double_flux_unit_is_made_horizontal_or_vertical_by_its_type_and_keeps_the_s
     s.execute("ahuedit", &json!({"handle": u["handle"], "type": "horizontal"})).unwrap();
     assert_eq!(kind(&s).kind, cadcraft_doc::AhuKind::DoubleFlow);
 }
+
+#[test]
+fn ductcross_draws_a_duct_under_another_it_runs_inside_of_and_lists_it_as_an_overlap() {
+    let mut s = metric();
+    let big = s.execute("ductadd", &json!({"points": [[0, 0], [0, -3000]], "diameter": 650})).unwrap();
+    let small = s.execute("ductadd", &json!({"points": [[0, 0], [0, -2000]], "diameter": 200})).unwrap();
+    let list = s.execute("ductcross", &json!({})).unwrap();
+    let c = &list["crossings"][0];
+    assert_eq!((c["overlap"].as_bool(), c["resolved"].as_bool(), c["a"].clone()), (Some(true), Some(false), small["handles"][0].clone()), "{list}");
+    let r = s.execute("ductcross", &json!({"under": small["handles"][0], "over": big["handles"][0]})).unwrap();
+    assert_eq!(r["gap"], json!([0.0, 2000.0]), "{r}");
+    assert_eq!(s.execute("ductcross", &json!({})).unwrap()["crossings"][0]["resolved"], true);
+}
+
+#[test]
+fn a_run_started_inside_the_width_of_another_cuts_it_and_the_narrower_still_passes_under_the_whole_run() {
+    let mut s = metric();
+    // The extract (650) down, then the supply (200) from the same point, down inside it and turning away: the
+    // turn starts on the axis of the wide one, which is cut there into two pieces.
+    s.execute("ductadd", &json!({"points": [[0, 0], [0, -3000]], "diameter": 650})).unwrap();
+    s.execute("ductadd", &json!({"points": [[0, 0], [0, -2000], [-3000, -2000]], "diameter": 200})).unwrap();
+    let ducts = |s: &Session| -> Vec<(Handle, cadcraft_doc::DuctParams, cadcraft_geom::Vec2, cadcraft_geom::Vec2)> {
+        let d = s.doc().unwrap();
+        d.model.iter().filter_map(|e| d.duct_ends(e.handle).map(|(p, a, b)| (e.handle, p, a, b))).collect()
+    };
+    let all = ducts(&s);
+    let wide: Vec<_> = all.iter().filter(|x| x.1.diameter_mm == 650.0).collect();
+    assert_eq!(wide.len(), 2, "the wide duct was cut in two where the turn starts");
+    let small = all.iter().find(|x| x.1.diameter_mm == 200.0 && (x.2.x - x.3.x).abs() < 1e-6).unwrap().0;
+    // Naming the lower piece, the one the click may reach, is enough: the narrower passes under the whole run.
+    let lower = wide.iter().find(|x| x.2.y.min(x.3.y) < -2500.0).unwrap().0;
+    let r = s.execute("ductcross", &json!({"under": small.hex(), "over": lower.hex()})).unwrap();
+    assert_eq!(r["gap"], json!([0.0, 2000.0]), "{r}");
+    // Named the wrong way round, the same.
+    s.execute("ductcross", &json!({"clear": [small.hex()]})).unwrap();
+    let r = s.execute("ductcross", &json!({"under": lower.hex(), "over": small.hex()})).unwrap();
+    assert_eq!(r["gap"], json!([0.0, 2000.0]), "{r}");
+    // The one that turns away comes out from under the edge.
+    let turn = all.iter().find(|x| x.1.diameter_mm == 200.0 && (x.2.y - x.3.y).abs() < 1e-6).unwrap().0;
+    let r = s.execute("ductcross", &json!({"under": turn.hex(), "over": lower.hex(), "clearance": 30})).unwrap();
+    let hi = r["gap"][1].as_f64().unwrap();
+    assert!((hi - 355.0).abs() < 1e-6, "{r}");
+}

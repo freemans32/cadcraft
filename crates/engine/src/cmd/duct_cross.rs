@@ -33,9 +33,10 @@ fn doc_err(e: cadcraft_doc::DocError) -> EngineError {
     other(e.to_string())
 }
 
-/// The crossings as JSON: the two ducts, where, and whether one is already drawn broken there.
+/// The crossings as JSON: the two ducts, where, whether one is already drawn broken there, and whether
+/// `a` runs parallel to `b`, inside its width, rather than across it (`a` is then the one that can lie under).
 pub(super) fn crossings_json(c: &[DuctCrossing]) -> Vec<Value> {
-    c.iter().map(|x| json!({ "a": x.a.hex(), "b": x.b.hex(), "at": [x.at.x, x.at.y], "resolved": x.resolved })).collect()
+    c.iter().map(|x| json!({ "a": x.a.hex(), "b": x.b.hex(), "at": [x.at.x, x.at.y], "resolved": x.resolved, "overlap": x.overlap })).collect()
 }
 
 fn handle(cmd: &str, p: &Value, key: &str) -> Result<Option<Handle>> {

@@ -20,6 +20,9 @@ pub struct DuctCrossing {
     pub at: Vec2,
     /// Whether one of the two is already drawn broken there.
     pub resolved: bool,
+    /// The ducts do not cross: `a` runs parallel to `b`, inside its width, over a stretch (as when the
+    /// supply and the extract leave stacked collars together); `at` is the middle of that stretch.
+    pub overlap: bool,
 }
 
 /// Where segment `a`–`b` crosses segment `c`–`d`: the point and how far along each (drawing units).
@@ -31,7 +34,26 @@ fn cross_point(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> Option<(Vec2, f64, f64)> {
     }
     let t = (c - a).cross(s) / denom;
     let u = (c - a).cross(r) / denom;
-    ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then(|| (a + r * t, t * r.len(), u * s.len()))
+    // A touch at an end counts: the ends of ducts drawn by rotation are exact only to rounding.
+    let range = -1e-9..=1.0 + 1e-9;
+    (range.contains(&t) && range.contains(&u)).then(|| (a + r * t, t.max(0.0) * r.len(), u.max(0.0) * s.len()))
+}
+
+/// Where duct `a`–`b` (of width `wa`) lies wholly inside the width `wc` of the parallel duct `c`–`d`:
+/// the stretch of `a`–`b` they share, drawing units from `a`. `None` when they are not parallel, not
+/// one inside the other, or share less than `min`.
+fn overlap_stretch(a: Vec2, b: Vec2, wa: f64, c: Vec2, d: Vec2, wc: f64, min: f64) -> Option<(f64, f64)> {
+    let (u, v) = ((b - a).normalized(), (d - c).normalized());
+    if u.cross(v).abs() > 0.02 {
+        return None;
+    }
+    let offset = (c - a).cross(u).abs();
+    if offset + wa / 2.0 > wc / 2.0 + 1e-6 {
+        return None;
+    }
+    let (tc, td) = ((c - a).dot(u), (d - a).dot(u));
+    let (lo, hi) = (tc.min(td).max(0.0), tc.max(td).min(a.dist(b)));
+    (hi - lo > min).then_some((lo, hi))
 }
 
 fn covers(p: &DuctParams, along_units: f64) -> bool {
@@ -54,10 +76,23 @@ impl crate::Drawing {
                 if b0.x.max(b1.x) < lo.x || b0.x.min(b1.x) > hi.x || b0.y.max(b1.y) < lo.y || b0.y.min(b1.y) > hi.y {
                     continue;
                 }
-                let Some((at, ta, tb)) = cross_point(*a0, *a1, *b0, *b1) else { continue };
+                let Some((at, ta, tb)) = cross_point(*a0, *a1, *b0, *b1) else {
+                    // Parallel and one inside the other: the narrower is the one that can lie under.
+                    let (wa, wb) = (pa.units.to_units(pa.plan_width_mm()), pb.units.to_units(pb.plan_width_mm()));
+                    let found = overlap_stretch(*a0, *a1, wa, *b0, *b1, wb, 10.0 * tol)
+                        .map(|s| (*ha, *hb, pa, *a0, *a1, s))
+                        .or_else(|| overlap_stretch(*b0, *b1, wb, *a0, *a1, wa, 10.0 * tol).map(|s| (*hb, *ha, pb, *b0, *b1, s)));
+                    if let Some((inner, outer, p, s0, s1, (lo, hi))) = found
+                        && out.len() < 10_000
+                    {
+                        let mid = (lo + hi) / 2.0;
+                        out.push(DuctCrossing { a: inner, b: outer, at: s0 + (s1 - s0).normalized() * mid, resolved: covers(p, mid), overlap: true });
+                    }
+                    continue;
+                };
                 let (ra, rb) = (reach(pa), reach(pb));
                 if ta > ra && ta < a0.dist(*a1) - ra && tb > rb && tb < b0.dist(*b1) - rb && out.len() < 10_000 {
-                    out.push(DuctCrossing { a: *ha, b: *hb, at, resolved: covers(pa, ta) || covers(pb, tb) });
+                    out.push(DuctCrossing { a: *ha, b: *hb, at, resolved: covers(pa, ta) || covers(pb, tb), overlap: false });
                 }
             }
         }
@@ -73,23 +108,84 @@ impl crate::Drawing {
         }
         let (mut p, a, b) = self.duct_ends(under).ok_or_else(|| invalid("Select ducts only."))?;
         let (po, c, d) = self.duct_ends(over).ok_or_else(|| invalid("Select ducts only."))?;
-        let (_, along, _) = cross_point(a, b, c, d).ok_or_else(|| invalid("The two ducts do not cross."))?;
-        let sin = (b - a).normalized().cross((d - c).normalized()).abs().max(0.05);
         let m = p.units.mm_per_unit;
-        let half = po.plan_width_mm() / 2.0 / sin + clearance_mm;
-        let (centre, length) = (along * m, a.dist(b) * m);
-        let gap = [(centre - half).max(0.0), (centre + half).min(length)];
-        // A new stretch absorbs the ones it overlaps.
-        let mut gaps: Vec<[f64; 2]> = p.gaps_mm.iter().copied().filter(|g| g[1] < gap[0] || g[0] > gap[1]).collect();
-        let merged = p.gaps_mm.iter().filter(|g| !(g[1] < gap[0] || g[0] > gap[1])).fold(gap, |acc, g| [acc[0].min(g[0]), acc[1].max(g[1])]);
-        gaps.push(merged);
-        gaps.sort_by(|x, y| x[0].total_cmp(&y[0]));
-        if gaps.len() > MAX_GAPS {
-            return Err(invalid(format!("A duct passes under at most {MAX_GAPS} others.")));
+        let length = a.dist(b) * m;
+        let new_gaps: Vec<[f64; 2]> = match cross_point(a, b, c, d) {
+            Some((_, along, along_over)) => {
+                let sin = (b - a).normalized().cross((d - c).normalized()).abs().max(0.05);
+                let half = po.plan_width_mm() / 2.0 / sin + clearance_mm;
+                // The crossing was drawn the other way before: that duct is whole again.
+                let mut reverse = po.clone();
+                let u = along_over * po.units.mm_per_unit;
+                if reverse.gaps_mm.iter().any(|g| g[0] <= u && u <= g[1]) {
+                    reverse.gaps_mm.retain(|g| !(g[0] <= u && u <= g[1]));
+                    self.regenerate_duct(over, &reverse)?;
+                }
+                vec![[((along * m) - half).max(0.0), ((along * m) + half).min(length)]]
+            }
+            None => {
+                // Parallel: the duct lies under the other, and under the pieces of its run, along the stretches
+                // they share, if it is wholly inside their width. Only the narrower can lie under: a click on two
+                // overlapping ducts may have named them the wrong way round.
+                let stretches = self.run_stretches(under, over);
+                if stretches.is_empty() {
+                    if self.run_stretches(over, under).is_empty() {
+                        return Err(invalid("The two ducts do not cross, and the first is not wholly inside the width of the second."));
+                    }
+                    return self.pass_duct_under(over, under, clearance_mm);
+                }
+                stretches.into_iter().map(|(lo, hi)| [lo * m, hi * m]).collect()
+            }
+        };
+        let mut hull = [f64::MAX, f64::MIN];
+        for gap in new_gaps {
+            // A new stretch absorbs the ones it overlaps.
+            let mut gaps: Vec<[f64; 2]> = p.gaps_mm.iter().copied().filter(|g| g[1] < gap[0] || g[0] > gap[1]).collect();
+            let merged = p.gaps_mm.iter().filter(|g| !(g[1] < gap[0] || g[0] > gap[1])).fold(gap, |acc, g| [acc[0].min(g[0]), acc[1].max(g[1])]);
+            gaps.push(merged);
+            gaps.sort_by(|x, y| x[0].total_cmp(&y[0]));
+            if gaps.len() > MAX_GAPS {
+                return Err(invalid(format!("A duct passes under at most {MAX_GAPS} others.")));
+            }
+            p.gaps_mm = gaps;
+            hull = [hull[0].min(merged[0]), hull[1].max(merged[1])];
         }
-        p.gaps_mm = gaps;
         self.regenerate_duct(under, &p)?;
-        Ok(merged)
+        Ok(hull)
+    }
+
+    /// The stretches of duct `inner` (drawing units from its start) that lie wholly inside the width of
+    /// the run of duct `of`: `of` and the ducts parallel to it on the same axis and of the same width, as
+    /// the pieces of a run cut where another duct started on it. Joined when they touch.
+    fn run_stretches(&self, inner: Handle, of: Handle) -> Vec<(f64, f64)> {
+        let (Some((pi, a, b)), Some((po, c, d))) = (self.duct_ends(inner), self.duct_ends(of)) else { return Vec::new() };
+        let wa = pi.units.to_units(pi.plan_width_mm());
+        let mm = po.units.to_units(1.0);
+        let v = (d - c).normalized();
+        let mut found = Vec::new();
+        for e in self.model.iter() {
+            if e.handle == inner {
+                continue;
+            }
+            let Some((q, c2, d2)) = self.duct_ends(e.handle) else { continue };
+            let same_run = e.handle == of
+                || ((q.plan_width_mm() - po.plan_width_mm()).abs() < 0.5
+                    && v.cross((d2 - c2).normalized()).abs() < 0.02
+                    && (c2 - c).cross(v).abs() < mm
+                    && (d2 - c).cross(v).abs() < mm);
+            if same_run && let Some(s) = overlap_stretch(a, b, wa, c2, d2, q.units.to_units(q.plan_width_mm()), 0.0) {
+                found.push(s);
+            }
+        }
+        found.sort_by(|x, y| x.0.total_cmp(&y.0));
+        let mut out: Vec<(f64, f64)> = Vec::new();
+        for (lo, hi) in found {
+            match out.last_mut() {
+                Some(last) if lo <= last.1 + 2.0 * mm => last.1 = last.1.max(hi),
+                _ => out.push((lo, hi)),
+            }
+        }
+        out
     }
 
     /// Makes duct `duct` go over (or, with `down`, under) duct `other` by four 45° elbows: it leaves its

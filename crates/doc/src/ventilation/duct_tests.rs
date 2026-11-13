@@ -1399,3 +1399,51 @@ fn a_compact_unit_shows_one_collar_at_each_end_as_wide_as_its_orifices() {
     assert_eq!(hi - lo, 1000.0);
     assert!(AhuParams { port_sizes: vec![None; 5], ..compact }.validate().is_err(), "one size per collar");
 }
+
+fn add_wide(d: &mut Drawing, a: (f64, f64), b: (f64, f64), diameter: f64) -> Handle {
+    d.add_duct(&Space::Model, Common::default(), duct(diameter), Vec2::new(a.0, a.1), Vec2::new(b.0, b.1)).unwrap()
+}
+
+#[test]
+fn a_duct_running_inside_the_width_of_another_passes_under_it_along_the_stretch_they_share() {
+    let polylines = |d: &Drawing, h: Handle| {
+        let EntityKind::Insert(i) = &d.entity(h).unwrap().kind else { return 0 };
+        d.block(&i.block).unwrap().entities.iter().filter(|x| matches!(x.kind, EntityKind::LwPolyline(_))).count()
+    };
+    // Stacked collars: the supply (200) leaves in the width of the extract (650), 2000 of its 3000 mm, then turns away.
+    let mut d = Drawing::new_metric();
+    let big = add_wide(&mut d, (0.0, 0.0), (0.0, -3000.0), 650.0);
+    let small = add_wide(&mut d, (0.0, 0.0), (0.0, -2000.0), 200.0);
+    let turn = add_wide(&mut d, (0.0, -2000.0), (-3000.0, -2000.0), 200.0);
+    let found = d.duct_crossings();
+    assert_eq!(found.len(), 1, "the horizontal one starts on the axis: a corner, not a crossing; {found:?}");
+    assert!(found[0].overlap && !found[0].resolved);
+    assert_eq!((found[0].a, found[0].b), (small, big), "the narrower is the one that can lie under");
+    assert!(found[0].at.near(Vec2::new(0.0, -1000.0), 1e-6), "the middle of the stretch: {:?}", found[0].at);
+    // It lies under along the whole stretch: no side is drawn.
+    assert_eq!(polylines(&d, small), 2);
+    let gap = d.pass_duct_under(small, big, 30.0).unwrap();
+    assert_eq!(gap, [0.0, 2000.0]);
+    assert_eq!(polylines(&d, small), 0, "wholly under the other");
+    assert!(d.duct_crossings()[0].resolved);
+    // The one that turns away comes out from under the other's edge: from its axis to its side, with the clearance.
+    let gap = d.pass_duct_under(turn, big, 30.0).unwrap();
+    assert!(gap[0] == 0.0 && (gap[1] - 355.0).abs() < 1e-6, "{gap:?}");
+    // Named the wrong way round (the wide one first), the narrower is the one drawn under.
+    let again = add_wide(&mut d, (0.0, -2500.0), (0.0, -2900.0), 200.0);
+    let g = d.pass_duct_under(big, again, 30.0).unwrap();
+    assert_eq!(g, [2500.0, 2900.0].map(|v| v - 2500.0).map(|v| v), "along the narrower duct");
+    assert_eq!(duct_of(d.entity(again).unwrap()).unwrap().gaps_mm.len(), 1);
+    assert!(duct_of(d.entity(big).unwrap()).unwrap().gaps_mm.is_empty(), "the wide one is never drawn under the narrow one");
+    // A duct only partly inside the width cannot lie under it.
+    let aside = add_wide(&mut d, (400.0, 0.0), (400.0, -2000.0), 200.0);
+    assert!(d.pass_duct_under(aside, big, 30.0).is_err());
+    // Two ducts that cross can be swapped: the one drawn broken is whole again.
+    let mut x = Drawing::new_metric();
+    let h = add_wide(&mut x, (-2000.0, 0.0), (2000.0, 0.0), 200.0);
+    let v = add_wide(&mut x, (0.0, -2000.0), (0.0, 2000.0), 200.0);
+    x.pass_duct_under(v, h, 30.0).unwrap();
+    assert_eq!((duct_of(x.entity(v).unwrap()).unwrap().gaps_mm.len(), duct_of(x.entity(h).unwrap()).unwrap().gaps_mm.len()), (1, 0));
+    x.pass_duct_under(h, v, 30.0).unwrap();
+    assert_eq!((duct_of(x.entity(v).unwrap()).unwrap().gaps_mm.len(), duct_of(x.entity(h).unwrap()).unwrap().gaps_mm.len()), (0, 1), "swapped");
+}
