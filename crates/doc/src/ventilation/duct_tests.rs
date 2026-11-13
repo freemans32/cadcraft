@@ -51,6 +51,8 @@ fn duct(diameter_mm: f64) -> DuctParams {
         open_flow_m3h: None,
         gaps_mm: Vec::new(),
         jogs: Vec::new(),
+        level_mm: None,
+        steps: Vec::new(),
         bottom_mm: None,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
@@ -1449,4 +1451,82 @@ fn a_duct_running_inside_the_width_of_another_passes_under_it_along_the_stretch_
     assert_eq!((duct_of(x.entity(v).unwrap()).unwrap().gaps_mm.len(), duct_of(x.entity(h).unwrap()).unwrap().gaps_mm.len()), (1, 0));
     x.pass_duct_under(h, v, 30.0).unwrap();
     assert_eq!((duct_of(x.entity(v).unwrap()).unwrap().gaps_mm.len(), duct_of(x.entity(h).unwrap()).unwrap().gaps_mm.len()), (0, 1), "swapped");
+}
+
+#[test]
+fn a_change_of_level_between_runs_counts_two_elbows_in_the_losses_and_a_run_too_short_for_it_is_named() {
+    let level = |d: &mut Drawing, h: Handle, mm: f64| {
+        let (mut p, ..) = d.duct_ends(h).unwrap();
+        p.level_mm = Some(mm);
+        d.regenerate_duct(h, &p).unwrap();
+    };
+    let build = |second_end: f64, second_level: f64| {
+        let mut d = Drawing::new_metric();
+        d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+        let a = add_duct(&mut d, (500.0, -300.0), (2000.0, -300.0));
+        let b = add_duct(&mut d, (2000.0, -300.0), (second_end, -300.0));
+        extract_terminal(&mut d, (second_end, -300.0), 250.0);
+        level(&mut d, a, 2500.0);
+        level(&mut d, b, second_level);
+        (d, b)
+    };
+    let elbows = |d: &Drawing| -> Vec<usize> {
+        let net = d.duct_networks().unwrap().remove(0);
+        net.network.segments.iter().map(|s| s.fittings.iter().filter(|f| **f == Fitting::Elbow45).count()).collect()
+    };
+    // The second run leaves the first 300 mm higher: two 45° elbows on it, none on the first.
+    let (mut d, b) = build(5000.0, 2800.0);
+    assert_eq!(elbows(&d), vec![0, 2]);
+    let net = d.duct_networks().unwrap().remove(0);
+    let report = size_network(&net.network, &DesignCriteria::default()).unwrap();
+    assert!(d.apply_duct_report(&net, &report).unwrap().is_empty());
+    let step = duct_of(d.entity(b).unwrap()).unwrap().steps;
+    assert_eq!(step.len(), 1);
+    assert!((step[0].shift_mm - 300.0).abs() < 1e-9 && step[0].at_mm == 0.0);
+    // The same level, or no level on one of them, makes no step.
+    let (mut same, b2) = build(5000.0, 2800.0);
+    level(&mut same, b2, 2500.0);
+    assert_eq!(elbows(&same), vec![0, 0]);
+    // A run of 600 mm cannot take a change of 600 mm and its margin: it is named, and nothing is drawn.
+    let (mut short, b3) = build(2600.0, 3100.0);
+    let net = short.duct_networks().unwrap().remove(0);
+    let report = size_network(&net.network, &DesignCriteria::default()).unwrap();
+    let warnings = short.apply_duct_report(&net, &report).unwrap();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("too short") && warnings[0].contains("600"), "{warnings:?}");
+    assert!(duct_of(short.entity(b3).unwrap()).unwrap().steps.is_empty());
+    // A step is drawn: two elbows across the run and the change written.
+    let drawn = d.entity(b).and_then(|e| if let EntityKind::Insert(i) = &e.kind { d.block(&i.block) } else { None }).unwrap();
+    assert!(drawn.entities.iter().any(|e| matches!(&e.kind, EntityKind::Text(t) if t.value == "+300")));
+    assert!(
+        DuctParams { steps: vec![DuctStep { at_mm: 0.0, shift_mm: 5.0 }], ..duct_with_length(1000.0) }.validate().is_err(),
+        "a step is 20 mm or more"
+    );
+}
+
+#[test]
+fn the_lower_of_two_ducts_passes_under_by_their_altitudes_a_duct_inside_another_only_when_it_is_the_lower() {
+    let at = |d: &mut Drawing, h: Handle, mm: Option<f64>| {
+        let (mut p, ..) = d.duct_ends(h).unwrap();
+        p.level_mm = mm;
+        d.regenerate_duct(h, &p).unwrap();
+    };
+    let mut d = Drawing::new_metric();
+    let over = add_duct(&mut d, (-2000.0, 0.0), (2000.0, 0.0));
+    let under = add_duct(&mut d, (0.0, -2000.0), (0.0, 2000.0));
+    assert_eq!(d.cross_ducts_by_altitude(30.0).unwrap(), 0, "no altitude, no choice");
+    at(&mut d, over, Some(2800.0));
+    at(&mut d, under, Some(2500.0));
+    assert_eq!(d.cross_ducts_by_altitude(30.0).unwrap(), 1);
+    assert_eq!((duct_of(d.entity(under).unwrap()).unwrap().gaps_mm.len(), duct_of(d.entity(over).unwrap()).unwrap().gaps_mm.len()), (1, 0));
+    assert_eq!(d.cross_ducts_by_altitude(30.0).unwrap(), 0, "done once");
+    // Inside the width of a wider duct: hidden only if it is the lower one.
+    let mut o = Drawing::new_metric();
+    let wide = add_wide(&mut o, (0.0, 0.0), (0.0, -3000.0), 650.0);
+    let thin = add_wide(&mut o, (0.0, 0.0), (0.0, -2000.0), 200.0);
+    at(&mut o, wide, Some(2500.0));
+    at(&mut o, thin, Some(2800.0));
+    assert_eq!(o.cross_ducts_by_altitude(30.0).unwrap(), 0, "the narrow one is above: it is not hidden");
+    at(&mut o, thin, Some(2000.0));
+    assert_eq!(o.cross_ducts_by_altitude(30.0).unwrap(), 1);
 }

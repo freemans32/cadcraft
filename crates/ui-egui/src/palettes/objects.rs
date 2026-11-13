@@ -920,6 +920,19 @@ fn duct_section(ui: &mut egui::Ui, sel: &[Handle], ds: &[DuctParams], len: &dyn 
             action = edit("air", json!(a));
         }
     });
+    // The altitude of the underside, metres: empty gives it back to the height zone. Where two joined runs
+    // differ, sizing makes the step between them and, where two cross, the lower passes under.
+    let altitude = shared(&ds.iter().map(|p| p.level_mm.map(|b| format!("{}", b / 1000.0)).unwrap_or_default()).collect::<Vec<_>>())
+        .unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Altitude of the underside (m)", |ui| {
+        if let Some(t) = edit_field(ui, ui.scope_id().with(("duct_altitude", &ids)), altitude).filter(|t| t != VARIES) {
+            if t.trim().is_empty() {
+                action = edit("altitude", Value::Null);
+            } else if let Some(m) = number(Some(t), bad) {
+                action = edit("altitude", json!(m));
+            }
+        }
+    });
     if let [p] = ds {
         prop_row(ui, "Length", |ui| read_only(ui, &len(p.length)));
         let flow = p.flow_m3h.map_or("—".to_string(), |f| format!("{f:.0} m³/h"));
@@ -1267,5 +1280,18 @@ mod hvac_tests {
         type_into(&mut hn, "93.4", "100");
         let e = cadcraft_doc::equipment_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
         assert_eq!((e.length_mm, e.capacity_kw, e.width_mm), (3000.0, Some(100.0), 2125.0));
+    }
+
+    #[test]
+    fn a_duct_takes_the_altitude_of_its_underside_typed_in_the_palette_and_gives_it_back_to_its_zone() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        let r = app.run("ductadd", json!({ "points": [[0, 0], [3000, 0]], "diameter": 200, "altitude": 2.5 })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handles"][0].as_str().unwrap()).unwrap();
+        app.session.set_selection(vec![h]);
+        let mut hn = palette(app);
+        type_into(&mut hn, "2.5", "2.8");
+        let p = cadcraft_doc::duct_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!(p.level_mm, Some(2800.0));
     }
 }

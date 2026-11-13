@@ -105,6 +105,8 @@ fn ducted() -> Drawing {
         open_flow_m3h: None,
         gaps_mm: Vec::new(),
         jogs: Vec::new(),
+        level_mm: None,
+        steps: Vec::new(),
         bottom_mm: None,
         label_height_mm: 100.0,
         units,

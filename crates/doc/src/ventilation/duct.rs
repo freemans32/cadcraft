@@ -31,6 +31,21 @@ pub const MAX_VOID_MM: f64 = 5_000.0;
 pub const MAX_GAPS: usize = 32;
 /// Most jogs (a rise or a dip round another duct, four 45° elbows each) one duct makes.
 pub const MAX_JOGS: usize = 8;
+/// Most steps (a change of level, two 45° elbows) one duct makes.
+pub const MAX_STEPS: usize = 4;
+/// The smallest difference of altitude between two runs, mm, that makes a step.
+pub const LEVEL_STEP_MIN_MM: f64 = 20.0;
+
+/// A change of level at one end of a run: two 45° elbows with the inclined run between them, so the run
+/// leaves the one before it higher (`shift_mm` positive) or lower. Written by sizing from the altitudes.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuctStep {
+    /// Where the first elbow is, mm along the run from its start.
+    pub at_mm: f64,
+    /// The change of altitude, mm: the run is this much higher than the one it joins (negative: lower).
+    pub shift_mm: f64,
+}
 
 /// A duct that goes over or under another by four 45° elbows: it leaves its line, runs level past
 /// the other duct, then comes back. The plan shows the four elbows across it; the flat part lies
@@ -620,6 +635,13 @@ pub struct DuctParams {
     /// The rises or dips the run makes round other ducts, four 45° elbows each.
     #[serde(default)]
     pub jogs: Vec<DuctJog>,
+    /// The altitude of the run's underside the user gave, mm above the drawing's zero: it wins over a
+    /// height zone's. Where two joined runs differ, sizing makes the step between them.
+    #[serde(default)]
+    pub level_mm: Option<f64>,
+    /// The changes of level at the ends of the run, written by sizing.
+    #[serde(default)]
+    pub steps: Vec<DuctStep>,
     /// A flexible duct (gaine souple): drawn as bellows, with the roughness of one.
     #[serde(default)]
     pub flexible: bool,
@@ -731,6 +753,20 @@ impl DuctParams {
             return Err(invalid(format!("A duct passes under at most {MAX_GAPS} others, each over a stretch of its length.")));
         }
         let length_mm = self.length * self.units.mm_per_unit;
+        if self.level_mm.is_some_and(|b| !(b.is_finite() && (-100_000.0..=1_000_000.0).contains(&b))) {
+            return Err(invalid("The altitude of a duct's underside is a number of millimetres."));
+        }
+        if self.steps.len() > MAX_STEPS
+            || !self.steps.iter().all(|t| {
+                t.at_mm.is_finite()
+                    && t.shift_mm.is_finite()
+                    && t.at_mm >= -1e-6
+                    && (LEVEL_STEP_MIN_MM..=20_000.0).contains(&t.shift_mm.abs())
+                    && t.at_mm + t.shift_mm.abs() <= length_mm + 1e-6
+            })
+        {
+            return Err(invalid(format!("A duct makes at most {MAX_STEPS} steps, each along its length.")));
+        }
         let fits = |j: &DuctJog| {
             [j.centre_mm, j.half_mm, j.shift_mm].iter().all(|v| v.is_finite())
                 && j.half_mm >= 0.0
@@ -758,6 +794,11 @@ impl DuctParams {
     }
 
     /// The size as written on the plan: "Ø200" or "400×250".
+    /// The altitude of the run's underside, mm: the one the user gave, else the one its height zone gives.
+    pub fn altitude_mm(&self) -> Option<f64> {
+        self.level_mm.or(self.bottom_mm)
+    }
+
     pub fn size_label(&self) -> String {
         match self.shape {
             DuctShape::Round => format!("Ø{:.0}", self.diameter_mm),
@@ -844,6 +885,29 @@ impl DuctParams {
                 });
             }
         }
+        // Each step: two elbows, 45° apart in height as in length, and the change written between them.
+        for t in &self.steps {
+            let run = t.shift_mm.abs();
+            for (k, x) in [t.at_mm, t.at_mm + run].into_iter().enumerate() {
+                let x = self.units.to_units(x);
+                pieces.push(HvacPiece {
+                    layer,
+                    kind: EntityKind::LwPolyline(LwPolyline {
+                        vertices: vec![
+                            PolyVertex { p: Vec2::new(x, -r), bulge: if k == 0 { 1.0 } else { -1.0 }, start_width: 0.0, end_width: 0.0 },
+                            PolyVertex { p: Vec2::new(x, r), bulge: 0.0, start_width: 0.0, end_width: 0.0 },
+                        ],
+                        closed: false,
+                        const_width: 0.0,
+                        elevation: 0.0,
+                        plinegen: false,
+                    }),
+                });
+            }
+            let at = Vec2::new(self.units.to_units(t.at_mm + run / 2.0), r + 0.9 * self.units.to_units(self.label_height_mm));
+            let value = format!("{}{:.0}", if t.shift_mm < 0.0 { "-" } else { "+" }, run);
+            pieces.push(HvacPiece { layer, kind: label(at, 0.8 * self.units.to_units(self.label_height_mm), value) });
+        }
         // The arrow and the label sit on the longest stretch that is drawn.
         let (sx, ex) = solid.iter().copied().max_by(|a, b| (a.1 - a.0).total_cmp(&(b.1 - b.0))).unwrap_or((x0, x1));
         if let Some(e) = self.elbow {
@@ -871,7 +935,7 @@ impl DuctParams {
         if let Some(f) = self.flow_m3h {
             text.push_str(&format!(" {f:.0} m³/h"));
         }
-        if let Some(b) = self.bottom_mm {
+        if let Some(b) = self.altitude_mm() {
             text.push_str(&format!(" Ai:{:.2}", b / 1000.0));
         }
         let h = self.units.to_units(self.label_height_mm);
@@ -1079,11 +1143,13 @@ impl crate::Drawing {
             length: a.dist(cut),
             gaps_mm: p.gaps_mm.iter().filter_map(|g| clip(g, 0.0, cut_mm)).collect(),
             jogs: jogs_in(0.0, cut_mm),
+            steps: Vec::new(),
             ..p.clone()
         };
         let second_params = DuctParams {
             gaps_mm: p.gaps_mm.iter().filter_map(|g| clip(g, cut_mm, cut_mm + rest_mm)).collect(),
             jogs: jogs_in(cut_mm, cut_mm + rest_mm),
+            steps: Vec::new(),
             ..p
         };
         self.regenerate_duct(h, &first)?;

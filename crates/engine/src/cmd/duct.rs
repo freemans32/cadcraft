@@ -40,7 +40,7 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         CommandSpec::new("ductsize", "Size Ducts", run_ductsize).menu(&["Draw", "HVAC", "Size Ducts"]).params(
             "{ahu? (handle; default every unit), maxVelocityMain? (m/s), maxVelocityBranch?, maxVelocityConnection?, \
-             balanceTerminals? (false keeps the terminals' flows; default true: a space's flow is shared between its terminals first), maxGradient? (Pa/m), margin? (mm kept back from the height available, default 100), maxAspect? (width / height of a rectangular duct, default 4), sideStep? (mm, default 50), \
+             autoCross? (false: the lower of two ducts that cross is not drawn broken by itself), balanceTerminals? (false keeps the terminals' flows; default true: a space's flow is shared between its terminals first), maxGradient? (Pa/m), margin? (mm kept back from the height available, default 100), maxAspect? (width / height of a rectangular duct, default 4), sideStep? (mm, default 50), \
              minSide? (mm, default 100), maxSide? (mm, default 2000)} → {networks: [{ahu, totalFlow (m³/h), requiredPressure (Pa), criticalPath, segments, warnings}]}",
         ),
     ]
@@ -512,6 +512,8 @@ fn duct_params(s: &Session, last: &DuctLastUsed, label_mm: f64) -> Result<DuctPa
         open_flow_m3h: None,
         gaps_mm: Vec::new(),
         jogs: Vec::new(),
+        level_mm: None,
+        steps: Vec::new(),
         bottom_mm: None,
         label_height_mm: label_mm,
         units: units_of(s)?,
@@ -533,6 +535,10 @@ fn run_ductadd(s: &mut Session, p: &Value) -> Result<Value> {
     last.flexible = bool_param(CMD, p, "flexible")?.unwrap_or(last.flexible);
     let mut params = duct_params(s, &last, positive(CMD, p, "labelHeight")?.unwrap_or(100.0))?;
     params.imposed = p.get("diameter").is_some_and(|v| !v.is_null());
+    params.level_mm = match p.get("altitude") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(v.as_f64().filter(|x| x.is_finite()).ok_or_else(|| bad(CMD, "`altitude` must be a number of metres"))? * 1000.0),
+    };
     // Width and height together give a rectangular duct; one alone is a mistake.
     match (positive(CMD, p, "width")?, positive(CMD, p, "height")?) {
         (Some(w), Some(h)) => Imposed::Rect(w, h).apply(&mut params),
@@ -740,6 +746,14 @@ fn run_ductedit(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let (kind, air) = (kind_param(CMD, p)?, duct_air_param(CMD, p)?);
     let flexible = bool_param(CMD, p, "flexible")?;
+    // The altitude of the underside, metres: a number sets it, null gives it back to the height zone.
+    let altitude: Option<Option<f64>> = match p.get("altitude") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(v) => {
+            Some(Some(v.as_f64().filter(|x| x.is_finite()).ok_or_else(|| bad(CMD, "`altitude` must be a number of metres or null"))? * 1000.0))
+        }
+    };
     // The flow of an open end (a duct on a unit's collar that leads to no terminal); null gives it back to the balance.
     let open_flow: Option<Option<f64>> = match p.get("openFlow") {
         None => None,
@@ -767,6 +781,9 @@ fn run_ductedit(s: &mut Session, p: &Value) -> Result<Value> {
         }
         dp.flexible = flexible.unwrap_or(dp.flexible);
         dp.open_flow_m3h = open_flow.unwrap_or(dp.open_flow_m3h);
+        if let Some(a) = altitude {
+            dp.level_mm = a;
+        }
         dp.validate().map_err(doc_err)?;
         next.push((*h, dp));
     }
@@ -875,6 +892,8 @@ fn run_ductconnect(s: &mut Session, p: &Value) -> Result<Value> {
             open_flow_m3h: None,
             gaps_mm: Vec::new(),
             jogs: Vec::new(),
+            level_mm: None,
+            steps: Vec::new(),
             bottom_mm: None,
             label_height_mm: 100.0,
             units: units_of(s)?,
@@ -1108,11 +1127,15 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
     let mismatches = space_mismatches(s.doc()?);
     let balance = unit_balance(&sized);
     let d = s.doc_mut()?;
+    let mut step_warnings = Vec::new();
     for (net, report) in &sized {
-        d.apply_duct_report(net, report).map_err(doc_err)?;
+        step_warnings.extend(d.apply_duct_report(net, report).map_err(doc_err)?);
     }
+    // The lower duct of two that cross passes under, where their altitudes are known (`autoCross: false` leaves them).
+    let auto_crossed =
+        if p.get("autoCross").and_then(Value::as_bool).unwrap_or(true) { d.cross_ducts_by_altitude(30.0).map_err(doc_err)? } else { 0 };
     let ducts = nets.first().map_or(0, |n| n.duct_count);
     let isolated = nets.first().map_or(0, |n| n.isolated.len());
-    Ok(json!({ "networks": out, "cuts": cuts, "rebalanced": rebalanced,
+    Ok(json!({ "networks": out, "cuts": cuts, "rebalanced": rebalanced, "stepWarnings": step_warnings, "autoCrossed": auto_crossed,
         "crossings": super::duct_cross::crossings_json(&s.doc()?.duct_crossings().into_iter().filter(|c| !c.resolved).collect::<Vec<_>>()), "spaces": mismatches, "balance": balance, "ducts": ducts, "reached": ducts - isolated }))
 }

@@ -101,6 +101,31 @@ impl crate::Drawing {
         out
     }
 
+    /// Draws broken, at every crossing and overlap still to draw, the duct that is lower: where both altitudes
+    /// are known and differ by a step or more, the one with the lower underside passes under. Returns how many.
+    pub fn cross_ducts_by_altitude(&mut self, clearance_mm: f64) -> Result<usize> {
+        let mut drawn = 0;
+        for x in self.duct_crossings() {
+            if x.resolved {
+                continue;
+            }
+            let (Some((pa, ..)), Some((pb, ..))) = (self.duct_ends(x.a), self.duct_ends(x.b)) else { continue };
+            let (Some(a), Some(b)) = (pa.altitude_mm(), pb.altitude_mm()) else { continue };
+            if (a - b).abs() < super::duct::LEVEL_STEP_MIN_MM {
+                continue;
+            }
+            // A duct lying inside the width of another can only be hidden by it when it is the lower one.
+            let (under, over) = if a < b { (x.a, x.b) } else { (x.b, x.a) };
+            if x.overlap && under != x.a {
+                continue;
+            }
+            if self.pass_duct_under(under, over, clearance_mm).is_ok() {
+                drawn += 1;
+            }
+        }
+        Ok(drawn)
+    }
+
     /// Draws duct `under` with its sides broken across duct `over`, with `clearance_mm` more than
     /// the width of `over` (and more still when they cross at a slant). Returns the stretch, mm from
     /// the start of `under`.

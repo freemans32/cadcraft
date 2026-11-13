@@ -1,7 +1,7 @@
 //! AHUADD places an air handling unit; DUCTADD draws round duct runs, one per segment, and cuts a
 //! run another starts on; DUCTEDIT changes them; DUCTSIZE sizes each network from its terminals.
 
-use cadcraft_doc::{AccessoryKind, Drawing, DuctKind, Handle, accessory_of, ahu_of, duct_of};
+use cadcraft_doc::{AccessoryKind, Drawing, DuctKind, EntityKind, Handle, accessory_of, ahu_of, duct_of};
 use cadcraft_engine::Session;
 use serde_json::{Value, json};
 
@@ -1025,4 +1025,46 @@ fn a_run_started_inside_the_width_of_another_cuts_it_and_the_narrower_still_pass
     let r = s.execute("ductcross", &json!({"under": turn.hex(), "over": lower.hex(), "clearance": 30})).unwrap();
     let hi = r["gap"][1].as_f64().unwrap();
     assert!((hi - 355.0).abs() < 1e-6, "{r}");
+}
+
+#[test]
+fn a_height_given_to_a_run_makes_the_step_between_runs_at_other_levels_and_the_lower_of_two_crossing_ducts_goes_under() {
+    let mut s = metric();
+    s.execute("ahuadd", &json!({"at": [0, 0]})).unwrap();
+    // Two joined runs of the supply, the second 250 mm higher than the first; a terminal at its end.
+    let a = s.execute("ductadd", &json!({"points": [[800, -300], [3000, -300]], "diameter": 200, "air": "supply", "altitude": 2.5})).unwrap();
+    let b = s.execute("ductadd", &json!({"points": [[3000, -300], [6000, -300]], "diameter": 200, "air": "supply", "altitude": 2.75})).unwrap();
+    s.execute("airterminaladd", &json!({"at": [6000, -300], "flow": 200, "air": "supply"})).unwrap();
+    // A duct that crosses the second one, lower than it, and one at the same level as it.
+    let low = s.execute("ductadd", &json!({"points": [[4500, -2000], [4500, 1500]], "diameter": 200, "altitude": 2.0})).unwrap();
+    let same = s.execute("ductadd", &json!({"points": [[5300, -2000], [5300, 1500]], "diameter": 200, "altitude": 2.75})).unwrap();
+    let p = |s: &Session, h: &Value| cadcraft_doc::duct_of(s.doc().unwrap().entity(hd(&h["handles"][0])).unwrap()).unwrap();
+    assert_eq!((p(&s, &a).level_mm, p(&s, &b).level_mm), (Some(2500.0), Some(2750.0)));
+    let out = s.execute("ductsize", &json!({})).unwrap();
+    assert!(out["stepWarnings"].as_array().unwrap().is_empty(), "{out}");
+    let (pa, pb) = (p(&s, &a), p(&s, &b));
+    assert!(pa.steps.is_empty(), "the first run is where the unit leaves it");
+    assert_eq!(pb.steps.len(), 1, "{:?}", pb.steps);
+    assert_eq!((pb.steps[0].at_mm, pb.steps[0].shift_mm), (0.0, 250.0), "up 250 mm at the start of the second run");
+    // The altitude is written on the label.
+    let labels = |s: &Session, h: &Value| -> Vec<String> {
+        let d = s.doc().unwrap();
+        let EntityKind::Insert(i) = &d.entity(hd(&h["handles"][0])).unwrap().kind else { return Vec::new() };
+        d.block(&i.block)
+            .unwrap()
+            .entities
+            .iter()
+            .filter_map(|e| if let EntityKind::Text(t) = &e.kind { Some(t.value.clone()) } else { None })
+            .collect()
+    };
+    assert!(labels(&s, &b).iter().any(|t| t.contains("Ai:2.75")), "{:?}", labels(&s, &b));
+    assert!(labels(&s, &b).iter().any(|t| t == "+250"), "the step is written: {:?}", labels(&s, &b));
+    // The lower duct passes under where it crosses; the one at the same level is left.
+    assert_eq!(out["autoCrossed"], 1, "{out}");
+    assert_eq!(p(&s, &low).gaps_mm.len(), 1);
+    assert!(p(&s, &same).gaps_mm.is_empty() && p(&s, &b).gaps_mm.is_empty());
+    // A run too short for its step is named. The altitude can be given back to its zone.
+    s.execute("ductedit", &json!({"handle": b["handles"][0], "altitude": null})).unwrap();
+    assert_eq!(p(&s, &b).level_mm, None);
+    assert!(s.execute("ductedit", &json!({"handle": a["handles"][0], "altitude": "high"})).is_err());
 }

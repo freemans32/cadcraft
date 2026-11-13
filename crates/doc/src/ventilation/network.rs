@@ -305,7 +305,11 @@ impl crate::Drawing {
 
     /// Gives every duct of `net` its diameter, flow and velocity from `report`, and the unit the
     /// flow and pressure it must supply.
-    pub fn apply_duct_report(&mut self, net: &DuctNetwork, report: &NetworkReport) -> Result<()> {
+    ///
+    /// Where a run is at another level than the one before it, it takes the step between them (two 45° elbows
+    /// at its end); the messages name the runs too short for theirs.
+    pub fn apply_duct_report(&mut self, net: &DuctNetwork, report: &NetworkReport) -> Result<Vec<String>> {
+        let mut warnings = Vec::new();
         if report.segments.len() != net.ducts.len() {
             return Err(invalid("The report is not the network's."));
         }
@@ -344,6 +348,18 @@ impl crate::Drawing {
             // Supply and exhaust air leave the unit, extract and fresh air come to it: with the way the
             // run is entered, that is the way along its block's x axis.
             p.flow_forward = Some(net.air.leaves_the_unit() != net.entered_at_end.get(i).copied().unwrap_or(false));
+            // The step to this level, where the run leaves the one before it, drawn at that end.
+            p.steps.clear();
+            let before = net.network.segments.get(i).and_then(|s| s.parent).and_then(|k| net.bottoms_mm.get(k).copied().flatten());
+            if let Some(shift) = step_between(before, net.bottoms_mm.get(i).copied().flatten()) {
+                let length_mm = p.length * p.units.mm_per_unit;
+                if shift.abs() + 100.0 <= length_mm {
+                    let at_mm = if net.entered_at_end.get(i).copied().unwrap_or(false) { length_mm - shift.abs() } else { 0.0 };
+                    p.steps.push(super::duct::DuctStep { at_mm, shift_mm: shift });
+                } else if let Some((_, a, _)) = self.duct_ends(*h) {
+                    warnings.push(format!("the run at ({:.0}, {:.0}) is too short for a change of level of {:.0} mm", a.x, a.y, shift.abs()));
+                }
+            }
             next.push(Some(p));
         }
         draw_elbows(net, &mut next);
@@ -389,7 +405,7 @@ impl crate::Drawing {
             }
             self.regenerate_riser(*h, &r)?;
         }
-        Ok(())
+        Ok(warnings)
     }
 }
 
@@ -780,6 +796,11 @@ impl Scan<'_> {
             .filter_map(|i| nodes.get(i).and_then(|n| self.ducts.get(n.duct)).map(|d| d.handle))
             .collect();
         let index_of = |old: usize| kept.iter().position(|k| *k == old);
+        // The altitude of each run's underside: the one it was given, else the one its height zone gives.
+        let altitude = |old: usize| -> Option<f64> {
+            let d = nodes.get(old).and_then(|n| self.ducts.get(n.duct))?;
+            d.params.level_mm.or_else(|| self.void_at(d.a.mid(d.b)).and_then(|(_, b)| b))
+        };
         let mut segments = Vec::with_capacity(kept.len());
         let mut handles = Vec::with_capacity(kept.len());
         let mut entered_at_end = Vec::with_capacity(kept.len());
@@ -806,7 +827,14 @@ impl Scan<'_> {
                 parent: n.parent.and_then(index_of),
                 length_m: d.params.length_m(),
                 kind: segment_kind(d.params.kind, n.terminals_below, on_trunk, d.params.length_m()),
-                fittings: n.fittings.iter().copied().chain(std::iter::repeat_n(Fitting::Elbow45, 4 * d.params.jogs.len())).collect(),
+                // The jogs' four elbows, and the two of a step where the run leaves the one before it at another level.
+                fittings: n
+                    .fittings
+                    .iter()
+                    .copied()
+                    .chain(std::iter::repeat_n(Fitting::Elbow45, 4 * d.params.jogs.len()))
+                    .chain(std::iter::repeat_n(Fitting::Elbow45, 2 * usize::from(step_between(n.parent.and_then(altitude), altitude(old)).is_some())))
+                    .collect(),
                 terminal: n.terminal.map(|(_, flow, pa)| Terminal { flow_m3h: flow, pressure_drop_pa: pa }),
                 diameter_mm: (d.params.imposed && d.params.shape == DuctShape::Round).then_some(d.params.diameter_mm).or(match riser_size {
                     Some(RiserSize::Round { diameter_mm }) => Some(diameter_mm),
@@ -825,7 +853,7 @@ impl Scan<'_> {
             entered_at_end.push(n.from == d.b && d.a != d.b);
             collar_widths_mm.push(n.parent.is_none().then(|| n.collar_size.map(RiserSize::width_mm)).flatten());
             elbow_turns_deg.push(bare_elbow_turn(nodes, n));
-            bottoms_mm.push(self.void_at(d.a.mid(d.b)).and_then(|(_, b)| b));
+            bottoms_mm.push(altitude(old));
             handles.push(d.handle);
         }
         DuctNetwork {
@@ -905,6 +933,12 @@ fn segments_cross(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> Option<Vec2> {
     let t = (c - a).cross(s) / denom;
     let u = (c - a).cross(r) / denom;
     ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then(|| a + r * t)
+}
+
+/// The change of altitude, mm, between a run and the one before it, when both are known and differ by a step or more.
+fn step_between(parent: Option<f64>, own: Option<f64>) -> Option<f64> {
+    let (p, o) = (parent?, own?);
+    ((o - p).abs() >= super::duct::LEVEL_STEP_MIN_MM).then_some(o - p)
 }
 
 /// Marks every run no other run leaves from as open at its far end, and counts again.
