@@ -58,7 +58,7 @@ impl RiserSize {
         }
     }
 
-    fn validate(self) -> Result<()> {
+    pub(super) fn validate(self) -> Result<()> {
         let ok = |v: f64| v.is_finite() && (DUCT_DIAMETER_MM.0..=DUCT_DIAMETER_MM.1).contains(&v);
         let fits = match self {
             RiserSize::Round { diameter_mm } => ok(diameter_mm),

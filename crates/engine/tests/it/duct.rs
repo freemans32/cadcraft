@@ -935,3 +935,29 @@ fn ductsize_records_the_type_it_gave_a_run_left_on_auto_and_the_kind_edit_forget
     s.execute("ductedit", &json!({"handle": long["handles"][0], "kind": "main"})).unwrap();
     assert_eq!(found(&s, &long["handles"][0]), None, "the type was set by hand");
 }
+
+#[test]
+fn the_orifice_of_a_collar_gives_the_duct_that_starts_on_it_its_section_unless_it_was_set_by_hand() {
+    let mut s = metric();
+    let u = s.execute("ahuadd", &json!({"at": [0, 0], "type": "supplyUnit"})).unwrap();
+    // The supply collar (right) is 800 x 400, the fresh air one (left) 315.
+    s.execute("ahuedit", &json!({"handle": u["handle"], "portSizes": [315, "800x400"]})).unwrap();
+    let unit = ahu_of(s.doc().unwrap().entity(hd(&u["handle"])).unwrap()).unwrap();
+    assert_eq!(unit.port_sizes.len(), 2);
+    let d = s.execute("ductadd", &json!({"points": [[1300, 0], [6000, 0]], "air": "supply"})).unwrap();
+    s.execute("airterminaladd", &json!({"at": [6000, 0], "flow": 300, "air": "supply"})).unwrap();
+    s.execute("ductsize", &json!({})).unwrap();
+    let p = duct_of(s.doc().unwrap().entity(hd(&d["handles"][0])).unwrap()).unwrap();
+    assert_eq!(
+        (p.shape, p.width_mm, p.height_mm),
+        (cadcraft_doc::DuctShape::Rectangular, 800.0, 400.0),
+        "the orifice's section, not the 300 m³/h one"
+    );
+    // A size set by hand wins over the orifice.
+    s.execute("ductedit", &json!({"handle": d["handles"][0], "diameter": 250})).unwrap();
+    s.execute("ductsize", &json!({})).unwrap();
+    let p = duct_of(s.doc().unwrap().entity(hd(&d["handles"][0])).unwrap()).unwrap();
+    assert_eq!((p.shape, p.diameter_mm), (cadcraft_doc::DuctShape::Round, 250.0));
+    assert!(s.execute("ahuedit", &json!({"handle": u["handle"], "portSizes": ["wide"]})).is_err());
+    assert!(s.execute("ahuedit", &json!({"handle": u["handle"], "portSizes": [1, 2, 3]})).is_err(), "a supply unit has two collars");
+}

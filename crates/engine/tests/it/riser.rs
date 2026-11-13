@@ -128,3 +128,45 @@ fn a_run_started_on_the_edge_of_another_near_its_corner_leaves_no_short_piece_ou
         }
     }
 }
+
+#[test]
+fn on_the_roof_a_riser_the_runs_of_the_unit_end_on_is_sized_for_the_flow_typed_on_it_in_its_shaft() {
+    let mut s = metric();
+    s.execute("ahuadd", &json!({"at": [0, 0], "type": "supplyUnit"})).unwrap();
+    // The shaft is 1500 x 600; 7000 m³/h from the floors below. A round duct of 600 - 100 mm cannot carry that at 6 m/s.
+    let r = s.execute("riseradd", &json!({"at": [4000, 0], "width": 1500, "depth": 600, "air": "supply", "incomingFlow": 7000})).unwrap();
+    s.execute("ductadd", &json!({"points": [[1300, 0], [3400, 0]], "air": "supply"})).unwrap();
+    let out = s.execute("ductsize", &json!({})).unwrap();
+    assert_eq!(out["networks"][0]["totalFlow"].as_f64(), Some(7000.0), "{out}");
+    let p = riser(&s, hd(&r["handle"]));
+    assert_eq!(p.flow_m3h, Some(7000.0));
+    match p.size {
+        Some(RiserSize::Rectangular { width_mm, height_mm }) => {
+            assert!(height_mm <= 500.0 && width_mm <= 1400.0, "{width_mm} x {height_mm} fits the shaft less the margin");
+            assert!(width_mm * height_mm / 1e6 * 6.0 * 3600.0 >= 7000.0 - 1.0, "and carries the flow at 6 m/s");
+        }
+        other => panic!("a rectangular section is expected, got {other:?}"),
+    }
+    // A size typed on the riser is kept.
+    s.execute("riseredit", &json!({"handle": r["handle"], "size": "900x500"})).unwrap();
+    s.execute("ductsize", &json!({})).unwrap();
+    assert_eq!(riser(&s, hd(&r["handle"])).size, Some(RiserSize::Rectangular { width_mm: 900.0, height_mm: 500.0 }));
+}
+
+#[test]
+fn on_the_roof_the_duct_leaves_the_orifice_of_the_unit_in_its_section_and_reduces_to_the_section_of_the_shaft() {
+    let mut s = metric();
+    let u = s.execute("ahuadd", &json!({"at": [0, 0], "type": "supplyUnit"})).unwrap();
+    s.execute("ahuedit", &json!({"handle": u["handle"], "portSizes": [null, "1000x500"]})).unwrap();
+    let r = s.execute("riseradd", &json!({"at": [4000, 0], "width": 1500, "depth": 600, "air": "supply", "incomingFlow": 7000})).unwrap();
+    let first = s.execute("ductadd", &json!({"points": [[1300, 0], [2300, 0]], "air": "supply"})).unwrap();
+    let last = s.execute("ductadd", &json!({"points": [[2300, 0], [3400, 0]], "air": "supply"})).unwrap();
+    s.execute("ductsize", &json!({})).unwrap();
+    let d = |h: &Value| cadcraft_doc::duct_of(s.doc().unwrap().entity(hd(&h["handles"][0])).unwrap()).unwrap();
+    let (a, b) = (d(&first), d(&last));
+    assert_eq!((a.width_mm, a.height_mm), (1000.0, 500.0), "the orifice");
+    let shaft = riser(&s, hd(&r["handle"])).size.unwrap();
+    let RiserSize::Rectangular { width_mm, height_mm } = shaft else { panic!("{shaft:?}") };
+    assert_eq!((b.width_mm, b.height_mm), (width_mm, height_mm), "the last run is the shaft's section");
+    assert!(b.reducer.is_some_and(|red| (red.from_mm - 1000.0).abs() < 1e-6), "a reducer from the orifice's width to the shaft's: {:?}", b.reducer);
+}

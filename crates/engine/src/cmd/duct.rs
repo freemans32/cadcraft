@@ -23,7 +23,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|s| Ok(Box::new(AhuAddM::new(s)))),
         CommandSpec::new("ahuedit", "Edit Air Handling Unit", run_ahuedit)
             .params(
-                "{handle | handles, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox|stackedDoubleFlow, width? (mm), depth? (mm), height? (mm or null), model?, weight? (kg or null), \
+                "{handle | handles, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox|stackedDoubleFlow, width? (mm), depth? (mm), height? (mm or null), model?, weight? (kg or null), portSizes? (one per collar: a diameter, 800x400 or null: the duct that starts on it takes that section), \
                  ports? (the direction of the air at each collar, supply|extract|fresh|exhaust, one per collar: four for a double-flux unit or a box, two for a single-flux unit; [] restores the kind's)} → {changed}",
             ),
         CommandSpec::new("ductadd", "Duct", run_ductadd)
@@ -215,6 +215,7 @@ fn run_ahuadd(s: &mut Session, p: &Value) -> Result<Value> {
         fresh_pressure_pa: None,
         exhaust_flow_m3h: None,
         exhaust_pressure_pa: None,
+        port_sizes: Vec::new(),
         height_mm: positive(CMD, p, "height")?,
         model: str_param(p, "model").unwrap_or_default().to_string(),
         weight_kg: positive(CMD, p, "weight")?,
@@ -249,6 +250,12 @@ fn run_ahuedit(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let (height, weight) = (clearable("height")?, clearable("weight")?);
+    // The size of each connection's orifice, one per collar: a diameter, "800x400", or null for none.
+    let port_sizes: Option<Vec<Option<cadcraft_doc::RiserSize>>> = match p.get("portSizes") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(list)) if list.len() <= 8 => Some(list.iter().map(|v| super::riser::size_value(CMD, v)).collect::<Result<_>>()?),
+        Some(_) => return Err(bad(CMD, "`portSizes` is a list of sizes, one per collar")),
+    };
     let kind = ahu_kind_param(CMD, p)?;
     let d = s.doc()?;
     let mut next = Vec::with_capacity(hs.len());
@@ -274,6 +281,9 @@ fn run_ahuedit(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let Some(m) = str_param(p, "model") {
             a.model = m.trim().to_string();
+        }
+        if let Some(sizes) = &port_sizes {
+            a.port_sizes = sizes.clone();
         }
         a.validate().map_err(doc_err)?;
         next.push((*h, a));
@@ -350,6 +360,7 @@ impl AhuAddM {
                     fresh_pressure_pa: None,
                     exhaust_flow_m3h: None,
                     exhaust_pressure_pa: None,
+                    port_sizes: Vec::new(),
                     height_mm: None,
                     model: String::new(),
                     weight_kg: None,
@@ -432,6 +443,7 @@ impl Interactive for AhuAddM {
             fresh_pressure_pa: None,
             exhaust_flow_m3h: None,
             exhaust_pressure_pa: None,
+            port_sizes: Vec::new(),
             height_mm: None,
             model: String::new(),
             weight_kg: None,

@@ -75,6 +75,7 @@ fn ducted() -> Drawing {
         fresh_pressure_pa: None,
         exhaust_flow_m3h: None,
         exhaust_pressure_pa: None,
+        port_sizes: Vec::new(),
         height_mm: None,
         model: String::new(),
         weight_kg: None,

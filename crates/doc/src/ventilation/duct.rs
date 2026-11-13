@@ -173,6 +173,11 @@ pub struct AhuParams {
     pub ports: Vec<AirDirection>,
     pub width_mm: f64,
     pub depth_mm: f64,
+    /// The size of each connection's orifice, in the order of the collars (empty or `None`: not
+    /// given): a round diameter or a rectangle. The duct that starts at a collar takes it, and the
+    /// next runs are sized for their flow with a reducer between.
+    #[serde(default)]
+    pub port_sizes: Vec<Option<super::RiserSize>>,
     /// The height of the casing, mm, when it is known: written on the unit's spec block (the plan shows no height).
     #[serde(default)]
     pub height_mm: Option<f64>,
@@ -276,7 +281,11 @@ impl AhuParams {
             let head = len * 0.3;
             let side = normal.perp() * (head * 0.6);
             v.extend([line(from, to), line(head_at, head_at + back * head + side), line(head_at, head_at + back * head - side)]);
-            v.push(HvacPiece { layer, kind: label(to + normal * (1.2 * label_height), label_height * 0.8, role.tag().into()) });
+            let tag = match self.port_sizes.get(idx).copied().flatten() {
+                Some(size) => format!("{} {}", role.tag(), size.label()),
+                None => role.tag().to_string(),
+            };
+            v.push(HvacPiece { layer, kind: label(to + normal * (1.2 * label_height), label_height * 0.8, tag) });
         }
         v
     }
@@ -312,6 +321,9 @@ impl AhuParams {
         let size = |v: f64| v.is_finite() && v > 0.0 && v <= MAX_AHU_SIZE_MM;
         if !size(self.width_mm) || !size(self.depth_mm) {
             return Err(invalid(format!("A unit's sizes are more than 0 and at most {MAX_AHU_SIZE_MM} mm.")));
+        }
+        if self.port_sizes.len() > self.kind.default_ports().len() || self.port_sizes.iter().flatten().any(|s| s.validate().is_err()) {
+            return Err(invalid("A unit's connection sizes: one per connection, each a diameter or two sides."));
         }
         if self.height_mm.is_some_and(|v| !size(v)) || self.weight_kg.is_some_and(|v| !(v.is_finite() && v > 0.0 && v <= 1e7)) {
             return Err(invalid("A unit's height and weight are more than 0 (the height at most 100 000 mm)."));

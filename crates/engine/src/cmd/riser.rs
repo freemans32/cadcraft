@@ -81,29 +81,33 @@ fn direction_param(cmd: &str, p: &Value) -> Result<Option<bool>> {
     }
 }
 
-/// "200" or 200 (a diameter), "400x250" or [400, 250] (a rectangle); "auto" or null gives none.
-fn size_param(cmd: &str, p: &Value) -> Result<Option<Option<RiserSize>>> {
+/// "200" or 200 (a diameter), "400x250" or [400, 250] (a rectangle); "auto", "" or null gives none.
+pub(super) fn size_value(cmd: &str, v: &Value) -> Result<Option<RiserSize>> {
     let sides = |t: &str| -> Option<(f64, f64)> {
         let (a, b) = t.split_once(['x', 'X', '×', '*'])?;
         Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
     };
-    let err = || bad(cmd, "`size` is a diameter, \"400x250\" or \"auto\"");
-    match p.get("size") {
-        None => Ok(None),
-        Some(Value::Null) => Ok(Some(None)),
-        Some(Value::String(t)) if t.trim().eq_ignore_ascii_case("auto") || t.trim().is_empty() => Ok(Some(None)),
-        Some(Value::String(t)) => match (sides(t), t.trim().parse::<f64>().ok()) {
-            (Some((w, h)), _) => Ok(Some(Some(RiserSize::Rectangular { width_mm: w, height_mm: h }))),
-            (None, Some(d)) => Ok(Some(Some(RiserSize::Round { diameter_mm: d }))),
+    let err = || bad(cmd, "a size is a diameter, \"400x250\" or \"auto\"");
+    match v {
+        Value::Null => Ok(None),
+        Value::String(t) if t.trim().eq_ignore_ascii_case("auto") || t.trim().is_empty() => Ok(None),
+        Value::String(t) => match (sides(t), t.trim().parse::<f64>().ok()) {
+            (Some((w, h)), _) => Ok(Some(RiserSize::Rectangular { width_mm: w, height_mm: h })),
+            (None, Some(d)) => Ok(Some(RiserSize::Round { diameter_mm: d })),
             _ => Err(err()),
         },
-        Some(Value::Number(n)) => Ok(Some(Some(RiserSize::Round { diameter_mm: n.as_f64().ok_or_else(err)? }))),
-        Some(Value::Array(a)) => match (a.first().and_then(Value::as_f64), a.get(1).and_then(Value::as_f64), a.len()) {
-            (Some(w), Some(h), 2) => Ok(Some(Some(RiserSize::Rectangular { width_mm: w, height_mm: h }))),
+        Value::Number(n) => Ok(Some(RiserSize::Round { diameter_mm: n.as_f64().ok_or_else(err)? })),
+        Value::Array(a) => match (a.first().and_then(Value::as_f64), a.get(1).and_then(Value::as_f64), a.len()) {
+            (Some(w), Some(h), 2) => Ok(Some(RiserSize::Rectangular { width_mm: w, height_mm: h })),
             _ => Err(err()),
         },
-        Some(_) => Err(err()),
+        _ => Err(err()),
     }
+}
+
+/// The `size` of a riser call: None when absent, else the size or none.
+fn size_param(cmd: &str, p: &Value) -> Result<Option<Option<RiserSize>>> {
+    p.get("size").map(|v| size_value(cmd, v)).transpose()
 }
 
 fn risers_count(d: &Drawing) -> usize {

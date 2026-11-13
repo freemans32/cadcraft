@@ -660,6 +660,20 @@ fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams], bad: &mut
         let items = [("supply", "Supply"), ("extract", "Extract"), ("fresh", "Fresh air"), ("exhaust", "Exhaust air")];
         for (k, name) in u.kind.port_names().iter().enumerate() {
             let Some(role) = roles.get(k).copied() else { continue };
+            // The size of the orifice: a diameter or "800x400", empty for none; the duct that starts here takes it.
+            let size = u.port_sizes.get(k).copied().flatten();
+            let text = size.map_or(String::new(), |s| s.label().replace('Ø', "").replace('×', "x"));
+            prop_row(ui, &format!("{} ({})", crate::i18n::t(name), crate::i18n::t("size")), |ui| {
+                if let Some(t) = edit_field(ui, ui.scope_id().with(("ahu_port_size", k, &ids)), text).filter(|t| t != VARIES) {
+                    let mut sizes: Vec<Value> = (0..u.kind.port_names().len())
+                        .map(|j| u.port_sizes.get(j).copied().flatten().map_or(Value::Null, |s| json!(s.label().replace('Ø', "").replace('×', "x"))))
+                        .collect();
+                    if let Some(slot) = sizes.get_mut(k) {
+                        *slot = if t.trim().is_empty() { Value::Null } else { json!(t.trim()) };
+                    }
+                    action = edit("portSizes", json!(sizes));
+                }
+            });
             prop_row(ui, name, |ui| {
                 if let Some(c) = choice(ui, items.iter().find(|i| AirDirection::parse(i.0) == Some(role)).map_or("", |i| i.1), &items)
                     && let Some(new) = AirDirection::parse(c)
@@ -710,7 +724,22 @@ fn duct_section(ui: &mut egui::Ui, sel: &[Handle], ds: &[DuctParams], len: &dyn 
         }
     });
     if let [p] = ds {
-        prop_row(ui, "Section", |ui| read_only(ui, &p.size_label()));
+        // The section is chosen here: round, or rectangular (its sides start from the diameter), as sizing would size it.
+        prop_row(ui, "Section", |ui| {
+            let items = [("round", "Round"), ("rectangular", "Rectangular")];
+            let shown = format!("{} ({})", crate::i18n::t(if p.shape == DuctShape::Round { "Round" } else { "Rectangular" }), p.size_label());
+            match choice_text(ui, shown, &items) {
+                Some("round") if p.shape != DuctShape::Round => {
+                    action = edit("diameter", json!(p.diameter_mm));
+                }
+                Some("rectangular") if p.shape != DuctShape::Rectangular => {
+                    let w = p.diameter_mm;
+                    let h = ((w * 0.75 / 50.0).round() * 50.0).max(100.0);
+                    action = Some(("ductedit", json!({ "handles": ids, "width": w, "height": h })));
+                }
+                _ => {}
+            }
+        });
     }
     // A diameter typed makes the duct round, a width or a height rectangular (the missing side is
     // the other one, else the diameter).

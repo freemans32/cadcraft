@@ -43,6 +43,8 @@ pub struct DuctNetwork {
     pub entered_at_end: Vec<bool>,
     /// Ducts connected to the unit that lead to no terminal, so are left out of the sizing.
     pub dangling: Vec<Handle>,
+    /// The risers the runs of this network end on (on the roof plan): they are sized for the flow typed on them.
+    pub riser_ends: Vec<Handle>,
     /// Terminals that no duct of their air direction reaches (set on the first network only).
     pub unconnected: Vec<Handle>,
     /// The accessories whose loss is in this network.
@@ -107,6 +109,8 @@ struct Node {
     from: Vec2,
     to: Vec2,
     terminal: Option<(Handle, f64, f64)>,
+    /// The section the orifice of a unit's collar gives the run that starts on it.
+    forced_size: Option<RiserSize>,
     /// The run ends in the open: no terminal, but the air leaves or comes in freely there.
     open: bool,
     fittings: Vec<Fitting>,
@@ -193,8 +197,12 @@ impl crate::Drawing {
             let port = |q: Vec2| {
                 let (k, d) = tips.iter().enumerate().map(|(k, t)| (k, (*t - q).len())).min_by(|a, b| a.1.total_cmp(&b.1))?;
                 let here = *tips.get(k)?;
-                let same: Vec<AirDirection> =
-                    tips.iter().enumerate().filter(|(_, t)| (**t - here).len() <= 1e-6).filter_map(|(i, _)| roles.get(i).copied()).collect();
+                let same: Vec<(AirDirection, Option<RiserSize>)> = tips
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, t)| (**t - here).len() <= 1e-6)
+                    .filter_map(|(i, _)| roles.get(i).copied().map(|role| (role, p.port_sizes.get(i).copied().flatten())))
+                    .collect();
                 (d <= units.to_units(0.8 * half.y.min(half.x)) && !same.is_empty()).then_some((k, same))
             };
             let found = scan.read_unit(*handle, &inside, &port, true);
@@ -205,7 +213,7 @@ impl crate::Drawing {
         for r in &risers {
             let inside = |q: Vec2, diameter_mm: f64| r.reaches(q, unit_tol.max(units.to_units(AXIS_REACH * diameter_mm)));
             let air = r.params.air;
-            let port = |_: Vec2| Some((0, vec![air]));
+            let port = |_: Vec2| Some((0, vec![(air, None)]));
             out.extend(scan.read_unit(r.handle, &inside, &port, false));
         }
         // A terminal left unreached by every unit is reported on each network: say so once, on the first.
@@ -355,7 +363,9 @@ impl crate::Drawing {
         if let Some(mut a) = ahu_of(e) {
             a.set_figures(net.air, report.total_flow_m3h, report.required_pressure_pa);
             self.regenerate_ahu(net.ahu, &a)?;
-        } else if let Some(mut r) = riser_of(e) {
+        } else if let Some(mut r) = riser_of(e)
+            && !net.riser_ends.contains(&net.ahu)
+        {
             // A riser carries what its floor draws and what comes from the other floors; unless its size
             // was typed, it is sized for that flow in the shaft.
             let total = report.total_flow_m3h + r.incoming_flow_m3h.unwrap_or(0.0);
@@ -364,6 +374,16 @@ impl crate::Drawing {
                 r.size = size_riser(&r, total);
             }
             self.regenerate_riser(net.ahu, &r)?;
+        }
+        // The risers the runs end on carry the flow typed on them: sized for it in their shaft.
+        for h in &net.riser_ends {
+            let Some(mut r) = self.entity(*h).and_then(|e| riser_of(e)) else { continue };
+            let Some(total) = r.incoming_flow_m3h else { continue };
+            r.flow_m3h = Some(total);
+            if !r.size_set {
+                r.size = size_riser(&r, total);
+            }
+            self.regenerate_riser(*h, &r)?;
         }
         Ok(())
     }
@@ -522,7 +542,7 @@ impl Scan<'_> {
         &mut self,
         ahu: Handle,
         inside: &impl Fn(Vec2, f64) -> bool,
-        port: &impl Fn(Vec2) -> Option<(usize, Vec<AirDirection>)>,
+        port: &impl Fn(Vec2) -> Option<(usize, Vec<(AirDirection, Option<RiserSize>)>)>,
         is_unit: bool,
     ) -> Vec<DuctNetwork> {
         let airs = AirDirection::ALL;
@@ -546,7 +566,7 @@ impl Scan<'_> {
             let gid = on.as_ref().map(|(g, _)| *g);
             // The directions of the collars at this point, in order (more than one when they are stacked).
             let mut roles: Vec<usize> = Vec::new();
-            for r in on.iter().flat_map(|(_, roles)| roles) {
+            for (r, _) in on.iter().flat_map(|(_, roles)| roles) {
                 if let Some(k) = airs.iter().position(|a| a == r)
                     && !roles.contains(&k)
                 {
@@ -589,6 +609,14 @@ impl Scan<'_> {
             });
             if let Some(g) = gid {
                 claimed.push((g, k));
+            }
+            // The orifice of the collar the duct starts on gives the run its section, unless it was set by hand.
+            let mut tree = tree;
+            if !d.params.imposed
+                && let Some(size) = on.iter().flat_map(|(_, roles)| roles).find(|(a, _)| *a == airs[k]).and_then(|(_, s)| *s)
+                && let Some(first) = tree.first_mut()
+            {
+                first.forced_size = Some(size);
             }
             if let Some(slot) = by_air.get_mut(k) {
                 append_tree(slot, tree);
@@ -646,7 +674,17 @@ impl Scan<'_> {
     /// terminals attached and counted.
     fn tree(&mut self, root: usize, from: Vec2, to: Vec2, air: AirDirection) -> Vec<Node> {
         self.take(root);
-        let mut nodes = vec![Node { duct: root, parent: None, from, to, terminal: None, open: false, fittings: Vec::new(), terminals_below: 0 }];
+        let mut nodes = vec![Node {
+            duct: root,
+            parent: None,
+            from,
+            to,
+            terminal: None,
+            forced_size: None,
+            open: false,
+            fittings: Vec::new(),
+            terminals_below: 0,
+        }];
         self.grow(&mut nodes, air);
         self.attach_terminals(&mut nodes, air);
         count_terminals(&mut nodes);
@@ -681,7 +719,17 @@ impl Scan<'_> {
             let many = children.len() > 1;
             for (k, (i, f, t)) in children.into_iter().enumerate() {
                 let fittings = junction_fittings(many, k, turn(f, t));
-                nodes.push(Node { duct: i, parent: Some(next), from: f, to: t, terminal: None, open: false, fittings, terminals_below: 0 });
+                nodes.push(Node {
+                    duct: i,
+                    parent: Some(next),
+                    from: f,
+                    to: t,
+                    terminal: None,
+                    forced_size: None,
+                    open: false,
+                    fittings,
+                    terminals_below: 0,
+                });
             }
             next += 1;
         }
@@ -743,14 +791,31 @@ impl Scan<'_> {
             if let Some(c) = main_chain.get_mut(old) {
                 *c = on_trunk;
             }
+            // The run that ends on a riser (roof plan) takes the riser's section when it was not set by hand,
+            // so the runs before it reduce to the shaft's duct.
+            let riser_size = n
+                .terminal
+                .and_then(|t| self.risers.iter().find(|r| r.handle == t.0))
+                .and_then(|r| if r.params.size_set { r.params.size } else { r.params.incoming_flow_m3h.and_then(|f| size_riser(&r.params, f)) })
+                .filter(|_| !d.params.imposed);
             segments.push(Segment {
                 parent: n.parent.and_then(index_of),
                 length_m: d.params.length_m(),
                 kind: segment_kind(d.params.kind, n.terminals_below, on_trunk, d.params.length_m()),
                 fittings: n.fittings.iter().copied().chain(std::iter::repeat_n(Fitting::Elbow45, 4 * d.params.jogs.len())).collect(),
                 terminal: n.terminal.map(|(_, flow, pa)| Terminal { flow_m3h: flow, pressure_drop_pa: pa }),
-                diameter_mm: (d.params.imposed && d.params.shape == DuctShape::Round).then_some(d.params.diameter_mm),
-                rect_mm: (d.params.imposed && d.params.shape == DuctShape::Rectangular).then_some((d.params.width_mm, d.params.height_mm)),
+                diameter_mm: (d.params.imposed && d.params.shape == DuctShape::Round).then_some(d.params.diameter_mm).or(
+                    match n.forced_size.or(riser_size) {
+                        Some(RiserSize::Round { diameter_mm }) => Some(diameter_mm),
+                        _ => None,
+                    },
+                ),
+                rect_mm: (d.params.imposed && d.params.shape == DuctShape::Rectangular).then_some((d.params.width_mm, d.params.height_mm)).or(
+                    match n.forced_size.or(riser_size) {
+                        Some(RiserSize::Rectangular { width_mm, height_mm }) => Some((width_mm, height_mm)),
+                        _ => None,
+                    },
+                ),
                 max_height_mm: self.height_available(d.a.mid(d.b)),
                 fixed_pa: 0.0,
                 roughness_mm: d.params.flexible.then_some(FLEX_ROUGHNESS_MM),
@@ -769,6 +834,11 @@ impl Scan<'_> {
             bottoms_mm,
             entered_at_end,
             dangling,
+            riser_ends: kept
+                .iter()
+                .filter_map(|&old| nodes.get(old).and_then(|n| n.terminal).map(|t| t.0))
+                .filter(|h| self.risers.iter().any(|r| r.handle == *h))
+                .collect(),
             unconnected: Vec::new(),
             accessories: Vec::new(),
             unplaced: Vec::new(),
