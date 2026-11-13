@@ -897,3 +897,24 @@ fn ductcross_with_jog_makes_the_named_duct_rise_or_dip_by_four_elbows_and_ductsi
     s.execute("ductcross", &json!({"clear": [under, over]})).unwrap();
     assert_eq!((jogs(&s, &under), jogs(&s, &over)), (0, 0));
 }
+
+#[test]
+fn a_long_run_to_a_single_terminal_is_a_branch_not_a_connection_so_it_is_not_sized_at_the_connection_velocity() {
+    // 350 m³/h: a round Ø200 runs at 3.1 m/s, under a branch's 4 m/s but over a connection's 2.5 m/s.
+    let diameter = |len: f64, kind: Option<&str>| {
+        let mut s = metric();
+        s.execute("ahuadd", &json!({"at": [-3000, 0], "type": "supplyUnit"})).unwrap();
+        let d = s.execute("ductadd", &json!({"points": [[-1700, 0], [-1700, len]]})).unwrap();
+        if let Some(k) = kind {
+            s.execute("ductedit", &json!({"handle": d["handles"][0], "kind": k})).unwrap();
+        }
+        s.execute("airterminaladd", &json!({"at": [-1700, len], "flow": 350, "air": "supply"})).unwrap();
+        let r = s.execute("ductsize", &json!({})).unwrap();
+        r["networks"][0]["segments"][0]["diameter"].as_f64().unwrap()
+    };
+    assert_eq!(diameter(1500.0, None), 250.0, "a drop of 1.5 m is a connection: 2.5 m/s");
+    assert_eq!(diameter(8000.0, None), 200.0, "8 m is a branch: 4 m/s");
+    // What the user sets stays: a long run given as a connection is sized as one.
+    assert_eq!(diameter(8000.0, Some("connection")), 250.0);
+    assert_eq!(diameter(1500.0, Some("branch")), 200.0);
+}

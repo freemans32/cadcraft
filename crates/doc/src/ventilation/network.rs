@@ -741,7 +741,7 @@ impl Scan<'_> {
             segments.push(Segment {
                 parent: n.parent.and_then(index_of),
                 length_m: d.params.length_m(),
-                kind: segment_kind(d.params.kind, n.terminals_below, on_trunk),
+                kind: segment_kind(d.params.kind, n.terminals_below, on_trunk, d.params.length_m()),
                 fittings: n.fittings.iter().copied().chain(std::iter::repeat_n(Fitting::Elbow45, 4 * d.params.jogs.len())).collect(),
                 terminal: n.terminal.map(|(_, flow, pa)| Terminal { flow_m3h: flow, pressure_drop_pa: pa }),
                 diameter_mm: (d.params.imposed && d.params.shape == DuctShape::Round).then_some(d.params.diameter_mm),
@@ -799,14 +799,18 @@ fn junction_fittings(many: bool, k: usize, angle: f64) -> Vec<Fitting> {
     fittings
 }
 
-/// The velocity class of a run: the one given, else a connection to one terminal, a main along the
-/// trunk, or a branch.
-fn segment_kind(kind: DuctKind, terminals_below: usize, on_trunk: bool) -> SegmentKind {
+/// The longest run, metres, that is a connection (a drop to a terminal, with the low velocity of the
+/// air near it) when it serves a single terminal: a longer one is a branch that happens to end at one.
+pub const CONNECTION_MAX_M: f64 = 3.0;
+
+/// The velocity class of a run: the one given, else a short run to one terminal is a connection, a
+/// longer one a main along the trunk or a branch.
+fn segment_kind(kind: DuctKind, terminals_below: usize, on_trunk: bool, length_m: f64) -> SegmentKind {
     match kind {
         DuctKind::Main => SegmentKind::Main,
         DuctKind::Branch => SegmentKind::Branch,
         DuctKind::Connection => SegmentKind::Connection,
-        DuctKind::Auto if terminals_below <= 1 => SegmentKind::Connection,
+        DuctKind::Auto if terminals_below <= 1 && length_m <= CONNECTION_MAX_M => SegmentKind::Connection,
         DuctKind::Auto if on_trunk => SegmentKind::Main,
         DuctKind::Auto => SegmentKind::Branch,
     }
