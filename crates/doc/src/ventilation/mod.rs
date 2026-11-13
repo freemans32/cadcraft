@@ -151,6 +151,15 @@ fn check_label_height(mm: f64) -> crate::Result<()> {
 
 /// A centred single-line text at `at`.
 fn label(at: Vec2, height: f64, value: String) -> crate::EntityKind {
+    text_at(at, height, value, crate::HAlign::Center)
+}
+
+/// A single-line text starting at `at`, its middle on the line.
+fn label_left(at: Vec2, height: f64, value: String) -> crate::EntityKind {
+    text_at(at, height, value, crate::HAlign::Left)
+}
+
+fn text_at(at: Vec2, height: f64, value: String, halign: crate::HAlign) -> crate::EntityKind {
     crate::EntityKind::Text(crate::Text {
         insert: v3(at),
         align_pt: Some(v3(at)),
@@ -160,7 +169,7 @@ fn label(at: Vec2, height: f64, value: String) -> crate::EntityKind {
         width_factor: 1.0,
         oblique: 0.0,
         style: "Standard".into(),
-        halign: crate::HAlign::Center,
+        halign,
         valign: crate::VAlign::Middle,
     })
 }

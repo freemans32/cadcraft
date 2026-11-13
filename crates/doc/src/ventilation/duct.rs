@@ -130,6 +130,15 @@ pub struct AhuParams {
     pub ports: Vec<AirDirection>,
     pub width_mm: f64,
     pub depth_mm: f64,
+    /// The height of the casing, mm, when it is known: written on the unit's spec block (the plan shows no height).
+    #[serde(default)]
+    pub height_mm: Option<f64>,
+    /// The make and model ("CIAT FLOWAY RHE 5000"), written on the spec block.
+    #[serde(default)]
+    pub model: String,
+    /// The weight, kg, written on the spec block.
+    #[serde(default)]
+    pub weight_kg: Option<f64>,
     /// The supply flow the network asks of the unit, m³/h, once the network is sized. A unit is
     /// double-flux: the supply and the extract networks start from it.
     #[serde(default)]
@@ -248,6 +257,12 @@ impl AhuParams {
         if !size(self.width_mm) || !size(self.depth_mm) {
             return Err(invalid(format!("A unit's sizes are more than 0 and at most {MAX_AHU_SIZE_MM} mm.")));
         }
+        if self.height_mm.is_some_and(|v| !size(v)) || self.weight_kg.is_some_and(|v| !(v.is_finite() && v > 0.0 && v <= 1e7)) {
+            return Err(invalid("A unit's height and weight are more than 0 (the height at most 100 000 mm)."));
+        }
+        if self.model.chars().count() > super::MAX_HVAC_NAME_CHARS || self.model.chars().any(char::is_control) {
+            return Err(invalid(format!("A unit's model has at most {} characters, without control characters.", super::MAX_HVAC_NAME_CHARS)));
+        }
         for v in AirDirection::ALL
             .into_iter()
             .flat_map(|a| {
@@ -298,7 +313,28 @@ impl AhuParams {
         pieces.push(HvacPiece { layer: AHU_LAYER, kind: label(code_at, h, self.kind.code().into()) });
         pieces.push(HvacPiece { layer: AHU_LAYER, kind: label(Vec2::new(0.0, -half.y - 1.2 * h), h, text) });
         pieces.extend(self.port_marks(h));
+        // The spec block to the right, beyond the collars' arrows, its lines under one another.
+        let x = half.x + 0.9 * half.x.min(half.y) + 3.0 * h;
+        for (i, line) in self.spec_lines().into_iter().enumerate() {
+            pieces.push(HvacPiece { layer: AHU_LAYER, kind: super::label_left(Vec2::new(x, half.y - (i as f64) * 1.6 * h - h), h, line) });
+        }
         Ok(pieces)
+    }
+
+    /// The spec block written beside the unit, one line each: the make and model, "Dim. LxPxH" (width
+    /// x depth x height) and the weight; only what is known.
+    pub fn spec_lines(&self) -> Vec<String> {
+        let mut v = Vec::new();
+        if !self.model.trim().is_empty() {
+            v.push(self.model.trim().to_string());
+        }
+        if let Some(h) = self.height_mm {
+            v.push(format!("Dim. {:.0}x{:.0}x{:.0}H", self.width_mm, self.depth_mm, h));
+        }
+        if let Some(w) = self.weight_kg {
+            v.push(format!("Poids {w:.0}kg"));
+        }
+        v
     }
 
     /// The casing, what is inside it and the collars its ducts connect to, as the kind has them.

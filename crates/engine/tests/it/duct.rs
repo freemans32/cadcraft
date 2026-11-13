@@ -804,3 +804,18 @@ fn ductsize_sizes_fresh_air_and_exhaust_ducts_that_end_in_the_open_and_sets_thei
     assert_eq!(airs.iter().filter(|a| **a == cadcraft_doc::AirDirection::Fresh).count(), 1, "{airs:?}");
     assert_eq!(airs.iter().filter(|a| **a == cadcraft_doc::AirDirection::Exhaust).count(), 1, "{airs:?}");
 }
+
+#[test]
+fn ahuadd_and_ahuedit_take_the_height_the_make_and_the_weight_of_the_unit() {
+    let mut s = metric();
+    let r = s
+        .execute("ahuadd", &json!({"at": [0, 0], "width": 1600, "depth": 1510, "height": 1659, "model": "CIAT FLOWAY RHE 5000", "weight": 600}))
+        .unwrap();
+    let h = hd(&r["handle"]);
+    let a = ahu_of(s.doc().unwrap().entity(h).unwrap()).unwrap();
+    assert_eq!((a.height_mm, a.weight_kg, a.model.as_str()), (Some(1659.0), Some(600.0), "CIAT FLOWAY RHE 5000"));
+    s.execute("ahuedit", &json!({"handle": r["handle"], "height": 1800, "weight": null, "depth": 1400})).unwrap();
+    let a = ahu_of(s.doc().unwrap().entity(h).unwrap()).unwrap();
+    assert_eq!((a.height_mm, a.weight_kg, a.depth_mm), (Some(1800.0), None, 1400.0));
+    assert!(s.execute("ahuedit", &json!({"handle": r["handle"], "height": -3})).is_err());
+}

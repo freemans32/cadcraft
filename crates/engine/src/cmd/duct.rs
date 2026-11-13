@@ -17,13 +17,13 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("ahuadd", "Air Handling Unit", run_ahuadd)
             .menu(&["Draw", "HVAC", "Air Handling Unit"])
             .params(
-                "{at, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox (default doubleFlow), width? (mm), depth? (mm), rotation? (degrees), \
+                "{at, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox (default doubleFlow), width? (mm), depth? (mm), height? (mm), model?, weight? (kg), rotation? (degrees), \
                  labelHeight? (mm)} → {handle, name} (its ducts and terminals say supply or extract)",
             )
             .interactive(|s| Ok(Box::new(AhuAddM::new(s)))),
         CommandSpec::new("ahuedit", "Edit Air Handling Unit", run_ahuedit)
             .params(
-                "{handle | handles, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox, width? (mm), depth? (mm), \
+                "{handle | handles, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox, width? (mm), depth? (mm), height? (mm or null), model?, weight? (kg or null), \
                  ports? (the direction of the air at each collar, supply|extract|fresh|exhaust, one per collar: four for a double-flux unit or a box, two for a single-flux unit; [] restores the kind's)} → {changed}",
             ),
         CommandSpec::new("ductadd", "Duct", run_ductadd)
@@ -213,6 +213,9 @@ fn run_ahuadd(s: &mut Session, p: &Value) -> Result<Value> {
         fresh_pressure_pa: None,
         exhaust_flow_m3h: None,
         exhaust_pressure_pa: None,
+        height_mm: positive(CMD, p, "height")?,
+        model: str_param(p, "model").unwrap_or_default().to_string(),
+        weight_kg: positive(CMD, p, "weight")?,
         label_height_mm: positive(CMD, p, "labelHeight")?.unwrap_or(100.0),
         units: units_of(s)?,
     };
@@ -235,6 +238,15 @@ fn run_ahuedit(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(CMD, format!("select 1 to {MAX_EDITED} units")));
     }
     let (width, depth) = (positive(CMD, p, "width")?, positive(CMD, p, "depth")?);
+    // Height and weight: a number sets them, null clears them.
+    let clearable = |key: &str| -> Result<Option<Option<f64>>> {
+        match p.get(key) {
+            None => Ok(None),
+            Some(Value::Null) => Ok(Some(None)),
+            Some(_) => Ok(Some(positive(CMD, p, key)?)),
+        }
+    };
+    let (height, weight) = (clearable("height")?, clearable("weight")?);
     let kind = ahu_kind_param(CMD, p)?;
     let d = s.doc()?;
     let mut next = Vec::with_capacity(hs.len());
@@ -252,6 +264,15 @@ fn run_ahuedit(s: &mut Session, p: &Value) -> Result<Value> {
         }
         a.width_mm = width.unwrap_or(a.width_mm);
         a.depth_mm = depth.unwrap_or(a.depth_mm);
+        if let Some(v) = height {
+            a.height_mm = v;
+        }
+        if let Some(v) = weight {
+            a.weight_kg = v;
+        }
+        if let Some(m) = str_param(p, "model") {
+            a.model = m.trim().to_string();
+        }
         a.validate().map_err(doc_err)?;
         next.push((*h, a));
     }
@@ -327,6 +348,9 @@ impl AhuAddM {
                     fresh_pressure_pa: None,
                     exhaust_flow_m3h: None,
                     exhaust_pressure_pa: None,
+                    height_mm: None,
+                    model: String::new(),
+                    weight_kg: None,
                     label_height_mm: 100.0,
                     units: units_of(s)?,
                 };
@@ -406,6 +430,9 @@ impl Interactive for AhuAddM {
             fresh_pressure_pa: None,
             exhaust_flow_m3h: None,
             exhaust_pressure_pa: None,
+            height_mm: None,
+            model: String::new(),
+            weight_kg: None,
             label_height_mm: 100.0,
             units,
         };

@@ -61,7 +61,7 @@ pub(super) fn section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], len: &dyn 
     }
     let units: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| ahu_of(e))).collect();
     if !units.is_empty() && units.len() == sel.len() {
-        return ahu_section(ui, sel, &units);
+        return ahu_section(ui, sel, &units, bad);
     }
     let accessories: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| accessory_of(e))).collect();
     if !accessories.is_empty() && accessories.len() == sel.len() {
@@ -587,7 +587,7 @@ fn riser_section(ui: &mut egui::Ui, sel: &[Handle], risers: &[RiserParams], bad:
 // Air handling units
 // =====================================================================================
 
-fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams]) -> Action {
+fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams], bad: &mut Option<String>) -> Action {
     let ids = handles(sel);
     let mut action: Action = None;
     let edit = |key: &str, value: Value| Some(("ahuedit", json!({ "handles": ids, key: value })));
@@ -610,6 +610,30 @@ fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams]) -> Action
     prop_row(ui, "Name", |ui| {
         if let Some(n) = edit_field(ui, ui.scope_id().with(("ahu_name", &ids)), name).filter(|n| !n.trim().is_empty() && n != VARIES) {
             action = edit("name", json!(n));
+        }
+    });
+    // The casing: width x depth on the plan and the height; the make and model and the weight go on its spec block.
+    for (label, key, get) in [
+        ("Width (mm)", "width", (|u: &AhuParams| Some(u.width_mm)) as fn(&AhuParams) -> Option<f64>),
+        ("Depth (mm)", "depth", |u| Some(u.depth_mm)),
+        ("Height (mm)", "height", |u| u.height_mm),
+        ("Weight (kg)", "weight", |u| u.weight_kg),
+    ] {
+        let v = shared(&units.iter().map(|u| get(u).map_or(String::new(), |f| format!("{f}"))).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+        prop_row(ui, label, |ui| {
+            if let Some(t) = edit_field(ui, ui.scope_id().with(("ahu_size", key, &ids)), v).filter(|t| t != VARIES) {
+                if t.trim().is_empty() && (key == "height" || key == "weight") {
+                    action = edit(key, Value::Null);
+                } else if let Some(n) = number(Some(t), bad) {
+                    action = edit(key, json!(n));
+                }
+            }
+        });
+    }
+    let model = shared(&units.iter().map(|p| p.model.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Make and model", |ui| {
+        if let Some(m) = edit_field(ui, ui.scope_id().with(("ahu_model", &ids)), model).filter(|m| m != VARIES) {
+            action = edit("model", json!(m));
         }
     });
     if let [u] = units {

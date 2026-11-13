@@ -83,6 +83,9 @@ fn unit() -> AhuParams {
         fresh_pressure_pa: None,
         exhaust_flow_m3h: None,
         exhaust_pressure_pa: None,
+        height_mm: None,
+        model: String::new(),
+        weight_kg: None,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     }

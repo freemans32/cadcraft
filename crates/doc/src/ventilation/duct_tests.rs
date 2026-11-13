@@ -19,6 +19,9 @@ fn ahu() -> AhuParams {
         fresh_pressure_pa: None,
         exhaust_flow_m3h: None,
         exhaust_pressure_pa: None,
+        height_mm: None,
+        model: String::new(),
+        weight_kg: None,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     }
@@ -1123,4 +1126,24 @@ fn open_ducts_with_nothing_to_balance_against_need_a_flow_and_are_left_out_until
     d.regenerate_duct(supply, &p).unwrap();
     let net = d.duct_networks().unwrap().remove(0);
     assert_eq!((net.air, net.network.segments.len(), net.dangling.len()), (AirDirection::Supply, 1, 0));
+}
+
+#[test]
+fn a_unit_writes_its_make_dimensions_and_weight_beside_it_and_keeps_them_in_its_data() {
+    let mut p = ahu();
+    assert!(p.spec_lines().is_empty(), "nothing is written for what is not known");
+    p.model = "CIAT FLOWAY RHE 5000".into();
+    p.width_mm = 1600.0;
+    p.depth_mm = 1510.0;
+    p.height_mm = Some(1659.0);
+    p.weight_kg = Some(600.0);
+    assert_eq!(p.spec_lines(), ["CIAT FLOWAY RHE 5000", "Dim. 1600x1510x1659H", "Poids 600kg"]);
+    let texts = |p: &AhuParams| p.generate().unwrap().iter().filter(|x| matches!(x.kind, EntityKind::Text(_))).count();
+    assert_eq!(texts(&p), texts(&ahu()) + 3);
+    let mut d = Drawing::new_metric();
+    let h = d.add_ahu(&Space::Model, Common::default(), &p, Vec2::ZERO, 0.0).unwrap();
+    let back = ahu_of(d.entity(h).unwrap()).unwrap();
+    assert_eq!((back.height_mm, back.weight_kg, back.model.as_str()), (Some(1659.0), Some(600.0), "CIAT FLOWAY RHE 5000"));
+    assert!(AhuParams { height_mm: Some(0.0), ..ahu() }.validate().is_err());
+    assert!(AhuParams { weight_kg: Some(-1.0), ..ahu() }.validate().is_err());
 }
