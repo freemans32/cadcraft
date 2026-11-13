@@ -779,3 +779,28 @@ fn ahuedit_sets_the_direction_of_each_collar() {
     s.execute("ahuedit", &json!({"handle": h, "type": "supplyUnit"})).unwrap();
     assert_eq!(ports(&s).len(), 2, "a change of kind restores that kind's roles");
 }
+
+#[test]
+fn ductsize_sizes_fresh_air_and_exhaust_ducts_that_end_in_the_open_and_sets_their_direction() {
+    let mut s = metric();
+    four_connections(&mut s, 300.0);
+    // Take the two louvres away: the fresh air and exhaust ducts now end in a wall passage nobody drew.
+    let louvres: Vec<Handle> = s
+        .doc()
+        .unwrap()
+        .model
+        .iter()
+        .filter(|e| cadcraft_doc::air_terminal_of(e).is_some_and(|t| t.model.kind == cadcraft_doc::TerminalKind::Louvre))
+        .map(|e| e.handle)
+        .collect();
+    assert_eq!(louvres.len(), 2);
+    s.execute("erase", &json!({"handles": louvres.iter().map(|h| h.hex()).collect::<Vec<_>>()})).unwrap();
+    let r = s.execute("ductsize", &json!({})).unwrap();
+    let nets = r["networks"].as_array().unwrap();
+    assert_eq!(nets.iter().map(|n| n["air"].as_str().unwrap()).collect::<Vec<_>>(), ["supply", "extract", "fresh", "exhaust"], "{r}");
+    // Fresh air takes the supply's flow, exhaust the extract's.
+    assert_eq!(nets.iter().map(|n| n["totalFlow"].as_f64().unwrap()).collect::<Vec<_>>(), [300.0, 280.0, 300.0, 280.0], "{r}");
+    let airs: Vec<_> = s.doc().unwrap().model.iter().filter_map(|e| duct_of(e).map(|p| p.air)).collect();
+    assert_eq!(airs.iter().filter(|a| **a == cadcraft_doc::AirDirection::Fresh).count(), 1, "{airs:?}");
+    assert_eq!(airs.iter().filter(|a| **a == cadcraft_doc::AirDirection::Exhaust).count(), 1, "{airs:?}");
+}

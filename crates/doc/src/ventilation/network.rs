@@ -87,6 +87,8 @@ struct Node {
     from: Vec2,
     to: Vec2,
     terminal: Option<(Handle, f64, f64)>,
+    /// The run ends in the open: no terminal, but the air leaves or comes in freely there.
+    open: bool,
     fittings: Vec<Fitting>,
     terminals_below: usize,
 }
@@ -461,12 +463,19 @@ impl Scan<'_> {
             // A tree that reaches no terminal is read once more, to name what leads nowhere.
             let (k, tree) = chosen.unwrap_or_else(|| {
                 let k = candidates.first().copied().unwrap_or(0);
-                (k, self.tree(i, from, to, airs[k]))
+                let mut tree = self.tree(i, from, to, airs[k]);
+                // A duct on a collar, or one given its direction, that reaches no terminal is open at
+                // its ends: air is blown or taken freely there. Any other is left out, as before.
+                if d.params.air_set || port(from).is_some() {
+                    open_the_ends(&mut tree);
+                }
+                (k, tree)
             });
             if let Some(slot) = by_air.get_mut(k) {
                 append_tree(slot, tree);
             }
         }
+        self.flow_open_ends(&mut by_air);
         let mut nets: Vec<DuctNetwork> =
             airs.iter().zip(&by_air).filter(|(_, nodes)| !nodes.is_empty()).map(|(air, nodes)| self.build(ahu, *air, nodes)).collect();
         // A unit with no duct leaving it still gets its (empty) supply network, to say so.
@@ -476,11 +485,49 @@ impl Scan<'_> {
         nets
     }
 
+    /// Gives each open end its flow: the one set on its duct, else its share of what the opposite
+    /// direction of the unit carries (fresh air of the supply, exhaust of the extract, and each of
+    /// supply and extract of the other). An open end with no flow is left out, as a duct to nowhere.
+    fn flow_open_ends(&self, by_air: &mut [Vec<Node>; 4]) {
+        let airs = AirDirection::ALL;
+        let carried = |nodes: &[Node]| nodes.iter().filter(|n| !n.open).filter_map(|n| n.terminal).map(|t| t.1).sum::<f64>();
+        for (k, air) in airs.iter().enumerate() {
+            let opposite = match air {
+                AirDirection::Fresh => AirDirection::Supply,
+                AirDirection::Exhaust => AirDirection::Extract,
+                AirDirection::Supply => AirDirection::Extract,
+                AirDirection::Extract => AirDirection::Supply,
+            };
+            let balance = airs.iter().position(|a| *a == opposite).and_then(|o| by_air.get(o)).map_or(0.0, |n| carried(n));
+            let Some(nodes) = by_air.get_mut(k) else { continue };
+            let set = |n: &Node| self.ducts.get(n.duct).and_then(|d| d.params.open_flow_m3h).filter(|f| *f > 0.0);
+            let fixed: f64 = nodes.iter().filter(|n| n.open).filter_map(set).sum();
+            let unset = nodes.iter().filter(|n| n.open && set(n).is_none()).count();
+            let share = if unset == 0 { 0.0 } else { ((balance - fixed).max(0.0)) / unset as f64 };
+            let flows: Vec<Option<f64>> = nodes.iter().map(|n| n.open.then(|| set(n).unwrap_or(share)).filter(|f| *f > 0.0)).collect();
+            for (n, f) in nodes.iter_mut().zip(flows) {
+                if n.open {
+                    n.terminal = f.zip(self.ducts.get(n.duct)).map(|(f, d)| (d.handle, f, 0.0));
+                    n.open = false;
+                }
+            }
+            // The runs that lead to no flow are counted again.
+            let mut first = 0;
+            while first < nodes.len() {
+                let end = nodes.iter().skip(first + 1).position(|n| n.parent.is_none()).map_or(nodes.len(), |e| first + 1 + e);
+                if let Some(tree) = nodes.get_mut(first..end) {
+                    recount(tree, first);
+                }
+                first = end;
+            }
+        }
+    }
+
     /// The tree of runs starting with duct `root`, entered at `from`, as direction `air`, its
     /// terminals attached and counted.
     fn tree(&mut self, root: usize, from: Vec2, to: Vec2, air: AirDirection) -> Vec<Node> {
         self.take(root);
-        let mut nodes = vec![Node { duct: root, parent: None, from, to, terminal: None, fittings: Vec::new(), terminals_below: 0 }];
+        let mut nodes = vec![Node { duct: root, parent: None, from, to, terminal: None, open: false, fittings: Vec::new(), terminals_below: 0 }];
         self.grow(&mut nodes, air);
         self.attach_terminals(&mut nodes, air);
         count_terminals(&mut nodes);
@@ -515,7 +562,7 @@ impl Scan<'_> {
             let many = children.len() > 1;
             for (k, (i, f, t)) in children.into_iter().enumerate() {
                 let fittings = junction_fittings(many, k, turn(f, t));
-                nodes.push(Node { duct: i, parent: Some(next), from: f, to: t, terminal: None, fittings, terminals_below: 0 });
+                nodes.push(Node { duct: i, parent: Some(next), from: f, to: t, terminal: None, open: false, fittings, terminals_below: 0 });
             }
             next += 1;
         }
@@ -646,10 +693,31 @@ fn segments_cross(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> Option<Vec2> {
     ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then(|| a + r * t)
 }
 
+/// Marks every run no other run leaves from as open at its far end, and counts again.
+fn open_the_ends(tree: &mut [Node]) {
+    let has_child: Vec<bool> = (0..tree.len()).map(|i| tree.iter().any(|n| n.parent == Some(i))).collect();
+    for (n, child) in tree.iter_mut().zip(has_child) {
+        n.open = !child && n.terminal.is_none();
+    }
+    recount(tree, 0);
+}
+
+/// [`count_terminals`] on a tree whose parent indices start at `offset` (a tree appended after others).
+fn recount(tree: &mut [Node], offset: usize) {
+    for n in tree.iter_mut() {
+        n.terminals_below = 0;
+        n.parent = n.parent.map(|p| p.saturating_sub(offset));
+    }
+    count_terminals(tree);
+    for n in tree.iter_mut() {
+        n.parent = n.parent.map(|p| p + offset);
+    }
+}
+
 /// How many terminals each run serves, itself and all the runs below it.
 fn count_terminals(nodes: &mut [Node]) {
     for i in (0..nodes.len()).rev() {
-        let own = usize::from(nodes.get(i).is_some_and(|n| n.terminal.is_some()));
+        let own = usize::from(nodes.get(i).is_some_and(|n| n.terminal.is_some() || n.open));
         let below = nodes.get(i).map_or(0, |n| n.terminals_below) + own;
         if let Some(n) = nodes.get_mut(i) {
             n.terminals_below = below;

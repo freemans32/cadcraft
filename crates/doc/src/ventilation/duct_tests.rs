@@ -43,6 +43,7 @@ fn duct(diameter_mm: f64) -> DuctParams {
         trim_start_mm: 0.0,
         trim_end_mm: 0.0,
         flow_forward: None,
+        open_flow_m3h: None,
         bottom_mm: None,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
@@ -1075,4 +1076,51 @@ fn a_duct_on_a_collar_takes_the_direction_of_that_collar_and_the_roles_can_be_ch
     assert_eq!(airs(&d), [AirDirection::Supply, AirDirection::Extract, AirDirection::Fresh]);
     // A unit takes as many roles as it has collars.
     assert!(AhuParams { ports: vec![AirDirection::Supply], ..ahu() }.validate().is_err());
+}
+
+#[test]
+fn a_duct_on_a_collar_with_no_terminal_is_an_open_end_of_that_collars_direction() {
+    let flow = |n: &DuctNetwork| n.network.segments.first().and_then(|s| s.terminal).map(|t| t.flow_m3h);
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    add_duct(&mut d, (500.0, 300.0), (4000.0, 300.0));
+    add_terminal(&mut d, (4000.0, 300.0), 300.0);
+    add_duct(&mut d, (500.0, -300.0), (4000.0, -300.0));
+    extract_terminal(&mut d, (4000.0, -300.0), 250.0);
+    // Fresh air and exhaust end in the open (a wall passage drawn by someone else): no terminal there.
+    add_duct(&mut d, (-500.0, 300.0), (-4000.0, 300.0));
+    let exhaust = add_duct(&mut d, (-500.0, -300.0), (-4000.0, -300.0));
+    let nets = d.duct_networks().unwrap();
+    let got: Vec<_> = nets.iter().map(|n| (n.air, flow(n))).collect();
+    // Fresh air brings what the supply blows, exhaust takes what the extract draws.
+    assert_eq!(
+        got,
+        [
+            (AirDirection::Supply, Some(300.0)),
+            (AirDirection::Extract, Some(250.0)),
+            (AirDirection::Fresh, Some(300.0)),
+            (AirDirection::Exhaust, Some(250.0))
+        ]
+    );
+    assert!(nets.iter().all(|n| n.dangling.is_empty()));
+    // A flow set on the open duct wins over the balance.
+    let (mut p, ..) = d.duct_ends(exhaust).unwrap();
+    p.open_flow_m3h = Some(120.0);
+    d.regenerate_duct(exhaust, &p).unwrap();
+    assert_eq!(d.duct_networks().unwrap().iter().find(|n| n.air == AirDirection::Exhaust).and_then(flow), Some(120.0));
+}
+
+#[test]
+fn open_ducts_with_nothing_to_balance_against_need_a_flow_and_are_left_out_until_they_have_one() {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    let supply = add_duct(&mut d, (500.0, 300.0), (4000.0, 300.0));
+    let net = d.duct_networks().unwrap().remove(0);
+    assert!(net.network.segments.is_empty(), "no terminal and no flow to give it");
+    assert_eq!(net.dangling, [supply]);
+    let (mut p, ..) = d.duct_ends(supply).unwrap();
+    p.open_flow_m3h = Some(500.0);
+    d.regenerate_duct(supply, &p).unwrap();
+    let net = d.duct_networks().unwrap().remove(0);
+    assert_eq!((net.air, net.network.segments.len(), net.dangling.len()), (AirDirection::Supply, 1, 0));
 }

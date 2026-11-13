@@ -110,6 +110,7 @@ fn ducted(accessory_at: Option<(AccessoryKind, f64, f64)>) -> (Drawing, Option<H
         trim_start_mm: 0.0,
         trim_end_mm: 0.0,
         flow_forward: None,
+        open_flow_m3h: None,
         bottom_mm: None,
         label_height_mm: 100.0,
         units: HvacUnits::default(),

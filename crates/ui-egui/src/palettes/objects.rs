@@ -659,6 +659,13 @@ fn duct_section(ui: &mut egui::Ui, sel: &[Handle], ds: &[DuctParams], len: &dyn 
         prop_row(ui, "Flow", |ui| read_only(ui, &flow));
         let velocity = p.velocity.map_or("—".to_string(), |v| format!("{v:.1} m/s"));
         prop_row(ui, "Velocity", |ui| read_only(ui, &velocity));
+        // For a duct that ends in the open; empty = the balance with the opposite direction (DUCTEDIT openFlow null gives it back).
+        let open = p.open_flow_m3h.map_or(String::new(), |f| format!("{f}"));
+        prop_row(ui, "Open-end flow (m³/h)", |ui| {
+            if let Some(f) = number(edit_field(ui, ui.scope_id().with(("open_flow", &ids)), open), bad) {
+                action = edit("openFlow", json!(f));
+            }
+        });
     }
     action
 }

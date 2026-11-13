@@ -466,6 +466,7 @@ fn duct_params(s: &Session, last: &DuctLastUsed, label_mm: f64) -> Result<DuctPa
         trim_start_mm: 0.0,
         trim_end_mm: 0.0,
         flow_forward: None,
+        open_flow_m3h: None,
         bottom_mm: None,
         label_height_mm: label_mm,
         units: units_of(s)?,
@@ -694,6 +695,14 @@ fn run_ductedit(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let (kind, air) = (kind_param(CMD, p)?, duct_air_param(CMD, p)?);
     let flexible = bool_param(CMD, p, "flexible")?;
+    // The flow of an open end (a duct on a unit's collar that leads to no terminal); null gives it back to the balance.
+    let open_flow: Option<Option<f64>> = match p.get("openFlow") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(v) => {
+            Some(Some(v.as_f64().filter(|f| f.is_finite() && *f > 0.0).ok_or_else(|| bad(CMD, "`openFlow` must be a flow above 0 (m³/h) or null"))?))
+        }
+    };
     let d = s.doc()?;
     let mut next = Vec::with_capacity(hs.len());
     for h in &hs {
@@ -710,6 +719,7 @@ fn run_ductedit(s: &mut Session, p: &Value) -> Result<Value> {
             None => {}
         }
         dp.flexible = flexible.unwrap_or(dp.flexible);
+        dp.open_flow_m3h = open_flow.unwrap_or(dp.open_flow_m3h);
         dp.validate().map_err(doc_err)?;
         next.push((*h, dp));
     }
@@ -814,6 +824,7 @@ fn run_ductconnect(s: &mut Session, p: &Value) -> Result<Value> {
             trim_start_mm: 0.0,
             trim_end_mm: 0.0,
             flow_forward: None,
+            open_flow_m3h: None,
             bottom_mm: None,
             label_height_mm: 100.0,
             units: units_of(s)?,

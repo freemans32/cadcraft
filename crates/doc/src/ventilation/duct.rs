@@ -490,6 +490,10 @@ pub struct DuctParams {
     /// The altitude of the run's underside, mm, when a height zone it runs in gives one: written on its label.
     #[serde(default)]
     pub bottom_mm: Option<f64>,
+    /// The flow, m³/h, leaving by this duct's free end, when it starts on a unit's collar and leads
+    /// to no terminal (an open end, as when air is blown or taken freely). None: the unit's balance.
+    #[serde(default)]
+    pub open_flow_m3h: Option<f64>,
     /// A flexible duct (gaine souple): drawn as bellows, with the roughness of one.
     #[serde(default)]
     pub flexible: bool,
@@ -595,7 +599,7 @@ impl DuctParams {
                 return Err(invalid(format!("A rectangular duct's sides are {} to {} mm.", DUCT_DIAMETER_MM.0, DUCT_DIAMETER_MM.1)));
             }
         }
-        for v in [self.flow_m3h, self.velocity].into_iter().flatten() {
+        for v in [self.flow_m3h, self.velocity, self.open_flow_m3h].into_iter().flatten() {
             if !(v.is_finite() && (0.0..=1e9).contains(&v)) {
                 return Err(invalid("A duct's flow and velocity are 0 or more."));
             }
