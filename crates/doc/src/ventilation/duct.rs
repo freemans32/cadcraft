@@ -93,7 +93,7 @@ impl AhuKind {
 
     pub fn parse(text: &str) -> Option<AhuKind> {
         match text.trim().to_ascii_lowercase().as_str() {
-            "doubleflow" | "doubleflux" | "double" | "df" | "dual" => Some(AhuKind::DoubleFlow),
+            "doubleflow" | "doubleflux" | "double" | "df" | "dual" | "horizontal" | "horizontale" => Some(AhuKind::DoubleFlow),
             "supplyunit" | "supply" | "soufflage" | "s" => Some(AhuKind::SupplyUnit),
             "extractunit" | "extract" | "extraction" | "e" => Some(AhuKind::ExtractUnit),
             "vmcbox" | "vmc" | "box" | "caisson" => Some(AhuKind::VmcBox),

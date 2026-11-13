@@ -335,7 +335,8 @@ impl AhuAddM {
             (AhuAsk::Width, _, Some(t)) => self.last.size = Some((Self::size(t)?, self.last.size_mm().1)),
             (AhuAsk::Depth, _, Some(t)) => self.last.size = Some((self.last.size_mm().0, Self::size(t)?)),
             (AhuAsk::Type, _, Some(t)) => {
-                self.last = AhuLastUsed { kind: AhuKind::parse(t).ok_or_else(|| other("Enter DoubleFlow, Supply, Extract or Vmc."))?, size: None };
+                self.last =
+                    AhuLastUsed { kind: AhuKind::parse(t).ok_or_else(|| other("Enter DoubleFlow, Vertical, Supply, Extract or Vmc."))?, size: None };
             }
             (AhuAsk::Rotation(at), _, _) => {
                 let angle = match (&i, text.as_deref()) {
@@ -395,9 +396,9 @@ impl Interactive for AhuAddM {
             AhuAsk::Name => Prompt::new("Enter unit name", Accept::TEXT).default(self.name.clone()),
             AhuAsk::Width => Prompt::new("Enter unit width (mm)", Accept::NUMBER).default(format!("{}", self.last.size_mm().0)),
             AhuAsk::Depth => Prompt::new("Enter unit depth (mm)", Accept::NUMBER).default(format!("{}", self.last.size_mm().1)),
-            AhuAsk::Type => {
-                Prompt::new("Enter unit type", super::curves::KW).kw(&["DoubleFlow", "Supply", "Extract", "Vmc"]).default(self.last.kind.name())
-            }
+            AhuAsk::Type => Prompt::new("Enter unit type", super::curves::KW)
+                .kw(&["DoubleFlow", "Vertical", "Supply", "Extract", "Vmc"])
+                .default(self.last.kind.name()),
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {

@@ -1145,6 +1145,7 @@
 	Edit Height Zone	Modifier la zone de hauteur
 	Altitude of the underside (m)	Altitude du dessous (m)
 	Riser	Colonne
+	Orientation	Orientation
 	section	section
 	size	taille
 	Round	Ronde
@@ -1192,7 +1193,7 @@
 	Supply unit	CTA simple flux soufflage
 	Extract unit	CTA simple flux extraction
 	Ventilation box	Caisson VMC
-	Compact double-flow unit	CTA double flux compacte
+	Double-flow unit, vertical	CTA double flux verticale
 	Enter unit type	Entrez le type de centrale
 	Ducts reached from a unit: {reached} of {ducts}	Gaines reliées à une CTA : {reached} sur {ducts}
 	Terminals connected: {n}	Bouches raccordées : {n}

@@ -604,19 +604,24 @@ fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams], bad: &mut
             AhuKind::SupplyUnit => "Supply unit",
             AhuKind::ExtractUnit => "Extract unit",
             AhuKind::VmcBox => "Ventilation box",
-            AhuKind::StackedDoubleFlow => "Compact double-flow unit",
+            AhuKind::StackedDoubleFlow => "Double-flow unit",
         };
-        let items = [
-            ("doubleFlow", "Double-flow unit"),
-            ("supplyUnit", "Supply unit"),
-            ("extractUnit", "Extract unit"),
-            ("vmcBox", "Ventilation box"),
-            ("stackedDoubleFlow", "Compact double-flow unit"),
-        ];
+        let items =
+            [("doubleFlow", "Double-flow unit"), ("supplyUnit", "Supply unit"), ("extractUnit", "Extract unit"), ("vmcBox", "Ventilation box")];
         if let Some(k) = choice(ui, kind.map_or(VARIES, label), &items) {
             action = edit("type", json!(k));
         }
     });
+    // A double-flux unit lies flat (its collars side by side at each end) or stands (the two collars of an end one over the other).
+    if units.iter().all(|p| matches!(p.kind, AhuKind::DoubleFlow | AhuKind::StackedDoubleFlow)) {
+        let vertical = shared(&units.iter().map(|p| p.kind == AhuKind::StackedDoubleFlow).collect::<Vec<_>>());
+        prop_row(ui, "Orientation", |ui| {
+            let shown = vertical.map_or(VARIES, |v| if v { "Vertical" } else { "Horizontal" });
+            if let Some(o) = choice(ui, shown, &[("doubleFlow", "Horizontal"), ("stackedDoubleFlow", "Vertical")]) {
+                action = edit("type", json!(o));
+            }
+        });
+    }
     let name = shared(&units.iter().map(|p| p.name.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
     prop_row(ui, "Name", |ui| {
         if let Some(n) = edit_field(ui, ui.scope_id().with(("ahu_name", &ids)), name).filter(|n| !n.trim().is_empty() && n != VARIES) {

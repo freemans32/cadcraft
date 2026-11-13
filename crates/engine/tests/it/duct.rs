@@ -961,3 +961,21 @@ fn the_orifice_of_a_collar_gives_the_duct_that_starts_on_it_its_section_unless_i
     assert!(s.execute("ahuedit", &json!({"handle": u["handle"], "portSizes": ["wide"]})).is_err());
     assert!(s.execute("ahuedit", &json!({"handle": u["handle"], "portSizes": [1, 2, 3]})).is_err(), "a supply unit has two collars");
 }
+
+#[test]
+fn a_double_flux_unit_is_made_horizontal_or_vertical_by_its_type_and_keeps_the_sizes_of_its_orifices() {
+    let mut s = metric();
+    let u = s.execute("ahuadd", &json!({"at": [0, 0], "type": "horizontal"})).unwrap();
+    let kind = |s: &Session| ahu_of(s.doc().unwrap().entity(hd(&u["handle"])).unwrap()).unwrap();
+    assert_eq!(kind(&s).kind, cadcraft_doc::AhuKind::DoubleFlow);
+    s.execute("ahuedit", &json!({"handle": u["handle"], "portSizes": [null, null, "1000x400", 250]})).unwrap();
+    s.execute("ahuedit", &json!({"handle": u["handle"], "type": "vertical"})).unwrap();
+    let v = kind(&s);
+    assert_eq!(v.kind, cadcraft_doc::AhuKind::StackedDoubleFlow);
+    assert_eq!(v.port_sizes.len(), 4, "the sizes stay");
+    // Its collars are the stacked ones: the two of an end at one point.
+    let tips = v.port_tips();
+    assert_eq!((tips[0].0, tips[2].0), (tips[1].0, tips[3].0));
+    s.execute("ahuedit", &json!({"handle": u["handle"], "type": "horizontal"})).unwrap();
+    assert_eq!(kind(&s).kind, cadcraft_doc::AhuKind::DoubleFlow);
+}
