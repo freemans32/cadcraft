@@ -1268,3 +1268,10 @@ fn a_stub_past_a_tee_leads_nowhere_but_takes_the_direction_of_the_network_it_han
     d.apply_duct_report(&net, &report).unwrap();
     assert_eq!(duct_of(d.entity(stub).unwrap()).unwrap().air, AirDirection::Extract, "it takes the colour of its network");
 }
+
+#[test]
+fn a_vmc_box_only_extracts_and_exhausts() {
+    let roles = AhuParams { kind: AhuKind::VmcBox, ..ahu() }.roles();
+    assert!(roles.iter().all(|r| matches!(r, AirDirection::Extract | AirDirection::Exhaust)), "{roles:?}");
+    assert!(roles.contains(&AirDirection::Extract) && roles.contains(&AirDirection::Exhaust));
+}

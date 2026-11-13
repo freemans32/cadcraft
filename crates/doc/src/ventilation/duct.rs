@@ -108,7 +108,8 @@ impl AhuKind {
             AhuKind::DoubleFlow => vec![Fresh, Exhaust, Supply, Extract],
             AhuKind::SupplyUnit => vec![Fresh, Supply],
             AhuKind::ExtractUnit => vec![Extract, Exhaust],
-            AhuKind::VmcBox => vec![Fresh, Exhaust, Supply, Extract],
+            // A VMC box only extracts and exhausts: air comes in by an extract collar and goes out by an exhaust one.
+            AhuKind::VmcBox => vec![Extract, Exhaust, Extract, Exhaust],
             AhuKind::StackedDoubleFlow => vec![Exhaust, Fresh, Extract, Supply],
         }
     }

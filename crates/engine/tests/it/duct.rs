@@ -163,7 +163,7 @@ fn ductsize_cuts_a_run_the_stub_ends_on_and_compares_the_terminals_with_the_spac
     for x in [-3000, 3000] {
         s.execute("airterminaladd", &json!({"at": [x, 500], "flow": 300})).unwrap();
     }
-    let r = s.execute("ductsize", &json!({})).unwrap();
+    let r = s.execute("ductsize", &json!({"balanceTerminals": false})).unwrap();
     assert_eq!(r["spaces"][0]["supplied"], 1800.0);
     assert_eq!(r["spaces"][0]["needed"], 1200.0);
     assert!(r["networks"][0]["warnings"][0].as_str().unwrap().contains("reached by no duct"));
@@ -551,7 +551,7 @@ fn a_space_gives_the_height_where_no_zone_does_and_a_zone_wins_over_it() {
     hall(&mut s, None);
     // A room over the whole trunk with 250 mm available: 150 after the margin.
     let sp = s.execute("spaceadd", &json!({"points": [[-500, -2000], [9000, -2000], [9000, 500], [-500, 500]], "voidHeight": 250})).unwrap();
-    let r = s.execute("ductsize", &json!({})).unwrap();
+    let r = s.execute("ductsize", &json!({"balanceTerminals": false})).unwrap();
     let heights = |r: &Value| -> Vec<f64> {
         r["networks"][0]["segments"]
             .as_array()
@@ -564,12 +564,12 @@ fn a_space_gives_the_height_where_no_zone_does_and_a_zone_wins_over_it() {
     assert!(!heights(&r).is_empty() && heights(&r).iter().all(|h| *h == 150.0), "{r}");
     // A zone over the same area with 350 wins: the ducts are taller (250).
     let z = s.execute("zoneadd", &json!({"points": [[-500, -2000], [9000, -2000], [9000, 500], [-500, 500]], "voidHeight": 350})).unwrap();
-    let r = s.execute("ductsize", &json!({})).unwrap();
+    let r = s.execute("ductsize", &json!({"balanceTerminals": false})).unwrap();
     assert!(heights(&r).iter().all(|h| *h == 250.0), "{r}");
     s.execute("erase", &json!({"handles": [z["handle"]]})).unwrap();
     // Clearing the space's height leaves nothing to size to: all round.
     s.execute("spaceedit", &json!({"handle": sp["handle"], "voidHeight": null})).unwrap();
-    let r = s.execute("ductsize", &json!({})).unwrap();
+    let r = s.execute("ductsize", &json!({"balanceTerminals": false})).unwrap();
     assert!(heights(&r).is_empty(), "{r}");
     assert!(s.execute("spaceedit", &json!({"handle": sp["handle"], "voidHeight": -3})).is_err());
 }
