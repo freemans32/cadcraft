@@ -3,7 +3,8 @@
 
 use cadcraft_doc::{
     ACCESSORY_APP, AHU_APP, AIR_TERMINAL_APP, AccessoryKind, AccessoryParams, AhuKind, AhuParams, AirDirection, Common, DUCT_APP, Drawing, DuctKind,
-    DuctParams, DuctShape, HvacUnits, SPACE_APP, Space, SpaceParams, TerminalParams, air_terminal_of, space_of, standard_air_terminal_models,
+    DuctParams, DuctShape, HvacUnits, RISER_APP, RiserParams, RiserSize, SPACE_APP, Space, SpaceParams, TerminalParams, air_terminal_of, riser_of,
+    space_of, standard_air_terminal_models,
 };
 use cadcraft_geom::Vec2;
 use cadcraft_hvac::RoomUse;
@@ -146,4 +147,29 @@ fn other_programs_see_the_duct_applications_registered() {
     for app in [AHU_APP, DUCT_APP, ACCESSORY_APP] {
         assert!(text.contains(&format!("AcDbRegAppTableRecord\r\n  2\r\n{app}")), "APPID record for {app}");
     }
+}
+
+#[test]
+fn a_riser_survives_dxf_and_dwg_and_its_application_is_registered() {
+    let mut d = Drawing::new_metric();
+    let p = RiserParams {
+        name: "VMC 3".into(),
+        air: AirDirection::Extract,
+        up: false,
+        outline: vec![Vec2::new(0.0, 0.0), Vec2::new(600.0, 0.0), Vec2::new(600.0, 400.0), Vec2::new(0.0, 400.0)],
+        incoming_flow_m3h: Some(660.0),
+        flow_m3h: Some(900.0),
+        size: Some(RiserSize::Rectangular { width_mm: 400.0, height_mm: 250.0 }),
+        label_height_mm: 100.0,
+        units: HvacUnits::default(),
+    };
+    d.add_riser(&Space::Model, Common::default(), p.clone()).unwrap();
+    for name in ["riser.dxf", "riser.dwg"] {
+        let back = cadcraft_io::read(&cadcraft_io::write(&d, name).unwrap_or_else(|e| panic!("{name}: {e}")), name)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let risers: Vec<RiserParams> = back.model.iter().filter_map(|e| riser_of(e)).collect();
+        assert_eq!(risers, std::slice::from_ref(&p), "{name}: the riser");
+    }
+    let text = String::from_utf8(cadcraft_io::write(&d, "riser.dxf").expect("dxf")).expect("utf-8");
+    assert!(text.contains(&format!("AcDbRegAppTableRecord\r\n  2\r\n{RISER_APP}")), "APPID record");
 }

@@ -1144,6 +1144,15 @@
 	Height Zone	Zone de hauteur
 	Edit Height Zone	Modifier la zone de hauteur
 	Altitude of the underside (m)	Altitude du dessous (m)
+	Riser	Colonne
+	Edit Riser	Modifier la colonne
+	Shaft width (mm)	Largeur de la trémie (mm)
+	Shaft depth (mm)	Profondeur de la trémie (mm)
+	Size (mm)	Taille (mm)
+	Flow from other floors (m³/h)	Débit des autres étages (m³/h)
+	Goes up	Monte
+	Goes down	Descend
+	Direction	Sens
 	Specify first point of zone	Spécifiez le premier point de la zone
 	Enter zone name	Entrez le nom de la zone
 	Enter the height available for ducts (mm)	Entrez la hauteur disponible pour les gaines (mm)

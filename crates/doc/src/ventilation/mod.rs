@@ -11,6 +11,7 @@ mod distribute;
 mod duct;
 mod library;
 mod network;
+mod riser;
 mod space;
 mod terminal;
 pub(crate) mod xdata;
@@ -21,6 +22,7 @@ pub use distribute::{Distribution, MAX_DISTRIBUTED, distribute_in_polygon};
 pub use duct::*;
 pub use library::standard_air_terminal_models;
 pub use network::{DEFAULT_MARGIN_MM, DuctNetwork, FLEX_ROUGHNESS_MM, MAX_DUCTS};
+pub use riser::*;
 pub use space::*;
 pub use terminal::*;
 pub use zone::*;
@@ -228,5 +230,7 @@ impl crate::Drawing {
 mod accessory_tests;
 #[cfg(test)]
 mod duct_tests;
+#[cfg(test)]
+mod riser_tests;
 #[cfg(test)]
 mod tests;

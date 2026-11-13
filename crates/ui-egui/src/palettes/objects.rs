@@ -4,8 +4,8 @@
 
 use cadcraft_doc::{
     AccessoryKind, AccessoryParams, AhuKind, AhuParams, AirDirection, Drawing, DuctKind, DuctParams, DuctShape, Handle, OpeningKind, OpeningParams,
-    SpaceParams, TerminalKind, TerminalParams, WallJustification, ZoneParams, accessory_of, ahu_of, air_terminal_of, duct_of, opening_of, space_of,
-    wall_of, zone_of,
+    RiserParams, SpaceParams, TerminalKind, TerminalParams, WallJustification, ZoneParams, accessory_of, ahu_of, air_terminal_of, duct_of,
+    opening_of, riser_of, space_of, wall_of, zone_of,
 };
 use cadcraft_hvac::RoomUse;
 use egui::{Sense, pos2, vec2};
@@ -55,6 +55,10 @@ pub(super) fn section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], len: &dyn 
     if !zones.is_empty() && zones.len() == sel.len() {
         return zone_section(ui, sel, &zones, bad);
     }
+    let risers: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| riser_of(e))).collect();
+    if !risers.is_empty() && risers.len() == sel.len() {
+        return riser_section(ui, sel, &risers, bad);
+    }
     let units: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| ahu_of(e))).collect();
     if !units.is_empty() && units.len() == sel.len() {
         return ahu_section(ui, sel, &units);
@@ -73,7 +77,12 @@ pub(super) fn section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], len: &dyn 
 /// Whether object `h` is a parametric object with a Properties group of its own.
 pub(crate) fn is_parametric(d: &Drawing, h: Handle) -> bool {
     d.entity(h).is_some_and(|e| {
-        wall_of(e).is_some() || space_of(e).is_some() || air_terminal_of(e).is_some() || duct_of(e).is_some() || accessory_of(e).is_some()
+        wall_of(e).is_some()
+            || space_of(e).is_some()
+            || air_terminal_of(e).is_some()
+            || duct_of(e).is_some()
+            || accessory_of(e).is_some()
+            || riser_of(e).is_some()
     })
 }
 
@@ -500,6 +509,77 @@ fn zone_section(ui: &mut egui::Ui, sel: &[Handle], zones: &[ZoneParams], bad: &m
             }
         }
     });
+    action
+}
+
+// =====================================================================================
+// Risers
+// =====================================================================================
+
+fn riser_section(ui: &mut egui::Ui, sel: &[Handle], risers: &[RiserParams], bad: &mut Option<String>) -> Action {
+    let ids = handles(sel);
+    let mut action: Action = None;
+    let edit = |key: &str, value: Value| Some(("riseredit", json!({ "handles": ids, key: value })));
+    group(ui, "Riser");
+    let name = shared(&risers.iter().map(|r| r.name.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Name", |ui| {
+        if let Some(n) = edit_field(ui, ui.scope_id().with(("riser_name", &ids)), name).filter(|n| !n.trim().is_empty() && n != VARIES) {
+            action = edit("name", json!(n));
+        }
+    });
+    let air = shared(&risers.iter().map(|r| r.air).collect::<Vec<_>>());
+    prop_row(ui, "Air", |ui| {
+        let shown = air.map_or(VARIES, |a| match a {
+            AirDirection::Supply => "Supply",
+            AirDirection::Extract => "Extract",
+            AirDirection::Fresh => "Fresh air",
+            AirDirection::Exhaust => "Exhaust air",
+        });
+        let items = [("supply", "Supply"), ("extract", "Extract"), ("fresh", "Fresh air"), ("exhaust", "Exhaust air")];
+        if let Some(a) = choice(ui, shown, &items) {
+            action = edit("air", json!(a));
+        }
+    });
+    let up = shared(&risers.iter().map(|r| r.up).collect::<Vec<_>>());
+    prop_row(ui, "Direction", |ui| {
+        let shown = up.map_or(VARIES, |u| if u { "Goes up" } else { "Goes down" });
+        if let Some(d) = choice(ui, shown, &[("up", "Goes up"), ("down", "Goes down")]) {
+            action = edit("direction", json!(d));
+        }
+    });
+    // The shaft (trémie): a rectangle around the same centre.
+    for (label, key, pick) in [("Shaft width (mm)", "width", 0), ("Shaft depth (mm)", "depth", 1)] {
+        let v = shared(&risers.iter().map(|r| format!("{:.0}", if pick == 0 { r.shaft_mm().0 } else { r.shaft_mm().1 })).collect::<Vec<_>>())
+            .unwrap_or_else(|| VARIES.into());
+        prop_row(ui, label, |ui| {
+            if let Some(n) = number(edit_field(ui, ui.scope_id().with(("riser_shaft", key, &ids)), v), bad) {
+                action = edit(key, json!(n));
+            }
+        });
+    }
+    // The size: 200 for a diameter, 400x250 for a rectangle, empty for none.
+    let size = shared(&risers.iter().map(|r| r.size.map_or(String::new(), |s| s.label().replace('Ø', "").replace('×', "x"))).collect::<Vec<_>>())
+        .unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Size (mm)", |ui| {
+        if let Some(t) = edit_field(ui, ui.scope_id().with(("riser_size", &ids)), size).filter(|t| t != VARIES) {
+            action = edit("size", json!(if t.trim().is_empty() { "auto" } else { t.trim() }));
+        }
+    });
+    // The flows, empty for none: the one from the other floors, and the one carried here.
+    for (label, key) in [("Flow from other floors (m³/h)", "incomingFlow"), ("Flow (m³/h)", "flow")] {
+        let pick = |r: &RiserParams| if key == "flow" { r.flow_m3h } else { r.incoming_flow_m3h };
+        let v =
+            shared(&risers.iter().map(|r| pick(r).map_or(String::new(), |f| format!("{f}"))).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+        prop_row(ui, label, |ui| {
+            if let Some(t) = edit_field(ui, ui.scope_id().with(("riser_flow", key, &ids)), v).filter(|t| t != VARIES) {
+                if t.trim().is_empty() {
+                    action = edit(key, Value::Null);
+                } else if let Some(f) = number(Some(t), bad) {
+                    action = edit(key, json!(f));
+                }
+            }
+        });
+    }
     action
 }
 
@@ -945,5 +1025,23 @@ mod hvac_tests {
         type_into(&mut hn, "2.45", "2.7");
         let z = cadcraft_doc::zone_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
         assert_eq!(z.bottom_mm, Some(2700.0));
+    }
+
+    #[test]
+    fn a_selected_riser_takes_the_flow_and_the_shaft_typed_in_the_palette_and_opens_on_double_click() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        let r = app.run("riseradd", json!({ "at": [0, 0], "width": 600, "depth": 400, "name": "VMC 3", "incomingFlow": 660 })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+        assert!(super::is_parametric(app.session.doc().unwrap(), h), "a double-click opens Properties");
+        app.session.set_selection(vec![h]);
+        let mut hn = palette(app);
+        assert!(hn.get_all_by_value("VMC 3").next().is_some());
+        type_into(&mut hn, "660", "900");
+        let p = cadcraft_doc::riser_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!(p.incoming_flow_m3h, Some(900.0));
+        type_into(&mut hn, "600", "800");
+        let p = cadcraft_doc::riser_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!(p.shaft_mm(), (800.0, 400.0));
     }
 }

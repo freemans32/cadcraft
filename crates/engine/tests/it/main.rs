@@ -150,6 +150,7 @@ mod rectang_polygon_order;
 mod refedit;
 mod region;
 mod rename_cmdline;
+mod riser;
 mod rotate_reference;
 mod save_keeps_view;
 mod scale_offset_z;

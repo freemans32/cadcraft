@@ -217,7 +217,7 @@ fn circle(radius: f64) -> HvacPiece {
 }
 
 /// The layer of the arrows (and the ducts) of an air direction: blue for supply, magenta for extract.
-fn air_layer(air: AirDirection) -> &'static str {
+pub(super) fn air_layer(air: AirDirection) -> &'static str {
     match air {
         AirDirection::Supply => AIR_SUPPLY_LAYER,
         AirDirection::Extract => AIR_EXTRACT_LAYER,
