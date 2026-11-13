@@ -7,6 +7,7 @@
 //! The flow rates and sizes come from [`cadcraft_hvac`]; this module only draws and stores.
 
 mod accessory;
+mod crossing;
 mod distribute;
 mod duct;
 mod library;
@@ -18,6 +19,7 @@ pub(crate) mod xdata;
 mod zone;
 
 pub use accessory::*;
+pub use crossing::DuctCrossing;
 pub use distribute::{Distribution, MAX_DISTRIBUTED, distribute_in_polygon};
 pub use duct::*;
 pub use library::standard_air_terminal_models;

@@ -219,6 +219,9 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         if row_button(ui, crate::i18n::t("Riser"), false, |_, _| {}) {
             start = Some("riseradd");
         }
+        if row_button(ui, crate::i18n::t("Duct Crossing"), false, |_, _| {}) {
+            start = Some("ductcross");
+        }
         if row_button(ui, crate::i18n::t("Connect Terminals"), false, |_, _| {}) {
             connect = true;
         }

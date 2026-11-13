@@ -496,6 +496,7 @@ fn duct_params(s: &Session, last: &DuctLastUsed, label_mm: f64) -> Result<DuctPa
         trim_end_mm: 0.0,
         flow_forward: None,
         open_flow_m3h: None,
+        gaps_mm: Vec::new(),
         bottom_mm: None,
         label_height_mm: label_mm,
         units: units_of(s)?,
@@ -854,6 +855,7 @@ fn run_ductconnect(s: &mut Session, p: &Value) -> Result<Value> {
             trim_end_mm: 0.0,
             flow_forward: None,
             open_flow_m3h: None,
+            gaps_mm: Vec::new(),
             bottom_mm: None,
             label_height_mm: 100.0,
             units: units_of(s)?,
@@ -1092,7 +1094,6 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let ducts = nets.first().map_or(0, |n| n.duct_count);
     let isolated = nets.first().map_or(0, |n| n.isolated.len());
-    Ok(
-        json!({ "networks": out, "cuts": cuts, "rebalanced": rebalanced, "spaces": mismatches, "balance": balance, "ducts": ducts, "reached": ducts - isolated }),
-    )
+    Ok(json!({ "networks": out, "cuts": cuts, "rebalanced": rebalanced,
+        "crossings": super::duct_cross::crossings_json(&s.doc()?.duct_crossings().into_iter().filter(|c| !c.resolved).collect::<Vec<_>>()), "spaces": mismatches, "balance": balance, "ducts": ducts, "reached": ducts - isolated }))
 }

@@ -170,22 +170,48 @@ impl RiserParams {
         let c = self.centre();
         let (w, d) = self.shaft_mm();
         let small = self.units.to_units(w.min(d));
-        // The circle is the riser's width when it has a size, else a quarter of the shaft.
+        // The symbol is the riser's section: a circle of its diameter, a rectangle of its two sides, else
+        // a circle of a quarter of the shaft.
         let r = self.size.map_or(0.25 * small, |s| self.units.to_units(s.width_mm() / 2.0)).max(0.8 * h);
+        let rect_half = match self.size {
+            Some(RiserSize::Rectangular { width_mm, height_mm }) => {
+                Some(Vec2::new(self.units.to_units(width_mm / 2.0).max(0.8 * h), self.units.to_units(height_mm / 2.0).max(0.8 * h)))
+            }
+            _ => None,
+        };
+        // The dot or the cross inside is sized to the nearer side; the leader leaves at 45° from the edge.
+        let (inner, edge) = match rect_half {
+            Some(hf) => (hf.x.min(hf.y), hf.x.min(hf.y) * std::f64::consts::SQRT_2),
+            None => (r, r),
+        };
         let layer = air_layer(self.air);
         let line = |a: Vec2, b: Vec2| HvacPiece { layer, kind: EntityKind::Line(Line { a: v3(a), b: v3(b) }) };
         let circle = |radius: f64| HvacPiece { layer, kind: EntityKind::Circle(Circle { center: v3(c), radius }) };
-        let mut pieces = vec![HvacPiece { layer: RISER_LAYER, kind: EntityKind::LwPolyline(outline) }, circle(r)];
+        let symbol = match rect_half {
+            Some(hf) => {
+                let corners = [Vec2::new(-hf.x, -hf.y), Vec2::new(hf.x, -hf.y), Vec2::new(hf.x, hf.y), Vec2::new(-hf.x, hf.y)];
+                let poly = LwPolyline {
+                    vertices: corners.iter().map(|k| PolyVertex { p: c + *k, bulge: 0.0, start_width: 0.0, end_width: 0.0 }).collect(),
+                    closed: true,
+                    const_width: 0.0,
+                    elevation: 0.0,
+                    plinegen: false,
+                };
+                HvacPiece { layer, kind: EntityKind::LwPolyline(poly) }
+            }
+            None => circle(r),
+        };
+        let mut pieces = vec![HvacPiece { layer: RISER_LAYER, kind: EntityKind::LwPolyline(outline) }, symbol];
         if self.up {
-            pieces.push(circle(0.18 * r));
+            pieces.push(circle(0.18 * inner));
         } else {
-            let k = r * FRAC_1_SQRT_2;
+            let k = inner * FRAC_1_SQRT_2;
             pieces.push(line(c + Vec2::new(-k, -k), c + Vec2::new(k, k)));
             pieces.push(line(c + Vec2::new(-k, k), c + Vec2::new(k, -k)));
         }
         // The leader leaves the circle at 45° and ends in an arrow head, where the text begins.
         let dir = Vec2::new(FRAC_1_SQRT_2, FRAC_1_SQRT_2);
-        let (start, len) = (c + dir * r, self.units.to_units(0.6 * (w * w + d * d).sqrt()).max(6.0 * h));
+        let (start, len) = (c + dir * edge, self.units.to_units(0.6 * (w * w + d * d).sqrt()).max(6.0 * h));
         let end = start + dir * len;
         let (back, side, head) = (-dir, dir.perp(), 1.2 * h);
         pieces.push(line(start, end));

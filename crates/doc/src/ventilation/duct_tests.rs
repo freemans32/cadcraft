@@ -47,6 +47,7 @@ fn duct(diameter_mm: f64) -> DuctParams {
         trim_end_mm: 0.0,
         flow_forward: None,
         open_flow_m3h: None,
+        gaps_mm: Vec::new(),
         bottom_mm: None,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
@@ -1274,4 +1275,35 @@ fn a_vmc_box_only_extracts_and_exhausts() {
     let roles = AhuParams { kind: AhuKind::VmcBox, ..ahu() }.roles();
     assert!(roles.iter().all(|r| matches!(r, AirDirection::Extract | AirDirection::Exhaust)), "{roles:?}");
     assert!(roles.contains(&AirDirection::Extract) && roles.contains(&AirDirection::Exhaust));
+}
+
+#[test]
+fn ducts_that_cross_are_found_a_tee_or_a_corner_is_not_one_and_the_one_that_passes_under_is_drawn_broken() {
+    let mut d = Drawing::new_metric();
+    let over = add_duct(&mut d, (0.0, 0.0), (4000.0, 0.0));
+    let under = add_duct(&mut d, (2000.0, -1500.0), (2000.0, 1500.0));
+    // A tee (ends on the first one) and a corner (ends at its end) are junctions, not crossings.
+    add_duct(&mut d, (1000.0, 0.0), (1000.0, 1500.0));
+    add_duct(&mut d, (4000.0, 0.0), (4000.0, 1500.0));
+    let all = d.duct_crossings();
+    assert_eq!(all.len(), 1, "{all:?}");
+    assert_eq!((all[0].at, all[0].resolved), (Vec2::new(2000.0, 0.0), false));
+    assert!([all[0].a, all[0].b].contains(&over) && [all[0].a, all[0].b].contains(&under));
+    // Under: the width of the other (200) plus 30 mm on each side, across the crossing at 1500 mm from its start.
+    let polylines = |d: &Drawing, h: Handle| {
+        let EntityKind::Insert(i) = &d.entity(h).unwrap().kind else { return 0 };
+        d.block(&i.block).unwrap().entities.iter().filter(|x| matches!(x.kind, EntityKind::LwPolyline(_))).count()
+    };
+    assert_eq!(polylines(&d, under), 2, "two sides, whole");
+    let gap = d.pass_duct_under(under, over, 30.0).unwrap();
+    assert_eq!(gap, [1500.0 - 130.0, 1500.0 + 130.0]);
+    assert_eq!(polylines(&d, under), 4, "each side is in two pieces");
+    assert!(d.duct_crossings()[0].resolved);
+    // Ducts that do not cross are refused; a gap is kept when the duct is cut, each part keeping its own.
+    let tee = d.model.iter().map(|e| e.handle).nth(2).unwrap();
+    assert!(d.pass_duct_under(under, tee, 30.0).is_err());
+    let second = d.split_duct_at(&Space::Model, under, Vec2::new(2000.0, 500.0), 10.0).unwrap().unwrap();
+    let (first, rest) = (duct_of(d.entity(under).unwrap()).unwrap(), duct_of(d.entity(second).unwrap()).unwrap());
+    assert_eq!((first.gaps_mm.clone(), rest.gaps_mm.len()), (vec![[1370.0, 1630.0]], 0), "the cut at 2000 is past the gap");
+    assert!(DuctParams { gaps_mm: vec![[5.0, 1.0]], ..duct(200.0) }.validate().is_err());
 }

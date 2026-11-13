@@ -850,3 +850,28 @@ fn ductsize_shares_the_flow_a_space_asks_between_its_terminals_and_leaves_unequa
     assert!(s.execute("ductsize", &json!({"balanceTerminals": false})).unwrap()["rebalanced"].as_array().unwrap().is_empty());
     assert_eq!(flows(&s), vec![150.0; 9]);
 }
+
+#[test]
+fn ductcross_lists_the_crossings_ductsize_reports_the_ones_left_and_the_one_under_is_drawn_broken() {
+    let mut s = metric();
+    let a = s.execute("ductadd", &json!({"points": [[0, 0], [4000, 0]], "diameter": 200})).unwrap();
+    let b = s.execute("ductadd", &json!({"points": [[2000, -1500], [2000, 1500]], "diameter": 160})).unwrap();
+    let (over, under) = (a["handles"][0].clone(), b["handles"][0].clone());
+    let list = s.execute("ductcross", &json!({})).unwrap();
+    assert_eq!(list["crossings"].as_array().unwrap().len(), 1, "{list}");
+    assert_eq!(list["crossings"][0]["resolved"], false);
+    let r = s.execute("ductcross", &json!({"under": under, "over": over, "clearance": 50})).unwrap();
+    assert_eq!(r["gap"], json!([1500.0 - 150.0, 1500.0 + 150.0]), "{r}");
+    assert_eq!(s.execute("ductcross", &json!({})).unwrap()["crossings"][0]["resolved"], true);
+    // DUCTSIZE names the crossings still to draw (none now); a new crossing is named.
+    s.execute("ahuadd", &json!({"at": [-3000, 0]})).unwrap();
+    assert!(s.execute("ductsize", &json!({})).unwrap()["crossings"].as_array().unwrap().is_empty());
+    s.execute("ductadd", &json!({"points": [[3000, -1000], [3000, 1000]], "diameter": 160})).unwrap();
+    let out = s.execute("ductsize", &json!({})).unwrap();
+    assert_eq!(out["crossings"].as_array().unwrap().len(), 1, "{out}");
+    assert_eq!(out["crossings"][0]["at"], json!([3000.0, 0.0]));
+    // Drawn whole again.
+    assert_eq!(s.execute("ductcross", &json!({"clear": [under]})).unwrap()["cleared"], 1);
+    assert_eq!(s.execute("ductcross", &json!({})).unwrap()["crossings"].as_array().unwrap().iter().filter(|c| c["resolved"] == true).count(), 0);
+    assert!(s.execute("ductcross", &json!({"under": under, "over": under})).is_err());
+}

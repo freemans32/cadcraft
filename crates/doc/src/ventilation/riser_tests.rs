@@ -34,12 +34,20 @@ fn a_riser_is_its_shaft_a_symbol_with_a_leader_and_a_label_that_reads_like_the_p
     let pieces = p.generate().unwrap();
     assert!(pieces.iter().any(|x| x.layer == RISER_LAYER && matches!(x.kind, EntityKind::LwPolyline(_))));
     assert!(pieces.iter().any(|x| x.layer == AIR_EXTRACT_LAYER && matches!(x.kind, EntityKind::Text(_))));
-    // Going up draws a dot in the circle, going down a cross.
-    let circles = |p: &RiserParams| p.generate().unwrap().iter().filter(|x| matches!(x.kind, EntityKind::Circle(_))).count();
-    let lines = |p: &RiserParams| p.generate().unwrap().iter().filter(|x| matches!(x.kind, EntityKind::Line(_))).count();
-    let down = RiserParams { up: false, ..p.clone() };
-    assert_eq!((circles(&p), lines(&p)), (2, 3));
-    assert_eq!((circles(&down), lines(&down)), (1, 5));
+    // Going up draws a dot in the symbol, going down a cross; a round section is drawn as a circle, a
+    // rectangular one as a rectangle (the shaft's outline is the first polyline).
+    let count = |p: &RiserParams, f: fn(&EntityKind) -> bool| p.generate().unwrap().iter().filter(|x| f(&x.kind)).count();
+    let (circles, lines, polys) = (
+        |k: &EntityKind| matches!(k, EntityKind::Circle(_)),
+        |k: &EntityKind| matches!(k, EntityKind::Line(_)),
+        |k: &EntityKind| matches!(k, EntityKind::LwPolyline(_)),
+    );
+    let round = RiserParams { size: Some(RiserSize::Round { diameter_mm: 200.0 }), ..p.clone() };
+    let down = RiserParams { up: false, ..round.clone() };
+    assert_eq!((count(&round, circles), count(&round, lines), count(&round, polys)), (2, 3, 1));
+    assert_eq!((count(&down, circles), count(&down, lines), count(&down, polys)), (1, 5, 1));
+    // Rectangular (400 x 250 here): no circle but the dot, and a second polyline, the section.
+    assert_eq!((count(&p, circles), count(&p, lines), count(&p, polys)), (1, 3, 2), "{:?}", p.size);
 }
 
 #[test]

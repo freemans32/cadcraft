@@ -14,6 +14,7 @@ mod draw2;
 mod draworder;
 mod duct;
 mod duct_acc;
+mod duct_cross;
 mod edit;
 mod exchange;
 pub mod file;
@@ -213,6 +214,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(duct_acc::specs());
         v.extend(zone::specs());
         v.extend(riser::specs());
+        v.extend(duct_cross::specs());
         v.extend(opening::specs());
         v.extend(modify2::specs());
         v.extend(groups::specs());

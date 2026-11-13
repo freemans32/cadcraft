@@ -27,6 +27,8 @@ pub const MAX_AHU_SIZE_MM: f64 = 50_000.0;
 pub const DUCT_DIAMETER_MM: (f64, f64) = (20.0, 5_000.0);
 /// Largest height available above a false ceiling, mm.
 pub const MAX_VOID_MM: f64 = 5_000.0;
+/// Most stretches one duct is drawn broken over, where it passes under others.
+pub const MAX_GAPS: usize = 32;
 /// Longest duct run, metres.
 pub const MAX_DUCT_LENGTH_M: f64 = 10_000.0;
 const AHU_FORMAT: &str = "AHU1";
@@ -553,6 +555,10 @@ pub struct DuctParams {
     /// to no terminal (an open end, as when air is blown or taken freely). None: the unit's balance.
     #[serde(default)]
     pub open_flow_m3h: Option<f64>,
+    /// Where the run passes under another duct, mm along it from its start: its sides are drawn
+    /// broken there (a plan's way of showing which duct goes over).
+    #[serde(default)]
+    pub gaps_mm: Vec<[f64; 2]>,
     /// A flexible duct (gaine souple): drawn as bellows, with the roughness of one.
     #[serde(default)]
     pub flexible: bool,
@@ -658,6 +664,11 @@ impl DuctParams {
                 return Err(invalid(format!("A rectangular duct's sides are {} to {} mm.", DUCT_DIAMETER_MM.0, DUCT_DIAMETER_MM.1)));
             }
         }
+        if self.gaps_mm.len() > MAX_GAPS
+            || self.gaps_mm.iter().any(|g| !(g[0].is_finite() && g[1].is_finite() && 0.0 <= g[0] && g[0] < g[1] && g[1] <= 1e9))
+        {
+            return Err(invalid(format!("A duct passes under at most {MAX_GAPS} others, each over a stretch of its length.")));
+        }
         for v in [self.flow_m3h, self.velocity, self.open_flow_m3h].into_iter().flatten() {
             if !(v.is_finite() && (0.0..=1e9).contains(&v)) {
                 return Err(invalid("A duct's flow and velocity are 0 or more."));
@@ -717,34 +728,40 @@ impl DuctParams {
             None => (trim0, self.length - trim1),
         };
         let (x0, x1) = (x0.min(self.length), x1.max(x0).min(self.length));
+        // The stretches drawn: the run less where it passes under another duct.
+        let solid = self.solid_stretches(x0, x1);
         for sign in [1.0, -1.0] {
-            let mut pts = Vec::new();
-            if let Some((r0, _, false)) = cone {
-                pts.push(Vec2::new(0.0, sign * r0));
+            for (k, (s, e)) in solid.iter().copied().enumerate() {
+                let mut pts = Vec::new();
+                if let (Some((r0, _, false)), 0) = (cone, k) {
+                    pts.push(Vec2::new(0.0, sign * r0));
+                }
+                pts.extend(self.side_points(s, e, sign * r));
+                if let (Some((r0, _, true)), true) = (cone, k + 1 == solid.len()) {
+                    pts.push(Vec2::new(self.length, sign * r0));
+                }
+                pieces.push(HvacPiece {
+                    layer,
+                    kind: EntityKind::LwPolyline(LwPolyline {
+                        vertices: pts.into_iter().map(|p| PolyVertex { p, bulge: 0.0, start_width: 0.0, end_width: 0.0 }).collect(),
+                        closed: false,
+                        const_width: 0.0,
+                        elevation: 0.0,
+                        plinegen: false,
+                    }),
+                });
             }
-            pts.extend(self.side_points(x0, x1, sign * r));
-            if let Some((r0, _, true)) = cone {
-                pts.push(Vec2::new(self.length, sign * r0));
-            }
-            pieces.push(HvacPiece {
-                layer,
-                kind: EntityKind::LwPolyline(LwPolyline {
-                    vertices: pts.into_iter().map(|p| PolyVertex { p, bulge: 0.0, start_width: 0.0, end_width: 0.0 }).collect(),
-                    closed: false,
-                    const_width: 0.0,
-                    elevation: 0.0,
-                    plinegen: false,
-                }),
-            });
         }
+        // The arrow and the label sit on the longest stretch that is drawn.
+        let (sx, ex) = solid.iter().copied().max_by(|a, b| (a.1 - a.0).total_cmp(&(b.1 - b.0))).unwrap_or((x0, x1));
         if let Some(e) = self.elbow {
             pieces.extend(self.elbow_pieces(e, r, layer));
         }
         // An arrow a quarter of the way along, the way the air runs.
         if let Some(forward) = self.flow_forward {
-            let len = (1.6 * r).min(0.15 * (x1 - x0));
+            let len = (1.6 * r).min(0.15 * (ex - sx));
             if len > 0.0 {
-                let at = x0 + 0.25 * (x1 - x0);
+                let at = sx + 0.25 * (ex - sx);
                 let dir = Vec2::new(if forward { 1.0 } else { -1.0 }, 0.0);
                 let (tail, tip) = (Vec2::new(at, 0.0) - dir * (len / 2.0), Vec2::new(at, 0.0) + dir * (len / 2.0));
                 let head = len * 0.35;
@@ -768,7 +785,8 @@ impl DuctParams {
         let h = self.units.to_units(self.label_height_mm);
         // A flexible duct is narrow and its bellows busy: its label sits above it.
         let (y, up) = if self.flexible { (r * 1.5 + 1.2 * h, if flip_label { -1.0 } else { 1.0 }) } else { (0.0, 1.0) };
-        let mut t = label(Vec2::new(self.length / 2.0, y * up), h, text);
+        let mid = if self.gaps_mm.is_empty() { self.length / 2.0 } else { (sx + ex) / 2.0 };
+        let mut t = label(Vec2::new(mid, y * up), h, text);
         if let EntityKind::Text(x) = &mut t {
             x.rotation = if flip_label { std::f64::consts::PI } else { 0.0 };
         }
@@ -802,6 +820,23 @@ impl DuctParams {
 
     /// The vertices of one side of the straight part, from `x0` to `x1` at height `y`: two points
     /// for a rigid duct, a zigzag for a flexible one.
+    /// `x0`–`x1` less the stretches the run passes under other ducts, in drawing units along the run.
+    fn solid_stretches(&self, x0: f64, x1: f64) -> Vec<(f64, f64)> {
+        let mut gaps: Vec<(f64, f64)> = self.gaps_mm.iter().map(|g| (self.units.to_units(g[0]), self.units.to_units(g[1]))).collect();
+        gaps.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let (mut out, mut from) = (Vec::new(), x0);
+        for (g0, g1) in gaps {
+            if g0 > from && g0 < x1 {
+                out.push((from, g0));
+            }
+            from = from.max(g1);
+        }
+        if from < x1 {
+            out.push((from, x1));
+        }
+        out
+    }
+
     fn side_points(&self, x0: f64, x1: f64, y: f64) -> Vec<Vec2> {
         if !self.flexible || x1 <= x0 {
             return vec![Vec2::new(x0, y), Vec2::new(x1, y)];
@@ -929,9 +964,17 @@ impl crate::Drawing {
         let Some((p, a, b)) = self.duct_ends(h) else { return Ok(None) };
         let Some(cut) = interior_cut(a, b, p.units.to_units(p.plan_width_mm()), at, tol) else { return Ok(None) };
         let common = self.entity(h).ok_or(crate::DocError::NoEntity(h))?.common.clone();
-        let first = DuctParams { length: a.dist(cut), ..p.clone() };
+        // The stretches it passes under stay where they were, each on the part it lies on.
+        let cut_mm = a.dist(cut) * p.units.mm_per_unit;
+        let rest_mm = cut.dist(b) * p.units.mm_per_unit;
+        let clip = |g: &[f64; 2], lo: f64, hi: f64| {
+            let (f, t) = (g[0].max(lo), g[1].min(hi));
+            (f < t).then_some([f - lo, t - lo])
+        };
+        let first = DuctParams { length: a.dist(cut), gaps_mm: p.gaps_mm.iter().filter_map(|g| clip(g, 0.0, cut_mm)).collect(), ..p.clone() };
+        let second_params = DuctParams { gaps_mm: p.gaps_mm.iter().filter_map(|g| clip(g, cut_mm, cut_mm + rest_mm)).collect(), ..p };
         self.regenerate_duct(h, &first)?;
-        let second = self.add_duct(space, common, p, cut, b)?;
+        let second = self.add_duct(space, common, second_params, cut, b)?;
         Ok(Some(second))
     }
 }
