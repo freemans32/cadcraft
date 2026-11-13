@@ -54,6 +54,7 @@ mod duct;
 mod dyn_input;
 mod dynamic_block_data;
 mod dynamic_grips;
+mod equipment;
 mod esc_select_objects;
 mod explode_stretched;
 mod extend_polyline_arc_end;

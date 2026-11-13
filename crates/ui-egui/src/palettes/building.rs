@@ -160,6 +160,8 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
     let mut chosen_unit: Option<AhuKind> = None;
     let accessory = app.session.last_used.accessory.kind;
     let mut chosen_accessory: Option<AccessoryKind> = None;
+    let equipment = app.session.last_used.equipment.kind;
+    let mut chosen_equipment: Option<cadcraft_doc::EquipmentKind> = None;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         header(ui, "Spaces");
@@ -241,6 +243,14 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
                 chosen_accessory = Some(kind);
             }
         }
+        ui.add_space(6.0);
+        separator(ui);
+        header(ui, "Equipment");
+        for kind in cadcraft_doc::EquipmentKind::ALL {
+            if row_button(ui, crate::i18n::t(equipment_kind_label(kind)), kind == equipment, |_, _| {}) {
+                chosen_equipment = Some(kind);
+            }
+        }
     });
     if let Some(kind) = terminal {
         // The type clicked becomes AIRTERMINALADD's, at the smallest size for the flow.
@@ -267,6 +277,11 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         app.session.last_used.ahu.size = None;
         app.cmd.buffer.clear();
         app.start("ahuadd");
+    } else if let Some(kind) = chosen_equipment {
+        // The kind clicked becomes EQUIPMENTADD's, at its first model, then it starts with it.
+        app.session.last_used.equipment = cadcraft_engine::cmd::EquipmentLastUsed { kind, model: String::new() };
+        app.cmd.buffer.clear();
+        app.start("equipmentadd");
     } else if let Some(kind) = chosen_accessory {
         // The type clicked becomes DUCTACCESSORYADD's, then it starts with it.
         app.session.last_used.accessory.kind = kind;
@@ -396,5 +411,20 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
             }
             Err(e) => app.session.echo(e.to_string()),
         }
+    }
+}
+
+/// The label of an equipment kind in the Tool Sets and in Properties.
+pub(super) fn equipment_kind_label(k: cadcraft_doc::EquipmentKind) -> &'static str {
+    use cadcraft_doc::EquipmentKind::{Cassette, Chiller, Ducted, FloorUnit, SplitOutdoor, VrfOutdoor, WallUnit};
+    match k {
+        Chiller => "Chiller",
+        VrfOutdoor => "VRV outdoor unit",
+        SplitOutdoor => "Split outdoor unit",
+        Cassette => "Cassette",
+        Ducted => "Ducted unit",
+        WallUnit => "Wall unit",
+        cadcraft_doc::EquipmentKind::CeilingUnit => "Ceiling unit",
+        FloorUnit => "Floor unit",
     }
 }

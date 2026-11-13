@@ -55,6 +55,10 @@ pub(super) fn section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], len: &dyn 
     if !zones.is_empty() && zones.len() == sel.len() {
         return zone_section(ui, sel, &zones, bad);
     }
+    let equipment: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| cadcraft_doc::equipment_of(e))).collect();
+    if !equipment.is_empty() && equipment.len() == sel.len() {
+        return equipment_section(ui, sel, &equipment, bad);
+    }
     let risers: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| riser_of(e))).collect();
     if !risers.is_empty() && risers.len() == sel.len() {
         return riser_section(ui, sel, &risers, bad);
@@ -83,6 +87,7 @@ pub(crate) fn is_parametric(d: &Drawing, h: Handle) -> bool {
             || duct_of(e).is_some()
             || accessory_of(e).is_some()
             || riser_of(e).is_some()
+            || cadcraft_doc::equipment_of(e).is_some()
     })
 }
 
@@ -512,6 +517,80 @@ fn zone_section(ui: &mut egui::Ui, sel: &[Handle], zones: &[ZoneParams], bad: &m
             } else if let Some(m) = number(Some(t), bad) {
                 action = edit("altitude", json!(m));
             }
+        }
+    });
+    action
+}
+
+// =====================================================================================
+// Equipment (chillers, outdoor and indoor units)
+// =====================================================================================
+
+fn equipment_section(ui: &mut egui::Ui, sel: &[Handle], items: &[cadcraft_doc::EquipmentParams], bad: &mut Option<String>) -> Action {
+    use cadcraft_doc::EquipmentKind;
+    let ids = handles(sel);
+    let mut action: Action = None;
+    let edit = |key: &str, value: Value| Some(("equipmentedit", json!({ "handles": ids, key: value })));
+    group(ui, "Equipment");
+    let name = shared(&items.iter().map(|e| e.name.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Name", |ui| {
+        if let Some(n) = edit_field(ui, ui.scope_id().with(("equip_name", &ids)), name).filter(|n| !n.trim().is_empty() && n != VARIES) {
+            action = edit("name", json!(n));
+        }
+    });
+    let kind = shared(&items.iter().map(|e| e.kind).collect::<Vec<_>>());
+    prop_row(ui, "Type", |ui| {
+        let all: Vec<(&'static str, &'static str)> =
+            EquipmentKind::ALL.iter().map(|k| (k.name(), super::building::equipment_kind_label(*k))).collect();
+        if let Some(k) = choice(ui, kind.map_or(VARIES, super::building::equipment_kind_label), &all) {
+            action = edit("kind", json!(k));
+        }
+    });
+    // The model: choosing one gives its values, which stay the user's to change afterwards.
+    let model = shared(&items.iter().map(|e| e.model.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Model", |ui| {
+        let names: Vec<String> = kind
+            .map(|k| cadcraft_doc::equipment_models_of(&cadcraft_doc::standard_equipment_models(), k).into_iter().map(|m| m.name).collect())
+            .unwrap_or_default();
+        let shown = if model.is_empty() { "—".to_string() } else { model.clone() };
+        if let Some(n) = pick_menu(ui, &shown, names) {
+            action = edit("model", json!(n));
+        }
+    });
+    prop_row(ui, "Reference", |ui| {
+        let reference = shared(&items.iter().map(|e| e.reference.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+        if let Some(r) = edit_field(ui, ui.scope_id().with(("equip_ref", &ids)), reference).filter(|r| r != VARIES) {
+            action = edit("reference", json!(r));
+        }
+    });
+    // Numbers: empty clears a power or the weight.
+    type Get = fn(&cadcraft_doc::EquipmentParams) -> Option<f64>;
+    let numbers: [(&str, &str, Get, bool); 8] = [
+        ("Power (kW)", "capacityKw", |e| e.capacity_kw, true),
+        ("Heating power (kW)", "heatingKw", |e| e.heating_kw, true),
+        ("Length (mm)", "length", |e| Some(e.length_mm), false),
+        ("Width (mm)", "width", |e| Some(e.width_mm), false),
+        ("Height (mm)", "height", |e| Some(e.height_mm), false),
+        ("Weight (kg)", "weight", |e| e.weight_kg, true),
+        ("Fans", "fans", |e| Some(f64::from(e.fans)), false),
+        ("Service clearance (mm)", "clearance", |e| Some(e.clearance_mm), false),
+    ];
+    for (label, key, get, clearable) in numbers {
+        let v = shared(&items.iter().map(|e| get(e).map_or(String::new(), |f| format!("{f}"))).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+        prop_row(ui, label, |ui| {
+            if let Some(t) = edit_field(ui, ui.scope_id().with(("equip_num", key, &ids)), v).filter(|t| t != VARIES) {
+                if t.trim().is_empty() && clearable {
+                    action = edit(key, Value::Null);
+                } else if let Some(n) = number(Some(t), bad) {
+                    action = edit(key, json!(n));
+                }
+            }
+        });
+    }
+    prop_row(ui, "Connections", |ui| {
+        let c = shared(&items.iter().map(|e| e.connections.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+        if let Some(t) = edit_field(ui, ui.scope_id().with(("equip_conn", &ids)), c).filter(|t| t != VARIES) {
+            action = edit("connections", json!(t));
         }
     });
     action
@@ -1171,5 +1250,21 @@ mod hvac_tests {
         let hn = palette(app);
         assert!(hn.query_by_label("Auto (Main)").is_some(), "the type sizing gave");
         assert!(hn.query_by_label("Auto (Supply)").is_some(), "the direction sizing found");
+    }
+
+    #[test]
+    fn a_selected_equipment_shows_its_model_and_takes_the_sizes_and_power_typed_in_the_palette() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        let r = app.run("equipmentadd", json!({ "at": [0, 0], "model": "Chiller 93.4 kW", "name": "GE1" })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+        assert!(super::is_parametric(app.session.doc().unwrap(), h), "a double-click opens Properties");
+        app.session.set_selection(vec![h]);
+        let mut hn = palette(app);
+        assert!(hn.query_by_label("Chiller 93.4 kW").is_some(), "the model is shown");
+        type_into(&mut hn, "2275", "3000");
+        type_into(&mut hn, "93.4", "100");
+        let e = cadcraft_doc::equipment_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!((e.length_mm, e.capacity_kw, e.width_mm), (3000.0, Some(100.0), 2125.0));
     }
 }

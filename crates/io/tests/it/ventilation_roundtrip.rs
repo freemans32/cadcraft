@@ -3,8 +3,8 @@
 
 use cadcraft_doc::{
     ACCESSORY_APP, AHU_APP, AIR_TERMINAL_APP, AccessoryKind, AccessoryParams, AhuKind, AhuParams, AirDirection, Common, DUCT_APP, Drawing, DuctKind,
-    DuctParams, DuctShape, HvacUnits, RISER_APP, RiserParams, RiserSize, SPACE_APP, Space, SpaceParams, TerminalParams, air_terminal_of, riser_of,
-    space_of, standard_air_terminal_models,
+    DuctParams, DuctShape, EQUIPMENT_APP, EquipmentParams, HvacUnits, RISER_APP, RiserParams, RiserSize, SPACE_APP, Space, SpaceParams,
+    TerminalParams, air_terminal_of, equipment_model_named, equipment_of, riser_of, space_of, standard_air_terminal_models,
 };
 use cadcraft_geom::Vec2;
 use cadcraft_hvac::RoomUse;
@@ -180,4 +180,22 @@ fn a_riser_survives_dxf_and_dwg_and_its_application_is_registered() {
     }
     let text = String::from_utf8(cadcraft_io::write(&d, "riser.dxf").expect("dxf")).expect("utf-8");
     assert!(text.contains(&format!("AcDbRegAppTableRecord\r\n  2\r\n{RISER_APP}")), "APPID record");
+}
+
+#[test]
+fn an_equipment_survives_dxf_and_dwg_and_its_application_is_registered() {
+    let model = equipment_model_named(&cadcraft_doc::standard_equipment_models(), "Heat-pump chiller 87 kW").unwrap();
+    let mut p = EquipmentParams::from_model(&model, "PAC1", HvacUnits::default());
+    p.weight_kg = Some(800.0);
+    p.connections = "Victaulic 2\"".into();
+    let mut d = Drawing::new_metric();
+    d.add_equipment(&Space::Model, Common::default(), &p, Vec2::new(1000.0, 2000.0), 0.0).unwrap();
+    for name in ["equip.dxf", "equip.dwg"] {
+        let back = cadcraft_io::read(&cadcraft_io::write(&d, name).unwrap_or_else(|e| panic!("{name}: {e}")), name)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let found: Vec<EquipmentParams> = back.model.iter().filter_map(|e| equipment_of(e)).collect();
+        assert_eq!(found, std::slice::from_ref(&p), "{name}: the equipment");
+    }
+    let text = String::from_utf8(cadcraft_io::write(&d, "equip.dxf").expect("dxf")).expect("utf-8");
+    assert!(text.contains(&format!("AcDbRegAppTableRecord\r\n  2\r\n{EQUIPMENT_APP}")), "APPID record");
 }

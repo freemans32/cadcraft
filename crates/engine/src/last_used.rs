@@ -41,6 +41,8 @@ pub struct LastUsed {
     pub accessory: cmd::AccessoryLastUsed,
     /// ZONEADD's height and altitude.
     pub zone: cmd::ZoneLastUsed,
+    /// EQUIPMENTADD's kind and model.
+    pub equipment: cmd::EquipmentLastUsed,
     /// RISERADD's air direction and way.
     pub riser: cmd::RiserLastUsed,
     /// OPENINGADD's type, size and swing.
@@ -68,6 +70,7 @@ impl Default for LastUsed {
             duct: cmd::DuctLastUsed::default(),
             accessory: cmd::AccessoryLastUsed::default(),
             zone: cmd::ZoneLastUsed::default(),
+            equipment: cmd::EquipmentLastUsed::default(),
             riser: cmd::RiserLastUsed::default(),
             opening: cmd::OpeningLastUsed::default(),
         }

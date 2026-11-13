@@ -1145,6 +1145,22 @@
 	Edit Height Zone	Modifier la zone de hauteur
 	Altitude of the underside (m)	Altitude du dessous (m)
 	Riser	Colonne
+	Equipment	Équipement
+	Edit Equipment	Modifier l'équipement
+	Chiller	Groupe d'eau glacée
+	VRV outdoor unit	Groupe extérieur VRV
+	Split outdoor unit	Groupe extérieur split
+	Cassette	Cassette
+	Ducted unit	Gainable
+	Wall unit	Mural
+	Ceiling unit	Plafonnier
+	Floor unit	Console
+	Reference	Référence
+	Power (kW)	Puissance (kW)
+	Heating power (kW)	Puissance chaud (kW)
+	Fans	Ventilateurs
+	Service clearance (mm)	Dégagement d'entretien (mm)
+	Connections	Raccords
 	Orientation	Orientation
 	section	section
 	size	taille
