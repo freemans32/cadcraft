@@ -742,7 +742,7 @@ impl Scan<'_> {
                 parent: n.parent.and_then(index_of),
                 length_m: d.params.length_m(),
                 kind: segment_kind(d.params.kind, n.terminals_below, on_trunk),
-                fittings: n.fittings.clone(),
+                fittings: n.fittings.iter().copied().chain(std::iter::repeat_n(Fitting::Elbow45, 4 * d.params.jogs.len())).collect(),
                 terminal: n.terminal.map(|(_, flow, pa)| Terminal { flow_m3h: flow, pressure_drop_pa: pa }),
                 diameter_mm: (d.params.imposed && d.params.shape == DuctShape::Round).then_some(d.params.diameter_mm),
                 rect_mm: (d.params.imposed && d.params.shape == DuctShape::Rectangular).then_some((d.params.width_mm, d.params.height_mm)),

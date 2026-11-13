@@ -366,6 +366,9 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
         if row_button(ui, crate::i18n::t("Edit Wall"), false, |_, _| {}) {
             start = Some("walledit");
         }
+        if row_button(ui, crate::i18n::t("Wall Styles"), false, |_, _| {}) {
+            start = Some("wallstyleedit");
+        }
         if row_button(ui, crate::i18n::t("Wall Junctions"), false, |_, _| {}) {
             cleanup = true;
         }

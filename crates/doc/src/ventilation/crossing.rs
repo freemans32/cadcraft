@@ -4,8 +4,8 @@
 
 use cadcraft_geom::Vec2;
 
-use super::duct::{AXIS_REACH, MAX_GAPS};
-use super::{DuctParams, HvacUnits, MAX_DUCTS, invalid};
+use super::duct::{AXIS_REACH, DuctJog, MAX_GAPS, MAX_JOGS};
+use super::{DuctParams, DuctShape, HvacUnits, MAX_DUCTS, invalid};
 use crate::{Handle, Result};
 
 /// Distance, in millimetres, within which two ends are one point (as for the network).
@@ -90,5 +90,34 @@ impl crate::Drawing {
         p.gaps_mm = gaps;
         self.regenerate_duct(under, &p)?;
         Ok(merged)
+    }
+
+    /// Makes duct `duct` go over (or, with `down`, under) duct `other` by four 45° elbows: it leaves its
+    /// line, runs level across `other` (its width and `clearance_mm` on each side), and comes back. The
+    /// rise is `shift_mm`, else enough to clear the other duct's height by 50 mm; at 45° it takes as much
+    /// length on each side. Returns the jog; an error when the ducts do not cross or the elbows do not
+    /// fit on the duct.
+    pub fn jog_duct_around(&mut self, duct: Handle, other: Handle, down: bool, shift_mm: Option<f64>, clearance_mm: f64) -> Result<DuctJog> {
+        if !(clearance_mm.is_finite() && (0.0..=1000.0).contains(&clearance_mm)) {
+            return Err(invalid("The clearance is 0 to 1000 mm."));
+        }
+        let (mut p, a, b) = self.duct_ends(duct).ok_or_else(|| invalid("Select ducts only."))?;
+        let (po, c, d) = self.duct_ends(other).ok_or_else(|| invalid("Select ducts only."))?;
+        let (_, along, _) = cross_point(a, b, c, d).ok_or_else(|| invalid("The two ducts do not cross."))?;
+        let height = |p: &DuctParams| if p.shape == DuctShape::Rectangular { p.height_mm } else { p.diameter_mm };
+        let shift = shift_mm.unwrap_or_else(|| (height(&p) + height(&po)) / 2.0 + 50.0);
+        let sin = (b - a).normalized().cross((d - c).normalized()).abs().max(0.05);
+        let jog = DuctJog { centre_mm: along * p.units.mm_per_unit, half_mm: po.plan_width_mm() / 2.0 / sin + clearance_mm, shift_mm: shift, down };
+        // A new jog replaces the ones it overlaps.
+        let (lo, hi) = (jog.elbows_mm()[0], jog.elbows_mm()[3]);
+        p.jogs.retain(|j| j.elbows_mm()[3] < lo || j.elbows_mm()[0] > hi);
+        p.jogs.push(jog);
+        p.jogs.sort_by(|x, y| x.centre_mm.total_cmp(&y.centre_mm));
+        if p.jogs.len() > MAX_JOGS {
+            return Err(invalid(format!("A duct makes at most {MAX_JOGS} jogs.")));
+        }
+        p.validate().map_err(|_| invalid("The four elbows do not fit on the duct: the crossing is too near its ends."))?;
+        self.regenerate_duct(duct, &p)?;
+        Ok(jog)
     }
 }

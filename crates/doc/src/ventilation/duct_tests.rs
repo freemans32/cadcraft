@@ -48,6 +48,7 @@ fn duct(diameter_mm: f64) -> DuctParams {
         flow_forward: None,
         open_flow_m3h: None,
         gaps_mm: Vec::new(),
+        jogs: Vec::new(),
         bottom_mm: None,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
@@ -1306,4 +1307,61 @@ fn ducts_that_cross_are_found_a_tee_or_a_corner_is_not_one_and_the_one_that_pass
     let (first, rest) = (duct_of(d.entity(under).unwrap()).unwrap(), duct_of(d.entity(second).unwrap()).unwrap());
     assert_eq!((first.gaps_mm.clone(), rest.gaps_mm.len()), (vec![[1370.0, 1630.0]], 0), "the cut at 2000 is past the gap");
     assert!(DuctParams { gaps_mm: vec![[5.0, 1.0]], ..duct(200.0) }.validate().is_err());
+}
+
+#[test]
+fn a_duct_that_goes_over_another_makes_four_45_degree_elbows_that_are_drawn_counted_and_kept_when_it_is_cut() {
+    let mut d = Drawing::new_metric();
+    let other = add_duct(&mut d, (0.0, 0.0), (6000.0, 0.0));
+    let duct = add_duct(&mut d, (3000.0, -3000.0), (3000.0, 3000.0));
+    let polylines = |d: &Drawing, h: Handle| {
+        let EntityKind::Insert(i) = &d.entity(h).unwrap().kind else { return 0 };
+        d.block(&i.block).unwrap().entities.iter().filter(|x| matches!(x.kind, EntityKind::LwPolyline(_))).count()
+    };
+    assert_eq!(polylines(&d, duct), 2);
+    // Both 200 mm: it rises 200 + 50 = 250 mm, which takes 250 mm of length on each side of the flat
+    // part, as wide as the other duct (200) and 30 mm of clearance each side.
+    let jog = d.jog_duct_around(duct, other, false, None, 30.0).unwrap();
+    assert_eq!((jog.centre_mm, jog.half_mm, jog.shift_mm, jog.down), (3000.0, 130.0, 250.0, false));
+    assert_eq!(jog.elbows_mm(), [2620.0, 2870.0, 3130.0, 3380.0]);
+    assert_eq!(polylines(&d, duct), 2 + 4, "the sides and the four elbows");
+    // A dip is the same elbows the other way, labelled with the minus sign.
+    let dip = d.jog_duct_around(duct, other, true, Some(300.0), 30.0).unwrap();
+    assert!(dip.down && dip.shift_mm == 300.0);
+    assert_eq!(duct_of(d.entity(duct).unwrap()).unwrap().jogs.len(), 1, "a new jog replaces the one it overlaps");
+    // Too near an end for four elbows: refused. Ducts that do not cross: refused.
+    let short = add_duct(&mut d, (500.0, -300.0), (500.0, 300.0));
+    assert!(d.jog_duct_around(short, other, false, None, 30.0).is_err(), "the crossing is at 300 mm from the end, the four elbows need 380");
+    let apart = add_duct(&mut d, (0.0, 2000.0), (5000.0, 2000.0));
+    let apart2 = add_duct(&mut d, (0.0, 2500.0), (5000.0, 2500.0));
+    assert!(d.jog_duct_around(apart, apart2, false, None, 30.0).is_err());
+    // Cut on the side of the flat part: the jog stays on the part that holds it.
+    let second = d.split_duct_at(&Space::Model, duct, Vec2::new(3000.0, 1500.0), 10.0).unwrap().unwrap();
+    assert_eq!((duct_of(d.entity(duct).unwrap()).unwrap().jogs.len(), duct_of(d.entity(second).unwrap()).unwrap().jogs.len()), (1, 0));
+    assert!(
+        DuctParams { jogs: vec![DuctJog { centre_mm: 100.0, half_mm: 10.0, shift_mm: 250.0, down: false }], ..duct_with_length(1000.0) }
+            .validate()
+            .is_err()
+    );
+}
+
+fn duct_with_length(mm: f64) -> DuctParams {
+    DuctParams { length: mm, ..duct(200.0) }
+}
+
+#[test]
+fn the_four_elbows_of_a_jog_are_in_the_losses_of_the_run() {
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &ahu(), Vec2::ZERO, 0.0).unwrap();
+    let run = add_duct(&mut d, (500.0, -300.0), (6000.0, -300.0));
+    extract_terminal(&mut d, (6000.0, -300.0), 250.0);
+    let elbows = |d: &Drawing| {
+        let net = d.duct_networks().unwrap().remove(0);
+        net.network.segments[0].fittings.iter().filter(|f| **f == Fitting::Elbow45).count()
+    };
+    assert_eq!(elbows(&d), 0);
+    let (mut p, ..) = d.duct_ends(run).unwrap();
+    p.jogs = vec![DuctJog { centre_mm: 3000.0, half_mm: 130.0, shift_mm: 250.0, down: false }];
+    d.regenerate_duct(run, &p).unwrap();
+    assert_eq!(elbows(&d), 4);
 }

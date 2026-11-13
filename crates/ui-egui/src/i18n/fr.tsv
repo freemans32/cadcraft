@@ -1145,6 +1145,29 @@
 	Edit Height Zone	Modifier la zone de hauteur
 	Altitude of the underside (m)	Altitude du dessous (m)
 	Riser	Colonne
+	Styles	Styles
+	Name of the new style	Nom du nouveau style
+	Create	Créer
+	New style (copy of the selected one)	Nouveau style (copie de celui choisi)
+	Delete style	Supprimer le style
+	Default height (mm)	Hauteur par défaut (mm)
+	Layers, from one face to the other	Couches, d'une face à l'autre
+	Add layer	Ajouter une couche
+	Total thickness	Épaisseur totale
+	A standard style: Apply keeps a copy of it in the drawing.	Style standard : Appliquer en garde une copie dans le dessin.
+	Modified	Modifié
+	Apply	Appliquer
+	Thickness (mm)	Épaisseur (mm)
+	Function	Fonction
+	Priority	Priorité
+	Structure	Structure
+	Insulation	Isolant
+	Finish	Parement
+	Membrane	Membrane
+	Air gap	Lame d'air
+	Move up	Monter
+	Move down	Descendre
+	Remove layer	Supprimer la couche
 	Duct Crossing	Croisement de gaines
 	Passes under	Passe sous
 	Depth (mm)	Profondeur (mm)

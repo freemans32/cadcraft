@@ -29,6 +29,37 @@ pub const DUCT_DIAMETER_MM: (f64, f64) = (20.0, 5_000.0);
 pub const MAX_VOID_MM: f64 = 5_000.0;
 /// Most stretches one duct is drawn broken over, where it passes under others.
 pub const MAX_GAPS: usize = 32;
+/// Most jogs (a rise or a dip round another duct, four 45° elbows each) one duct makes.
+pub const MAX_JOGS: usize = 8;
+
+/// A duct that goes over or under another by four 45° elbows: it leaves its line, runs level past
+/// the other duct, then comes back. The plan shows the four elbows across it; the flat part lies
+/// between the second and the third.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuctJog {
+    /// The middle of the flat part, mm along the duct from its start.
+    pub centre_mm: f64,
+    /// Half the length of the flat part, mm.
+    pub half_mm: f64,
+    /// How far the duct rises or dips, mm: at 45° the rise takes as much length, on each side.
+    pub shift_mm: f64,
+    /// Whether it dips (goes under) rather than rises.
+    #[serde(default)]
+    pub down: bool,
+}
+
+impl DuctJog {
+    /// The positions of the four elbows, mm along the duct.
+    pub fn elbows_mm(&self) -> [f64; 4] {
+        [
+            self.centre_mm - self.half_mm - self.shift_mm,
+            self.centre_mm - self.half_mm,
+            self.centre_mm + self.half_mm,
+            self.centre_mm + self.half_mm + self.shift_mm,
+        ]
+    }
+}
 /// Longest duct run, metres.
 pub const MAX_DUCT_LENGTH_M: f64 = 10_000.0;
 const AHU_FORMAT: &str = "AHU1";
@@ -559,6 +590,9 @@ pub struct DuctParams {
     /// broken there (a plan's way of showing which duct goes over).
     #[serde(default)]
     pub gaps_mm: Vec<[f64; 2]>,
+    /// The rises or dips the run makes round other ducts, four 45° elbows each.
+    #[serde(default)]
+    pub jogs: Vec<DuctJog>,
     /// A flexible duct (gaine souple): drawn as bellows, with the roughness of one.
     #[serde(default)]
     pub flexible: bool,
@@ -669,6 +703,17 @@ impl DuctParams {
         {
             return Err(invalid(format!("A duct passes under at most {MAX_GAPS} others, each over a stretch of its length.")));
         }
+        let length_mm = self.length * self.units.mm_per_unit;
+        let fits = |j: &DuctJog| {
+            [j.centre_mm, j.half_mm, j.shift_mm].iter().all(|v| v.is_finite())
+                && j.half_mm >= 0.0
+                && (20.0..=5_000.0).contains(&j.shift_mm)
+                && j.elbows_mm()[0] >= -1e-6
+                && j.elbows_mm()[3] <= length_mm + 1e-6
+        };
+        if self.jogs.len() > MAX_JOGS || !self.jogs.iter().all(fits) {
+            return Err(invalid(format!("A duct makes at most {MAX_JOGS} jogs, each along its length (a rise of 20 to 5000 mm).")));
+        }
         for v in [self.flow_m3h, self.velocity, self.open_flow_m3h].into_iter().flatten() {
             if !(v.is_finite() && (0.0..=1e9).contains(&v)) {
                 return Err(invalid("A duct's flow and velocity are 0 or more."));
@@ -752,6 +797,26 @@ impl DuctParams {
                 });
             }
         }
+        // Each jog: four elbows across the run, the outer two bulging toward the flat part, the inner two away.
+        for j in &self.jogs {
+            for (k, x) in j.elbows_mm().into_iter().enumerate() {
+                let bulge = if k == 0 || k == 2 { 1.0 } else { -1.0 };
+                let x = self.units.to_units(x);
+                pieces.push(HvacPiece {
+                    layer,
+                    kind: EntityKind::LwPolyline(LwPolyline {
+                        vertices: vec![
+                            PolyVertex { p: Vec2::new(x, -r), bulge, start_width: 0.0, end_width: 0.0 },
+                            PolyVertex { p: Vec2::new(x, r), bulge: 0.0, start_width: 0.0, end_width: 0.0 },
+                        ],
+                        closed: false,
+                        const_width: 0.0,
+                        elevation: 0.0,
+                        plinegen: false,
+                    }),
+                });
+            }
+        }
         // The arrow and the label sit on the longest stretch that is drawn.
         let (sx, ex) = solid.iter().copied().max_by(|a, b| (a.1 - a.0).total_cmp(&(b.1 - b.0))).unwrap_or((x0, x1));
         if let Some(e) = self.elbow {
@@ -785,6 +850,10 @@ impl DuctParams {
         let h = self.units.to_units(self.label_height_mm);
         // A flexible duct is narrow and its bellows busy: its label sits above it.
         let (y, up) = if self.flexible { (r * 1.5 + 1.2 * h, if flip_label { -1.0 } else { 1.0 }) } else { (0.0, 1.0) };
+        for j in &self.jogs {
+            let at = Vec2::new(self.units.to_units(j.centre_mm), -(r + 0.9 * h));
+            pieces.push(HvacPiece { layer, kind: label(at, 0.8 * h, format!("{}{:.0}", if j.down { "-" } else { "+" }, j.shift_mm)) });
+        }
         let mid = if self.gaps_mm.is_empty() { self.length / 2.0 } else { (sx + ex) / 2.0 };
         let mut t = label(Vec2::new(mid, y * up), h, text);
         if let EntityKind::Text(x) = &mut t {
@@ -971,8 +1040,25 @@ impl crate::Drawing {
             let (f, t) = (g[0].max(lo), g[1].min(hi));
             (f < t).then_some([f - lo, t - lo])
         };
-        let first = DuctParams { length: a.dist(cut), gaps_mm: p.gaps_mm.iter().filter_map(|g| clip(g, 0.0, cut_mm)).collect(), ..p.clone() };
-        let second_params = DuctParams { gaps_mm: p.gaps_mm.iter().filter_map(|g| clip(g, cut_mm, cut_mm + rest_mm)).collect(), ..p };
+        // A jog lies on one part, or is dropped when the cut falls inside it.
+        let jogs_in = |lo: f64, hi: f64| -> Vec<DuctJog> {
+            p.jogs
+                .iter()
+                .filter(|j| j.elbows_mm()[0] >= lo - 1e-6 && j.elbows_mm()[3] <= hi + 1e-6)
+                .map(|j| DuctJog { centre_mm: j.centre_mm - lo, ..*j })
+                .collect()
+        };
+        let first = DuctParams {
+            length: a.dist(cut),
+            gaps_mm: p.gaps_mm.iter().filter_map(|g| clip(g, 0.0, cut_mm)).collect(),
+            jogs: jogs_in(0.0, cut_mm),
+            ..p.clone()
+        };
+        let second_params = DuctParams {
+            gaps_mm: p.gaps_mm.iter().filter_map(|g| clip(g, cut_mm, cut_mm + rest_mm)).collect(),
+            jogs: jogs_in(cut_mm, cut_mm + rest_mm),
+            ..p
+        };
         self.regenerate_duct(h, &first)?;
         let second = self.add_duct(space, common, second_params, cut, b)?;
         Ok(Some(second))

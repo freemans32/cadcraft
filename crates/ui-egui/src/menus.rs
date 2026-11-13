@@ -591,6 +591,11 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             crate::aliasdlg::open(app);
             Ok(Value::Null)
         }
+        // Typed or from the Architecture tab (no parameters): the Wall Styles dialog. JSON calls keep the JSON form.
+        "wallstyleedit" if params.is_null() => {
+            crate::wallstyledlg::open(app);
+            Ok(Value::Null)
+        }
         "hatchedit" | "he" if params.is_null() && app.session.state().is_ok() => {
             crate::hatchdlg::open_edit(app);
             Ok(Value::Null)

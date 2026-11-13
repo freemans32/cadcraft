@@ -875,3 +875,25 @@ fn ductcross_lists_the_crossings_ductsize_reports_the_ones_left_and_the_one_unde
     assert_eq!(s.execute("ductcross", &json!({})).unwrap()["crossings"].as_array().unwrap().iter().filter(|c| c["resolved"] == true).count(), 0);
     assert!(s.execute("ductcross", &json!({"under": under, "over": under})).is_err());
 }
+
+#[test]
+fn ductcross_with_jog_makes_the_named_duct_rise_or_dip_by_four_elbows_and_ductsize_counts_them() {
+    let mut s = metric();
+    s.execute("ahuadd", &json!({"at": [-3000, 0]})).unwrap();
+    let a = s.execute("ductadd", &json!({"points": [[0, 0], [6000, 0]], "diameter": 200, "air": "supply"})).unwrap();
+    let b = s.execute("ductadd", &json!({"points": [[3000, -3000], [3000, 3000]], "diameter": 200, "air": "extract"})).unwrap();
+    let (over, under) = (a["handles"][0].clone(), b["handles"][0].clone());
+    let r = s.execute("ductcross", &json!({"under": under, "over": over, "jog": "under", "shift": 300})).unwrap();
+    assert_eq!(r["jog"]["down"], true, "{r}");
+    assert_eq!(r["jog"]["shift"], 300.0);
+    let jogs = |s: &Session, h: &Value| cadcraft_doc::duct_of(s.doc().unwrap().entity(hd(h)).unwrap()).unwrap().jogs.len();
+    assert_eq!((jogs(&s, &under), jogs(&s, &over)), (1, 0), "the duct that dips makes the elbows, the other stays straight");
+    // The elbows over: the other way round.
+    let r = s.execute("ductcross", &json!({"under": under, "over": over, "jog": "over"})).unwrap();
+    assert_eq!(r["jog"]["down"], false, "{r}");
+    assert_eq!(jogs(&s, &over), 1);
+    assert!(s.execute("ductcross", &json!({"under": under, "over": over, "jog": "sideways"})).is_err());
+    // Drawn whole again: no gap, no elbows.
+    s.execute("ductcross", &json!({"clear": [under, over]})).unwrap();
+    assert_eq!((jogs(&s, &under), jogs(&s, &over)), (0, 0));
+}
