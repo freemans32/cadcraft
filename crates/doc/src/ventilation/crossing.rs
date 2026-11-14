@@ -127,6 +127,40 @@ impl crate::Drawing {
         Ok(drawn)
     }
 
+    /// Where the sides of the duct over each run-along crossing are drawn straight, in the coordinates of the duct under it: the
+    /// elbows and cones of the duct over are not known until it is sized, so this is done at the end of each sizing.
+    pub fn refresh_cover_straights(&mut self) -> Result<()> {
+        let with: Vec<Handle> =
+            self.model.iter().filter(|e| duct_of(e).is_some_and(|p| p.covers.iter().any(|c| c.along))).map(|e| e.handle).collect();
+        for h in with {
+            let Some((mut p, a, b)) = self.duct_ends(h) else { continue };
+            if a.dist(b) <= 0.0 {
+                continue;
+            }
+            let u = (b - a).normalized();
+            let mut changed = false;
+            for c in p.covers.iter_mut().filter(|c| c.along) {
+                let Some((po, c0, d0)) = self.duct_ends(Handle(c.over)) else { continue };
+                if c0.dist(d0) <= 0.0 {
+                    continue;
+                }
+                let (x0, x1) = po.straight_range();
+                let dir = (d0 - c0).normalized();
+                let along = |x: f64| (c0 + dir * x - a).dot(u) * p.units.mm_per_unit;
+                let (t0, t1) = (along(x0), along(x1));
+                let new = [t0.min(t1).max(0.0), t0.max(t1).min(p.length * p.units.mm_per_unit)];
+                if new.iter().zip(c.over_straight_mm).any(|(x, y)| (x - y).abs() > 0.5) {
+                    c.over_straight_mm = new;
+                    changed = true;
+                }
+            }
+            if changed {
+                self.regenerate_duct(h, &p)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Gives the marks of crossings drawn before marks said whether the duct over runs along this one, and how
     /// wide it is (they read as unknown), what they would have been drawn with now.
     fn refresh_cover_marks(&mut self) -> Result<()> {
@@ -216,6 +250,7 @@ impl crate::Drawing {
                 over: over.0,
                 over_width_mm: po.plan_width_mm(),
                 along: !across,
+                over_straight_mm: [0.0, 0.0],
             });
         }
         self.regenerate_duct(under, &p)?;

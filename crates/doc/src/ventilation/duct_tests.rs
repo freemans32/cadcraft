@@ -1728,6 +1728,7 @@ fn the_label_of_a_run_under_another_duct_sits_beside_it_and_not_under_the_other_
         over: 1,
         over_width_mm: 0.0,
         along: false,
+        over_straight_mm: [0.0, 0.0],
     }];
     p.gaps_mm = vec![[1000.0, 3000.0]];
     assert!(text_y(&p, false) > 200.0 + 100.0, "beside the run: {}", text_y(&p, false));
@@ -1741,6 +1742,7 @@ fn the_label_of_a_run_under_another_duct_sits_beside_it_and_not_under_the_other_
         over: 1,
         over_width_mm: 0.0,
         along: false,
+        over_straight_mm: [0.0, 0.0],
     }];
     p.gaps_mm = vec![[100.0, 600.0]];
     assert!(text_y(&p, false).abs() < 1e-9, "not under the other duct there: {}", text_y(&p, false));
@@ -1764,6 +1766,7 @@ fn the_hidden_sides_are_dashed_in_the_colour_of_the_duct_underneath_and_not_wher
         over: 1,
         over_width_mm,
         along,
+        over_straight_mm: [0.0, 0.0],
     };
     // One over the other on the same route and the same width: its sides are the other's own, nothing is dashed.
     p.covers = vec![mark(400.0, true)];
@@ -1794,6 +1797,7 @@ fn the_dashes_stop_where_a_cone_begins_and_a_run_under_another_keeps_its_bend() 
         over: 1,
         over_width_mm: 900.0,
         along: true,
+        over_straight_mm: [0.0, 0.0],
     }];
     // A cone of 1000 mm at the start: the dashes start where the straight sides do.
     p.reducer = Some(DuctReducer { from_mm: 900.0, at_end: false });
@@ -1848,4 +1852,58 @@ fn a_crossing_drawn_before_marks_knew_the_width_and_the_route_is_given_them_at_t
     d.regenerate_duct(under, &p).unwrap();
     assert_eq!(d.cross_ducts_by_altitude(30.0).unwrap(), 0, "nothing new to draw");
     assert_eq!((marks(&d)[0].along, marks(&d)[0].over_width_mm), (true, 650.0), "but the mark is brought up to date");
+}
+
+#[test]
+fn under_a_duct_as_wide_the_dashes_are_where_its_sides_are_not_straight_that_is_under_its_elbows() {
+    let mut p = duct(400.0);
+    p.units = HvacUnits { mm_per_unit: 1.0 };
+    p.length = 4000.0;
+    p.gaps_mm = vec![[0.0, 4000.0]];
+    // The duct over is as wide and goes the same way; its sides are straight from 650 to 3350 only (an elbow at each end).
+    p.covers = vec![CoverMark {
+        gap_mm: [0.0, 4000.0],
+        dash_mm: [0.0, 4000.0],
+        over_air: AirDirection::Extract,
+        over: 1,
+        over_width_mm: 400.0,
+        along: true,
+        over_straight_mm: [650.0, 3350.0],
+    }];
+    let pieces = p.generate(false).unwrap();
+    let mut spans: Vec<(f64, f64)> = pieces
+        .iter()
+        .filter(|x| x.layer.contains("HVAC_HIDDEN"))
+        .filter_map(|x| match &x.kind {
+            EntityKind::LwPolyline(l) if l.vertices.first().is_some_and(|v| v.p.y > 0.0) => Some((l.vertices[0].p.x, l.vertices[1].p.x)),
+            _ => None,
+        })
+        .collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert_eq!(spans, [(0.0, 650.0), (3350.0, 4000.0)], "one side: dashed under the two elbows, none where the sides coincide");
+    // Where the duct over is wider, the sides are hidden all along.
+    p.covers[0].over_width_mm = 600.0;
+    assert_eq!(dashed_layers(&p).len(), 2);
+}
+
+#[test]
+fn the_stretch_where_the_duct_over_has_straight_sides_is_read_from_its_trims_after_a_sizing() {
+    let mut d = Drawing::new_metric();
+    let under = add_wide(&mut d, (0.0, 0.0), (4000.0, 0.0), 650.0);
+    let over = add_wide(&mut d, (0.0, 0.0), (4000.0, 0.0), 650.0);
+    for (h, mm) in [(over, 2800.0), (under, 2500.0)] {
+        let (mut p, ..) = d.duct_ends(h).unwrap();
+        p.level_mm = Some(mm);
+        d.regenerate_duct(h, &p).unwrap();
+    }
+    assert_eq!(d.cross_ducts_by_altitude(30.0).unwrap(), 1);
+    let straight = |d: &Drawing| duct_of(d.entity(under).unwrap()).unwrap().covers[0].over_straight_mm;
+    d.refresh_cover_straights().unwrap();
+    assert_eq!(straight(&d), [0.0, 4000.0], "no elbow: straight all along");
+    // The duct over takes 650 mm at each end for its elbows.
+    let (mut po, ..) = d.duct_ends(over).unwrap();
+    (po.trim_start_mm, po.trim_end_mm) = (650.0, 650.0);
+    d.regenerate_duct(over, &po).unwrap();
+    d.refresh_cover_straights().unwrap();
+    assert_eq!(straight(&d), [650.0, 3350.0]);
 }

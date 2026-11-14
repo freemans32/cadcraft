@@ -1136,6 +1136,8 @@ fn run_ductsize(s: &mut Session, p: &Value) -> Result<Value> {
     // The lower duct of two that cross passes under, where their altitudes are known (`autoCross: false` leaves them).
     let auto_crossed =
         if p.get("autoCross").and_then(Value::as_bool).unwrap_or(true) { d.cross_ducts_by_altitude(30.0).map_err(doc_err)? } else { 0 };
+    // Where the ducts one over the other have their sides drawn straight is known once all are sized: the dashes go on the rest.
+    d.refresh_cover_straights().map_err(doc_err)?;
     let ducts = nets.first().map_or(0, |n| n.duct_count);
     let isolated = nets.first().map_or(0, |n| n.isolated.len());
     Ok(json!({ "networks": out, "cuts": cuts, "rebalanced": rebalanced, "stepWarnings": step_warnings, "autoCrossed": auto_crossed,

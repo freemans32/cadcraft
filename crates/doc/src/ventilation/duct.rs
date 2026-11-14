@@ -70,6 +70,10 @@ pub struct CoverMark {
     /// Whether the duct over runs along this one (one over the other on the same route), not across it.
     #[serde(default)]
     pub along: bool,
+    /// Where the sides of the duct over it are drawn straight, mm from this duct's start (0, 0: unknown): where it
+    /// is as wide as this one, its sides coincide with this one's only there, and the dashes are on the rest.
+    #[serde(default)]
+    pub over_straight_mm: [f64; 2],
 }
 
 /// A duct that goes over or under another by four 45° elbows: it leaves its line, runs level past
@@ -854,6 +858,30 @@ impl DuctParams {
         }
     }
 
+    /// The cone where the run joins a larger or smaller one, drawn only where no elbow is: the radius of the run it joins, its
+    /// length and whether it is at the run's far end. `r` is the run's own radius, drawing units.
+    fn cone(&self, r: f64) -> Option<(f64, f64, bool)> {
+        let (trim0, trim1) = (self.units.to_units(self.trim_start_mm), self.units.to_units(self.trim_end_mm));
+        self.reducer.filter(|red| if red.at_end { trim1 <= 0.0 } else { trim0 <= 0.0 }).map(|red| {
+            let r0 = self.units.to_units(red.from_mm) / 2.0;
+            let len = ((r0 - r).abs() / REDUCER_HALF_ANGLE_DEG.to_radians().tan()).min(0.4 * self.length);
+            (r0, len, red.at_end)
+        })
+    }
+
+    /// The stretch of the run, drawing units from its start, whose sides are drawn straight: between what an elbow takes at each
+    /// end and the cone of a reducer.
+    pub fn straight_range(&self) -> (f64, f64) {
+        let r = self.units.to_units(self.plan_width_mm()) / 2.0;
+        let (trim0, trim1) = (self.units.to_units(self.trim_start_mm), self.units.to_units(self.trim_end_mm));
+        let (x0, x1) = match self.cone(r) {
+            Some((_, len, false)) => (len, self.length - trim1),
+            Some((_, len, true)) => (trim0, self.length - len),
+            None => (trim0, self.length - trim1),
+        };
+        (x0.min(self.length), x1.max(x0).min(self.length))
+    }
+
     /// Under another duct: a mask over each crossing and the hidden sides dashed, on the other duct's layer.
     fn cover_pieces(&self, r: f64, (x0, x1): (f64, f64), pieces: &mut Vec<HvacPiece>) {
         for c in &self.covers {
@@ -868,15 +896,25 @@ impl DuctParams {
             // The hidden sides are dashed where the run's sides are drawn (not in a cone), and only where they are
             // inside the duct over: when that one is no wider the sides coincide with its own, and nothing is hidden.
             let (d0, d1) = (self.units.to_units(c.dash_mm[0]).max(x0), self.units.to_units(c.dash_mm[1]).min(x1));
-            let hidden = !c.along || c.over_width_mm <= 0.0 || self.units.to_units(c.over_width_mm) / 2.0 > r + self.units.to_units(0.5);
-            if d1 > d0 && hidden {
+            // Where the duct over is as wide as this one its straight sides are this one's own: nothing is hidden there
+            // (but under its elbows, where its sides leave this one's).
+            let as_wide = c.along && c.over_width_mm > 0.0 && self.units.to_units(c.over_width_mm) / 2.0 <= r + self.units.to_units(0.5);
+            let straight = (self.units.to_units(c.over_straight_mm[0]), self.units.to_units(c.over_straight_mm[1]));
+            let ranges: Vec<(f64, f64)> = if as_wide && straight.1 > straight.0 {
+                vec![(d0, d1.min(straight.0)), (d0.max(straight.1), d1)]
+            } else if as_wide {
+                Vec::new()
+            } else {
+                vec![(d0, d1)]
+            };
+            for (s0, s1) in ranges.into_iter().filter(|(a, b)| b > a) {
                 for y in [-r, r] {
                     pieces.push(HvacPiece {
                         layer: self.dash_layer(c.over_air),
                         kind: EntityKind::LwPolyline(LwPolyline {
                             vertices: vec![
-                                PolyVertex { p: Vec2::new(d0, y), bulge: 0.0, start_width: 0.0, end_width: 0.0 },
-                                PolyVertex { p: Vec2::new(d1, y), bulge: 0.0, start_width: 0.0, end_width: 0.0 },
+                                PolyVertex { p: Vec2::new(s0, y), bulge: 0.0, start_width: 0.0, end_width: 0.0 },
+                                PolyVertex { p: Vec2::new(s1, y), bulge: 0.0, start_width: 0.0, end_width: 0.0 },
                             ],
                             closed: false,
                             const_width: 0.0,
@@ -937,18 +975,8 @@ impl DuctParams {
         let layer = self.layer();
         let mut pieces = Vec::new();
         // What an elbow takes at each end; a cone is drawn only where no elbow is.
-        let (trim0, trim1) = (self.units.to_units(self.trim_start_mm), self.units.to_units(self.trim_end_mm));
-        let cone = self.reducer.filter(|red| if red.at_end { trim1 <= 0.0 } else { trim0 <= 0.0 }).map(|red| {
-            let r0 = self.units.to_units(red.from_mm) / 2.0;
-            let len = ((r0 - r).abs() / REDUCER_HALF_ANGLE_DEG.to_radians().tan()).min(0.4 * self.length);
-            (r0, len, red.at_end)
-        });
-        let (x0, x1) = match cone {
-            Some((_, len, false)) => (len, self.length - trim1),
-            Some((_, len, true)) => (trim0, self.length - len),
-            None => (trim0, self.length - trim1),
-        };
-        let (x0, x1) = (x0.min(self.length), x1.max(x0).min(self.length));
+        let cone = self.cone(r);
+        let (x0, x1) = self.straight_range();
         // The stretches drawn: the run less where it passes under another duct.
         let solid = self.solid_stretches(x0, x1);
         for sign in [1.0, -1.0] {
@@ -1177,7 +1205,7 @@ pub fn duct_of(e: &crate::Entity) -> Option<DuctParams> {
 }
 
 /// Whether a run turned `rotation` radians reads upside down without a flipped label.
-fn reads_upside_down(rotation: f64) -> bool {
+pub(super) fn reads_upside_down(rotation: f64) -> bool {
     let a = rotation.rem_euclid(std::f64::consts::TAU);
     a > std::f64::consts::FRAC_PI_2 + 1e-9 && a <= 3.0 * std::f64::consts::FRAC_PI_2 + 1e-9
 }
