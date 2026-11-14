@@ -32,6 +32,11 @@ fn separator(ui: &mut egui::Ui) {
 
 /// A full-width button with a small picture drawn by `paint` on its left; true when clicked.
 fn row_button(ui: &mut egui::Ui, label: &str, selected: bool, paint: impl FnOnce(&egui::Painter, Rect)) -> bool {
+    row_tip(ui, label, "", selected, paint)
+}
+
+/// [`row_button`] with a how-to shown when the pointer rests on it (empty: none).
+fn row_tip(ui: &mut egui::Ui, label: &str, tip: &str, selected: bool, paint: impl FnOnce(&egui::Painter, Rect)) -> bool {
     let t = Tokens::get();
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
     let r = r.shrink2(vec2(6.0, 2.0));
@@ -42,7 +47,8 @@ fn row_button(ui: &mut egui::Ui, label: &str, selected: bool, paint: impl FnOnce
     paint(p, Rect::from_min_size(pos2(r.left() + 6.0, r.center().y - 8.0), vec2(30.0, 16.0)));
     p.text(pos2(r.left() + 44.0, r.center().y), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(12.0), t.text);
     crate::icons::describe_control(ui, &resp, label, Some(selected), false);
-    resp.clicked()
+    let clicked = resp.clicked();
+    if tip.is_empty() { clicked } else { resp.on_hover_text(tip).clicked() || clicked }
 }
 
 /// A wall style's components side by side, as wide as they are thick.
@@ -213,22 +219,22 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
             }
         }
         // In the order they are drawn: the riser, the ducts, the height zones, then terminals are connected, ducts sized and crossings settled.
-        if row_button(ui, crate::i18n::t("Riser"), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Riser"), crate::i18n::t("Draw the outline of the shaft where the air goes up or down. Type the flow that comes from the other floors on it; sizing gives it its section."), false, |_, _| {}) {
             start = Some("riseradd");
         }
-        if row_button(ui, crate::i18n::t("Duct"), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Duct"), crate::i18n::t("Click the points of a run (one duct per segment), seen from above. Leave the direction on auto: sizing finds supply or extract from the terminals the run reaches."), false, |_, _| {}) {
             start = Some("ductadd");
         }
-        if row_button(ui, crate::i18n::t("Height Zone"), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Height Zone"), crate::i18n::t("Draw an outline where ducts have less height (a beam, a low ceiling), seen from above, then type the height available in mm. Ducts crossing it are cut at its edges and sized flat inside. An altitude is optional."), false, |_, _| {}) {
             start = Some("zoneadd");
         }
-        if row_button(ui, crate::i18n::t("Connect Terminals"), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Connect Terminals"), crate::i18n::t("Draws a flexible duct from each terminal that no duct reaches to the nearest duct (3 m at most)."), false, |_, _| {}) {
             connect = true;
         }
-        if row_button(ui, crate::i18n::t("Size Ducts"), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Size Ducts"), crate::i18n::t("Sizes every network from its terminals (flows, section, velocity) and writes the result on the ducts. Run it again after any change."), false, |_, _| {}) {
             size = true;
         }
-        if row_button(ui, crate::i18n::t("Duct Crossing"), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Duct Crossing"), crate::i18n::t("Click two ducts that cross: one passes under or over the other, drawn broken or with four 45° elbows."), false, |_, _| {}) {
             start = Some("ductcross");
         }
         ui.add_space(6.0);
@@ -255,7 +261,7 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         ui.add_space(6.0);
         separator(ui);
         header(ui, "Quantities");
-        if row_button(ui, crate::i18n::t("HVAC Quantities"), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("HVAC Quantities"), crate::i18n::t("Counts the ducts, fittings, terminals, units, risers and equipment of this drawing (one drawing per level), and saves a spreadsheet."), false, |_, _| {}) {
             start = Some("hvactakeoff");
         }
     });

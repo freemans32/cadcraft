@@ -1328,3 +1328,10 @@
 	Top left	Haut gauche
 	Top right	Haut droite
 	size W×H	taille L×H
+	Draw the outline of the shaft where the air goes up or down. Type the flow that comes from the other floors on it; sizing gives it its section.	Dessine le contour de la trémie où l'air monte ou descend. Saisis dessus le débit venant des autres étages ; le dimensionnement lui donne sa section.
+	Click the points of a run (one duct per segment), seen from above. Leave the direction on auto: sizing finds supply or extract from the terminals the run reaches.	Clique les points d'un tronçon (une gaine par segment), vu de dessus. Laisse la direction en auto : le dimensionnement trouve soufflage ou reprise d'après les bouches atteintes.
+	Draw an outline where ducts have less height (a beam, a low ceiling), seen from above, then type the height available in mm. Ducts crossing it are cut at its edges and sized flat inside. An altitude is optional.	Dessine, vu de dessus, un contour où les gaines ont moins de hauteur (poutre, faux plafond bas), puis saisis la hauteur disponible en mm. Les gaines qui le traversent sont coupées à ses bords et dimensionnées plates à l'intérieur. L'altitude est facultative.
+	Draws a flexible duct from each terminal that no duct reaches to the nearest duct (3 m at most).	Trace une gaine souple de chaque bouche que aucune gaine n'atteint jusqu'à la gaine la plus proche (3 m au plus).
+	Sizes every network from its terminals (flows, section, velocity) and writes the result on the ducts. Run it again after any change.	Dimensionne chaque réseau d'après ses bouches (débits, section, vitesse) et écrit le résultat sur les gaines. À relancer après chaque modification.
+	Click two ducts that cross: one passes under or over the other, drawn broken or with four 45° elbows.	Clique deux gaines qui se croisent : l'une passe dessous ou dessus, dessinée interrompue ou avec quatre coudes à 45°.
+	Counts the ducts, fittings, terminals, units, risers and equipment of this drawing (one drawing per level), and saves a spreadsheet.	Compte les gaines, raccords, bouches, centrales, colonnes et équipements du dessin (un dessin par niveau) et enregistre un tableur.
