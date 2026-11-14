@@ -1032,19 +1032,33 @@ impl DuctParams {
             text.push_str(&format!(" Ai:{:.2}", b / 1000.0));
         }
         let h = self.units.to_units(self.label_height_mm);
-        // A flexible duct is narrow and its bellows busy: its label sits above it.
-        let (y, up) = if self.flexible { (r * 1.5 + 1.2 * h, if flip_label { -1.0 } else { 1.0 }) } else { (0.0, 1.0) };
         for j in &self.jogs {
             let at = Vec2::new(self.units.to_units(j.centre_mm), -(r + 0.9 * h));
             pieces.push(HvacPiece { layer, kind: label(at, 0.8 * h, format!("{}{:.0}", if j.down { "-" } else { "+" }, j.shift_mm)) });
         }
         let mid = if self.gaps_mm.is_empty() { self.length / 2.0 } else { (sx + ex) / 2.0 };
-        let mut t = label(Vec2::new(mid, y * up), h, text);
+        let mut t = label(Vec2::new(mid, self.label_offset(mid, r, flip_label)), h, text);
         if let EntityKind::Text(x) = &mut t {
             x.rotation = if flip_label { std::f64::consts::PI } else { 0.0 };
         }
         pieces.push(HvacPiece { layer, kind: t });
         Ok(pieces)
+    }
+
+    /// How far the label sits across the run (positive: above it as it reads), `mid` along it. On the run, but a
+    /// flexible duct is narrow and its bellows busy, so its label sits above it; and where the label would be under
+    /// the duct that goes over this one it is moved beside the run, so two superposed runs do not write over each other.
+    fn label_offset(&self, mid: f64, r: f64, flip_label: bool) -> f64 {
+        let h = self.units.to_units(self.label_height_mm);
+        let up = if flip_label { -1.0 } else { 1.0 };
+        let mid_mm = mid / self.units.to_units(1.0);
+        if self.covers.iter().any(|c| c.dash_mm[0] <= mid_mm && mid_mm <= c.dash_mm[1]) {
+            (r + 1.4 * h) * up
+        } else if self.flexible {
+            (r * 1.5 + 1.2 * h) * up
+        } else {
+            0.0
+        }
     }
 
     /// The two arcs of an elbow, in the run's block coordinates: the entry end is the origin (or, if

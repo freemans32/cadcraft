@@ -169,3 +169,22 @@ fn on_the_roof_a_reducer_joins_the_orifice_of_the_unit_to_the_duct_and_the_last_
     let RiserSize::Rectangular { width_mm, height_mm } = shaft else { panic!("{shaft:?}") };
     assert_eq!((b.width_mm, b.height_mm), (width_mm, height_mm), "the last run is the shaft's section");
 }
+
+#[test]
+fn a_short_run_that_ends_on_a_riser_is_a_main_not_a_connection_and_is_not_sized_at_the_velocity_of_a_diffuser_drop() {
+    let mut s = metric();
+    s.execute("ahuadd", &json!({"at": [0, 0], "type": "supplyUnit"})).unwrap();
+    s.execute("riseradd", &json!({"at": [4600, 0], "width": 1500, "depth": 600, "air": "supply", "incomingFlow": 7000})).unwrap();
+    // Three runs of 1, 1 and 1.5 m: the last two are short and serve one terminal, the riser. A run to
+    // a diffuser that short is a connection at 2.5 m/s; one that carries 7000 m³/h to a riser is not.
+    let a = s.execute("ductadd", &json!({"points": [[1300, 0], [2300, 0]], "air": "supply"})).unwrap();
+    let b = s.execute("ductadd", &json!({"points": [[2300, 0], [3300, 0]], "air": "supply"})).unwrap();
+    let c = s.execute("ductadd", &json!({"points": [[3300, 0], [4000, 0]], "air": "supply"})).unwrap();
+    s.execute("ductsize", &json!({})).unwrap();
+    let d = |h: &Value| cadcraft_doc::duct_of(s.doc().unwrap().entity(hd(&h["handles"][0])).unwrap()).unwrap();
+    for (name, p) in [("first", d(&a)), ("second", d(&b)), ("last", d(&c))] {
+        assert_ne!(p.kind_found, Some(cadcraft_doc::DuctKind::Connection), "{name} run: {:?}", p.kind_found);
+        let v = p.velocity.expect("sized");
+        assert!(v > 3.0, "{name} run at {v} m/s: sized like a drop to a diffuser (2.5 m/s)");
+    }
+}

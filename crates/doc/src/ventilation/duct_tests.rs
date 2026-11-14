@@ -1704,3 +1704,30 @@ fn a_duct_passing_under_is_drawn_whole_with_a_mask_and_dashes_on_the_layer_of_th
     let EntityKind::Insert(i) = &d.entity(under).unwrap().kind else { panic!("not a block reference") };
     assert!(!d.block(&i.block).unwrap().entities.iter().any(|e| matches!(e.kind, EntityKind::Wipeout(_))));
 }
+
+#[test]
+fn the_label_of_a_run_under_another_duct_sits_beside_it_and_not_under_the_other_duct_s_label() {
+    let text_y = |p: &DuctParams, flip: bool| -> f64 {
+        let pieces = p.generate(flip).unwrap();
+        let t = pieces.iter().find_map(|x| match &x.kind {
+            EntityKind::Text(t) if t.value.contains("Ø") || t.value.contains('m') => Some(t.insert.y),
+            _ => None,
+        });
+        t.expect("a label")
+    };
+    let mut p = duct(400.0);
+    p.units = HvacUnits { mm_per_unit: 1.0 };
+    p.length = 4000.0;
+    p.label_height_mm = 100.0;
+    assert!(text_y(&p, false).abs() < 1e-9, "alone, the label is on the run");
+    // Under another duct along its middle: the label is beside the run, past its side (200) by a bit more than a text's height.
+    p.covers = vec![CoverMark { gap_mm: [1000.0, 3000.0], dash_mm: [1200.0, 2800.0], over_air: AirDirection::Extract, over: 1 }];
+    p.gaps_mm = vec![[1000.0, 3000.0]];
+    assert!(text_y(&p, false) > 200.0 + 100.0, "beside the run: {}", text_y(&p, false));
+    // A run drawn leftwards has its text turned over: the label stays on the same side as it reads.
+    assert!(text_y(&p, true) < -(200.0 + 100.0));
+    // Under the other duct elsewhere than at the label: it stays on the run.
+    p.covers = vec![CoverMark { gap_mm: [100.0, 600.0], dash_mm: [200.0, 500.0], over_air: AirDirection::Extract, over: 1 }];
+    p.gaps_mm = vec![[100.0, 600.0]];
+    assert!(text_y(&p, false).abs() < 1e-9, "not under the other duct there: {}", text_y(&p, false));
+}

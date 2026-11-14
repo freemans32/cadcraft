@@ -853,6 +853,20 @@ impl Scan<'_> {
         let mut elbow_turns_deg = Vec::with_capacity(kept.len());
         let mut bottoms_mm = Vec::with_capacity(kept.len());
         let mut main_chain = vec![false; nodes.len()];
+        // The runs that lead to a riser: they carry the flow of a whole network (the floors it serves), not a terminal's.
+        let mut to_riser = vec![false; nodes.len()];
+        for i in (0..nodes.len()).rev() {
+            let own = nodes.get(i).and_then(|n| n.terminal).is_some_and(|t| self.risers.iter().any(|r| r.handle == t.0));
+            if let Some(flag) = to_riser.get_mut(i) {
+                *flag |= own;
+            }
+            if to_riser.get(i).copied().unwrap_or(false)
+                && let Some(p) = nodes.get(i).and_then(|n| n.parent)
+                && let Some(flag) = to_riser.get_mut(p)
+            {
+                *flag = true;
+            }
+        }
         for &old in &kept {
             let Some(n) = nodes.get(old) else { continue };
             let Some(d) = self.ducts.get(n.duct) else { continue };
@@ -871,7 +885,7 @@ impl Scan<'_> {
             segments.push(Segment {
                 parent: n.parent.and_then(index_of),
                 length_m: d.params.length_m(),
-                kind: segment_kind(d.params.kind, n.terminals_below, on_trunk, d.params.length_m()),
+                kind: segment_kind(d.params.kind, n.terminals_below, on_trunk, d.params.length_m(), to_riser.get(old).copied().unwrap_or(false)),
                 // The jogs' four elbows, and the two of a step where the run leaves the one before it at another level.
                 fittings: n
                     .fittings
@@ -964,13 +978,14 @@ fn junction_fittings(many: bool, k: usize, angle: f64) -> Vec<Fitting> {
 pub const CONNECTION_MAX_M: f64 = 3.0;
 
 /// The velocity class of a run: the one given, else a short run to one terminal is a connection, a
-/// longer one a main along the trunk or a branch.
-fn segment_kind(kind: DuctKind, terminals_below: usize, on_trunk: bool, length_m: f64) -> SegmentKind {
+/// longer one a main along the trunk or a branch. A run that leads to a riser is never a connection:
+/// a riser is not a diffuser, it takes the flow of the floors below, at the velocity of a main.
+fn segment_kind(kind: DuctKind, terminals_below: usize, on_trunk: bool, length_m: f64, to_riser: bool) -> SegmentKind {
     match kind {
         DuctKind::Main => SegmentKind::Main,
         DuctKind::Branch => SegmentKind::Branch,
         DuctKind::Connection => SegmentKind::Connection,
-        DuctKind::Auto if terminals_below <= 1 && length_m <= CONNECTION_MAX_M => SegmentKind::Connection,
+        DuctKind::Auto if terminals_below <= 1 && length_m <= CONNECTION_MAX_M && !to_riser => SegmentKind::Connection,
         DuctKind::Auto if on_trunk => SegmentKind::Main,
         DuctKind::Auto => SegmentKind::Branch,
     }
