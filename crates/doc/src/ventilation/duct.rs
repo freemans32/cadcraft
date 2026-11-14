@@ -29,6 +29,9 @@ pub const DUCT_DIAMETER_MM: (f64, f64) = (20.0, 5_000.0);
 pub const MAX_VOID_MM: f64 = 5_000.0;
 /// Most stretches one duct is drawn broken over, where it passes under others.
 pub const MAX_GAPS: usize = 32;
+/// The bulge of the arc that draws a 45° elbow across a run: its rise over half its chord.
+const ELBOW_BULGE: f64 = 0.25;
+
 /// Most jogs (a rise or a dip round another duct, four 45° elbows each) one duct makes.
 pub const MAX_JOGS: usize = 8;
 /// Most steps (a change of level, two 45° elbows) one duct makes.
@@ -865,10 +868,11 @@ impl DuctParams {
                 });
             }
         }
-        // Each jog: four elbows across the run, the outer two bulging toward the flat part, the inner two away.
+        // Each jog: four elbows across the run, each a shallow arc bulging toward the middle of the jog (as plans draw an elbow's
+        // gores), the same for every size: a semicircle would read as rings on a wide duct.
         for j in &self.jogs {
             for (k, x) in j.elbows_mm().into_iter().enumerate() {
-                let bulge = if k == 0 || k == 2 { 1.0 } else { -1.0 };
+                let bulge = if k < 2 { ELBOW_BULGE } else { -ELBOW_BULGE };
                 let x = self.units.to_units(x);
                 pieces.push(HvacPiece {
                     layer,
@@ -894,7 +898,12 @@ impl DuctParams {
                     layer,
                     kind: EntityKind::LwPolyline(LwPolyline {
                         vertices: vec![
-                            PolyVertex { p: Vec2::new(x, -r), bulge: if k == 0 { 1.0 } else { -1.0 }, start_width: 0.0, end_width: 0.0 },
+                            PolyVertex {
+                                p: Vec2::new(x, -r),
+                                bulge: if k == 0 { ELBOW_BULGE } else { -ELBOW_BULGE },
+                                start_width: 0.0,
+                                end_width: 0.0,
+                            },
                             PolyVertex { p: Vec2::new(x, r), bulge: 0.0, start_width: 0.0, end_width: 0.0 },
                         ],
                         closed: false,

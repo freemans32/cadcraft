@@ -11,6 +11,7 @@ use crate::theme::Tokens;
 
 /// The hatch pattern picker.
 mod building;
+mod hvachelp;
 #[cfg(test)]
 mod layer_menu_tests;
 mod objects;

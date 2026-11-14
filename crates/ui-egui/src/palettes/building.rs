@@ -6,6 +6,7 @@ use cadcraft_color::Color;
 use cadcraft_doc::{AccessoryKind, AhuKind, AirDirection, ComponentFunction, OpeningKind, TerminalKind};
 use egui::{Rect, Sense, Stroke, pos2, vec2};
 
+use super::hvachelp;
 use crate::CadApp;
 use crate::theme::Tokens;
 
@@ -32,11 +33,11 @@ fn separator(ui: &mut egui::Ui) {
 
 /// A full-width button with a small picture drawn by `paint` on its left; true when clicked.
 fn row_button(ui: &mut egui::Ui, label: &str, selected: bool, paint: impl FnOnce(&egui::Painter, Rect)) -> bool {
-    row_tip(ui, label, "", selected, paint)
+    row_tip(ui, label, "", None, selected, paint)
 }
 
 /// [`row_button`] with a how-to shown when the pointer rests on it (empty: none).
-fn row_tip(ui: &mut egui::Ui, label: &str, tip: &str, selected: bool, paint: impl FnOnce(&egui::Painter, Rect)) -> bool {
+fn row_tip(ui: &mut egui::Ui, label: &str, tip: &str, help: Option<&'static str>, selected: bool, paint: impl FnOnce(&egui::Painter, Rect)) -> bool {
     let t = Tokens::get();
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
     let r = r.shrink2(vec2(6.0, 2.0));
@@ -48,6 +49,19 @@ fn row_tip(ui: &mut egui::Ui, label: &str, tip: &str, selected: bool, paint: imp
     p.text(pos2(r.left() + 44.0, r.center().y), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(12.0), t.text);
     crate::icons::describe_control(ui, &resp, label, Some(selected), false);
     let clicked = resp.clicked();
+    // The "i" at the right: the tool's help window.
+    if let Some(id) = help {
+        let i = Rect::from_center_size(pos2(r.right() - 14.0, r.center().y), vec2(18.0, 18.0));
+        let ir = ui.interact(i, resp.id.with("help"), Sense::click());
+        let p = ui.painter();
+        p.circle_stroke(i.center(), 7.5, Stroke::new(1.0, if ir.hovered() { t.text } else { t.text_dim }));
+        p.text(i.center(), egui::Align2::CENTER_CENTER, "i", egui::FontId::proportional(11.0), if ir.hovered() { t.text } else { t.text_dim });
+        crate::icons::describe_control(ui, &ir, "Help", None, false);
+        if ir.clicked() {
+            hvachelp::request(ui.ctx(), id);
+        }
+        return if tip.is_empty() { clicked } else { resp.on_hover_text(tip).clicked() || clicked };
+    }
     if tip.is_empty() { clicked } else { resp.on_hover_text(tip).clicked() || clicked }
 }
 
@@ -219,22 +233,22 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
             }
         }
         // In the order they are drawn: the riser, the ducts, the height zones, then terminals are connected, ducts sized and crossings settled.
-        if row_tip(ui, crate::i18n::t("Riser"), crate::i18n::t("Draw the outline of the shaft where the air goes up or down. Type the flow that comes from the other floors on it; sizing gives it its section."), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Riser"), crate::i18n::t("Draw the outline of the shaft where the air goes up or down. Type the flow that comes from the other floors on it; sizing gives it its section."), Some("Riser"), false, |_, _| {}) {
             start = Some("riseradd");
         }
-        if row_tip(ui, crate::i18n::t("Duct"), crate::i18n::t("Click the points of a run (one duct per segment), seen from above. Leave the direction on auto: sizing finds supply or extract from the terminals the run reaches."), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Duct"), crate::i18n::t("Click the points of a run (one duct per segment), seen from above. Leave the direction on auto: sizing finds supply or extract from the terminals the run reaches."), Some("Duct"), false, |_, _| {}) {
             start = Some("ductadd");
         }
-        if row_tip(ui, crate::i18n::t("Height Zone"), crate::i18n::t("Draw an outline where ducts have less height (a beam, a low ceiling), seen from above, then type the height available in mm. Ducts crossing it are cut at its edges and sized flat inside. An altitude is optional."), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Height Zone"), crate::i18n::t("Draw an outline where ducts have less height (a beam, a low ceiling), seen from above, then type the height available in mm. Ducts crossing it are cut at its edges and sized flat inside. An altitude is optional."), Some("Height Zone"), false, |_, _| {}) {
             start = Some("zoneadd");
         }
-        if row_tip(ui, crate::i18n::t("Connect Terminals"), crate::i18n::t("Draws a flexible duct from each terminal that no duct reaches to the nearest duct (3 m at most)."), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Connect Terminals"), crate::i18n::t("Draws a flexible duct from each terminal that no duct reaches to the nearest duct (3 m at most)."), Some("Connect Terminals"), false, |_, _| {}) {
             connect = true;
         }
-        if row_tip(ui, crate::i18n::t("Size Ducts"), crate::i18n::t("Sizes every network from its terminals (flows, section, velocity) and writes the result on the ducts. Run it again after any change."), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Size Ducts"), crate::i18n::t("Sizes every network from its terminals (flows, section, velocity) and writes the result on the ducts. Run it again after any change."), Some("Size Ducts"), false, |_, _| {}) {
             size = true;
         }
-        if row_tip(ui, crate::i18n::t("Duct Crossing"), crate::i18n::t("Click two ducts that cross: one passes under or over the other, drawn broken or with four 45° elbows."), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Duct Crossing"), crate::i18n::t("Click two ducts that cross: one passes under or over the other, drawn broken or with four 45° elbows."), Some("Duct Crossing"), false, |_, _| {}) {
             start = Some("ductcross");
         }
         ui.add_space(6.0);
@@ -261,10 +275,11 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         ui.add_space(6.0);
         separator(ui);
         header(ui, "Quantities");
-        if row_tip(ui, crate::i18n::t("HVAC Quantities"), crate::i18n::t("Counts the ducts, fittings, terminals, units, risers and equipment of this drawing (one drawing per level), and saves a spreadsheet."), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("HVAC Quantities"), crate::i18n::t("Counts the ducts, fittings, terminals, units, risers and equipment of this drawing (one drawing per level), and saves a spreadsheet."), Some("HVAC Quantities"), false, |_, _| {}) {
             start = Some("hvactakeoff");
         }
     });
+    hvachelp::show(ui.ctx());
     if let Some(kind) = terminal {
         // The type clicked becomes AIRTERMINALADD's, at the smallest size for the flow.
         let last = &mut app.session.last_used.air_terminal;

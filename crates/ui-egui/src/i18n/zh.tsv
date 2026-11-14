@@ -1553,3 +1553,24 @@ menu	View	视图
 	Sizes every network from its terminals (flows, section, velocity) and writes the result on the ducts. Run it again after any change.	根据风口计算每个管网（风量、截面、风速），并把结果写在风管上。修改后请重新运行。
 	Click two ducts that cross: one passes under or over the other, drawn broken or with four 45° elbows.	点击两根交叉的风管：其中一根从下方或上方通过，以断开或四个45°弯头绘制。
 	Counts the ducts, fittings, terminals, units, risers and equipment of this drawing (one drawing per level), and saves a spreadsheet.	统计本图（每层一张图）的风管、管件、风口、机组、风井和设备，并保存为电子表格。
+	Start the tool and click the corners of the shaft, then press Enter.	启动工具，点击风井的各个角点，然后按回车。
+	Type the flow that comes from the other floors in Properties.	在属性中输入来自其他楼层的风量。
+	Size Ducts gives the riser its section; the arrow shows if the air goes up or down.	风管计算会给出风井截面；箭头表示空气向上还是向下。
+	Click the points of the run: one duct is drawn per segment.	点击风管段的各点：每段绘制一根风管。
+	Start on a unit's collar, end on a terminal; start on another duct to make a tee.	从机组接口开始，到风口结束；从另一根风管上开始可做三通。
+	Leave the direction on auto: Size Ducts finds supply or extract from the terminals the run reaches.	方向保持自动：计算根据所连风口判断送风或回风。
+	Click the corners of the outline where ducts have less height (a beam, a low ceiling), seen from above.	俯视图中点击风管可用高度较小区域（梁、低吊顶）的各角点。
+	Type the height available for the ducts, in mm. An altitude is optional.	输入风管可用高度（毫米）。标高为可选项。
+	Size Ducts cuts the ducts at the edges and sizes them flat inside the zone.	计算会在区域边缘处断开风管，并在区域内按扁形计算。
+	No selection needed: every terminal that no duct reaches is taken.	无需选择：所有没有风管到达的风口都会被处理。
+	A flexible duct is drawn from each one to the nearest duct, 3 m at most.	从每个风口到最近的风管绘制软风管，最多3米。
+	Terminals too far from any duct are listed and left alone.	离任何风管太远的风口会被列出并跳过。
+	Run it when the ducts and terminals are drawn; it reads each network from its unit or riser.	风管和风口画好后运行；它从机组或风井读取每个管网。
+	Each duct gets its section, and its flow and velocity are written on it.	每根风管得到截面，风量和风速写在其上。
+	Run it again after any change: sections and flows are recalculated.	任何修改后重新运行：截面和风量会重新计算。
+	Click the two ducts that cross.	点击两根交叉的风管。
+	Choose which one passes under or over the other.	选择哪一根从下方或上方通过。
+	It is drawn broken, or with four 45° elbows when the duct has to go round the other.	以断开方式绘制，或在风管需要绕过另一根时用四个45°弯头绘制。
+	Draw one drawing per level, then open this tool on the level.	每层一张图，然后在该层上打开此工具。
+	The tables count ducts by section, fittings, terminals, units, risers and equipment.	表格统计按截面的风管、管件、风口、机组、风井和设备。
+	The spreadsheet button saves them for Excel; each level makes its own file.	电子表格按钮保存供Excel使用；每层一个文件。

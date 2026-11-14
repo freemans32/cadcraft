@@ -1335,3 +1335,24 @@
 	Sizes every network from its terminals (flows, section, velocity) and writes the result on the ducts. Run it again after any change.	Dimensionne chaque réseau d'après ses bouches (débits, section, vitesse) et écrit le résultat sur les gaines. À relancer après chaque modification.
 	Click two ducts that cross: one passes under or over the other, drawn broken or with four 45° elbows.	Clique deux gaines qui se croisent : l'une passe dessous ou dessus, dessinée interrompue ou avec quatre coudes à 45°.
 	Counts the ducts, fittings, terminals, units, risers and equipment of this drawing (one drawing per level), and saves a spreadsheet.	Compte les gaines, raccords, bouches, centrales, colonnes et équipements du dessin (un dessin par niveau) et enregistre un tableur.
+	Start the tool and click the corners of the shaft, then press Enter.	Lance l'outil et clique les coins de la trémie, puis Entrée.
+	Type the flow that comes from the other floors in Properties.	Saisis dans Propriétés le débit venant des autres étages.
+	Size Ducts gives the riser its section; the arrow shows if the air goes up or down.	Dimensionner les gaines donne sa section à la colonne ; la flèche indique si l'air monte ou descend.
+	Click the points of the run: one duct is drawn per segment.	Clique les points du tronçon : une gaine est dessinée par segment.
+	Start on a unit's collar, end on a terminal; start on another duct to make a tee.	Pars d'un raccord de CTA, finis sur une bouche ; pars d'une autre gaine pour faire un piquage.
+	Leave the direction on auto: Size Ducts finds supply or extract from the terminals the run reaches.	Laisse la direction en auto : Dimensionner les gaines trouve soufflage ou reprise d'après les bouches atteintes.
+	Click the corners of the outline where ducts have less height (a beam, a low ceiling), seen from above.	Clique les coins du contour où les gaines ont moins de hauteur (poutre, faux plafond bas), vu de dessus.
+	Type the height available for the ducts, in mm. An altitude is optional.	Saisis la hauteur disponible pour les gaines, en mm. L'altitude est facultative.
+	Size Ducts cuts the ducts at the edges and sizes them flat inside the zone.	Dimensionner les gaines coupe les gaines aux bords et les dimensionne plates dans la zone.
+	No selection needed: every terminal that no duct reaches is taken.	Pas de sélection : toutes les bouches qu'aucune gaine n'atteint sont prises.
+	A flexible duct is drawn from each one to the nearest duct, 3 m at most.	Une gaine souple est tracée de chacune jusqu'à la gaine la plus proche, 3 m au plus.
+	Terminals too far from any duct are listed and left alone.	Les bouches trop loin de toute gaine sont listées et laissées de côté.
+	Run it when the ducts and terminals are drawn; it reads each network from its unit or riser.	À lancer quand les gaines et les bouches sont dessinées ; il lit chaque réseau depuis sa CTA ou sa colonne.
+	Each duct gets its section, and its flow and velocity are written on it.	Chaque gaine reçoit sa section, son débit et sa vitesse sont écrits dessus.
+	Run it again after any change: sections and flows are recalculated.	À relancer après chaque modification : sections et débits sont recalculés.
+	Click the two ducts that cross.	Clique les deux gaines qui se croisent.
+	Choose which one passes under or over the other.	Choisis laquelle passe dessous ou dessus.
+	It is drawn broken, or with four 45° elbows when the duct has to go round the other.	Elle est dessinée interrompue, ou avec quatre coudes à 45° quand la gaine doit contourner l'autre.
+	Draw one drawing per level, then open this tool on the level.	Un dessin par niveau, puis ouvre l'outil sur le niveau.
+	The tables count ducts by section, fittings, terminals, units, risers and equipment.	Les tableaux comptent les gaines par section, les raccords, bouches, centrales, colonnes et équipements.
+	The spreadsheet button saves them for Excel; each level makes its own file.	Le bouton tableur les enregistre pour Excel ; chaque niveau fait son fichier.
