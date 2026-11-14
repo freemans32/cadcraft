@@ -16,6 +16,8 @@ pub struct TakeoffDlgState {
     pub level: String,
     /// Where the spreadsheet is written.
     pub path: String,
+    /// Whether the file was typed or chosen: until it is, it follows the drawing's folder.
+    pub path_edited: bool,
     pub takeoff: Option<Takeoff>,
     pub message: Option<String>,
     pub error: bool,
@@ -25,11 +27,44 @@ pub struct TakeoffDlgState {
 /// Open the dialog on the quantities of the drawing as it is now; open already, count again.
 pub fn open(app: &mut CadApp) {
     let mut st = app.takeoff_dlg.take().unwrap_or_else(|| TakeoffDlgState { path: "metre.xlsx".into(), ..Default::default() });
+    if !st.path_edited {
+        st.path = default_path(app, &st.path);
+    }
     st.raise = true;
     st.message = None;
     app.takeoff_dlg = Some(st);
     refresh(app);
     app.ui.dialog = Some("takeoff".into());
+}
+
+/// The file the quantities go to when none was chosen: the name kept (`metre.xlsx` at first), in
+/// the folder of the drawing that is open; just the name for a drawing not saved yet.
+fn default_path(app: &CadApp, current: &str) -> String {
+    let name = std::path::Path::new(current).file_name().map_or_else(|| "metre.xlsx".to_string(), |f| f.to_string_lossy().into_owned());
+    let folder = app
+        .session
+        .state()
+        .ok()
+        .and_then(|st| st.path.clone())
+        .and_then(|p| std::path::Path::new(&p).parent().map(std::path::Path::to_path_buf))
+        .filter(|d| !d.as_os_str().is_empty());
+    folder.map_or(name.clone(), |d| d.join(&name).display().to_string())
+}
+
+/// Choose the file with the system's dialog, which opens in the file's folder.
+fn browse(app: &mut CadApp) {
+    let Some(path) = app.takeoff_dlg.as_ref().map(|s| s.path.clone()) else { return };
+    let asked = app.pick_then(crate::Pick::Save(path), |app, chosen| {
+        if let Some(st) = app.takeoff_dlg.as_mut() {
+            (st.path, st.path_edited) = (chosen, true);
+        }
+        Ok(serde_json::Value::Null)
+    });
+    if asked.is_none()
+        && let Some(st) = app.takeoff_dlg.as_mut()
+    {
+        (st.message, st.error) = (Some(crate::tl!("There is no file dialog here: type the file name.").to_string()), true);
+    }
 }
 
 /// Count again, after the drawing changed.
@@ -106,7 +141,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open_flag: &mut bool) {
         open(app);
     }
     let warn = Tokens::get().warn;
-    let (mut refresh_clicked, mut excel_clicked, mut csv_clicked) = (false, false, false);
+    let (mut refresh_clicked, mut excel_clicked, mut csv_clicked, mut browse_clicked) = (false, false, false, false);
     let Some(st) = app.takeoff_dlg.as_mut() else { return };
     let id = egui::Id::unique("takeoff_dialog");
     if std::mem::take(&mut st.raise) {
@@ -122,7 +157,11 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open_flag: &mut bool) {
         });
         ui.horizontal(|ui| {
             let label = ui.label(crate::tl!("File"));
-            ui.add(egui::TextEdit::singleline(&mut st.path).desired_width(360.0)).labelled_by(label.id);
+            let typed = ui.add(egui::TextEdit::singleline(&mut st.path).desired_width(300.0)).labelled_by(label.id);
+            st.path_edited |= typed.changed();
+            if ui.button(crate::tl!("Browse…")).clicked() {
+                browse_clicked = true;
+            }
             if ui.button(crate::tl!("Export Excel")).clicked() {
                 excel_clicked = true;
             }
@@ -266,5 +305,81 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open_flag: &mut bool) {
     }
     if csv_clicked {
         export_csv(app);
+    }
+    if browse_clicked {
+        browse(app);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use super::*;
+    use crate::Services;
+
+    fn app_with(pick: Option<Box<dyn Fn(&str) -> Option<String>>>) -> CadApp {
+        CadApp::new(cadcraft_engine::Session::new(), Services { pick_save: pick, ..Services::default() })
+    }
+
+    fn saved_as(app: &mut CadApp, path: &str) {
+        if let Ok(st) = app.session.state_mut() {
+            st.path = Some(path.into());
+        }
+    }
+
+    #[test]
+    fn the_file_starts_in_the_folder_of_the_open_drawing_until_it_is_chosen() {
+        let mut app = app_with(None);
+        open(&mut app);
+        assert_eq!(app.takeoff_dlg.as_ref().map(|s| s.path.as_str()), Some("metre.xlsx"), "an unsaved drawing: just the name");
+        saved_as(&mut app, "/projets/lycee/plan.dwg");
+        open(&mut app);
+        let dir = std::path::Path::new("/projets/lycee").join("metre.xlsx").display().to_string();
+        assert_eq!(app.takeoff_dlg.as_ref().map(|s| s.path.clone()), Some(dir), "the drawing's folder");
+        // Another drawing, another folder, while the file was not chosen.
+        saved_as(&mut app, "/autre/dossier/rdc.dxf");
+        open(&mut app);
+        assert_eq!(
+            app.takeoff_dlg.as_ref().map(|s| s.path.clone()),
+            Some(std::path::Path::new("/autre/dossier").join("metre.xlsx").display().to_string())
+        );
+        // Typed: kept as it is.
+        if let Some(st) = app.takeoff_dlg.as_mut() {
+            (st.path, st.path_edited) = ("/ailleurs/mon-metre.xlsx".into(), true);
+        }
+        saved_as(&mut app, "/projets/lycee/plan.dwg");
+        open(&mut app);
+        assert_eq!(app.takeoff_dlg.as_ref().map(|s| s.path.as_str()), Some("/ailleurs/mon-metre.xlsx"));
+    }
+
+    #[test]
+    fn browse_asks_for_the_file_in_its_folder_and_keeps_the_answer() {
+        let asked = Rc::new(RefCell::new(Vec::<String>::new()));
+        let seen = asked.clone();
+        let mut app = app_with(Some(Box::new(move |name: &str| {
+            seen.borrow_mut().push(name.to_string());
+            Some("/choisi/metre-rdc.xlsx".into())
+        })));
+        saved_as(&mut app, "/projets/lycee/plan.dwg");
+        open(&mut app);
+        browse(&mut app);
+        let first = std::path::Path::new("/projets/lycee").join("metre.xlsx").display().to_string();
+        assert_eq!(*asked.borrow(), [first], "the dialog is given the file with its folder");
+        let st = app.takeoff_dlg.as_ref().expect("the dialog is open");
+        assert_eq!(st.path, "/choisi/metre-rdc.xlsx");
+        assert!(st.path_edited, "a chosen file stays when the dialog opens again");
+        assert!(!st.error);
+    }
+
+    #[test]
+    fn without_a_file_dialog_browse_says_to_type_the_name() {
+        let mut app = app_with(None);
+        open(&mut app);
+        browse(&mut app);
+        let st = app.takeoff_dlg.as_ref().expect("the dialog is open");
+        assert!(st.error && st.message.is_some());
+        assert_eq!(st.path, "metre.xlsx");
     }
 }

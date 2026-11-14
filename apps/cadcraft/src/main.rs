@@ -259,19 +259,40 @@ fn filters(pick: &Pick) -> Vec<(&'static str, Vec<&'static str>)> {
 fn file_dialog(pick: &Pick) -> rfd::FileDialog {
     let dialog = filters(pick).iter().fold(rfd::FileDialog::new(), |d, (label, exts)| d.add_filter(*label, exts));
     match pick {
-        Pick::Save(name) => dialog.set_file_name(name),
+        Pick::Save(name) => {
+            // A name that carries its folder (the quantities file) opens the dialog there.
+            let (dir, file) = split_save_name(name);
+            let dialog = if dir.is_empty() { dialog } else { dialog.set_directory(dir) };
+            dialog.set_file_name(file)
+        }
         Pick::Lisp(dir) | Pick::Pgp(dir) if !dir.is_empty() => dialog.set_directory(dir),
         _ => dialog,
     }
+}
+
+/// The folder and the file name of a suggested Save name: the folder is empty for a bare name.
+fn split_save_name(name: &str) -> (String, String) {
+    let path = std::path::Path::new(name);
+    let dir = path.parent().map(|d| d.to_string_lossy().to_string()).unwrap_or_default();
+    let file = path.file_name().map_or_else(|| name.to_string(), |f| f.to_string_lossy().to_string());
+    (dir, file)
 }
 
 /// File types for the Save dialog, the suggested name's type first: Windows adds the first
 /// filter's extension, and macOS accepts only listed extensions, replacing any other with the
 /// first one. DWG must be listed for a `.dwg` name to survive, and a drawing opened from DWG
 /// then defaults to DWG; other names keep DXF first.
-fn filters_for_save(name: &str) -> [(&'static str, &'static str); 6] {
-    let mut filters =
-        [("Drawing (DXF)", "dxf"), ("Drawing (DWG)", "dwg"), ("Drawing Template (DWT)", "dwt"), ("SVG", "svg"), ("PNG", "png"), ("PDF", "pdf")];
+fn filters_for_save(name: &str) -> [(&'static str, &'static str); 8] {
+    let mut filters = [
+        ("Drawing (DXF)", "dxf"),
+        ("Drawing (DWG)", "dwg"),
+        ("Drawing Template (DWT)", "dwt"),
+        ("SVG", "svg"),
+        ("PNG", "png"),
+        ("PDF", "pdf"),
+        ("Excel workbook (XLSX)", "xlsx"),
+        ("CSV table (CSV)", "csv"),
+    ];
     let lower = name.to_ascii_lowercase();
     filters.sort_by_key(|(_, ext)| !lower.ends_with(&format!(".{ext}")));
     filters

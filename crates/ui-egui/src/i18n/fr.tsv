@@ -1405,3 +1405,7 @@
 	Concrete block 200 wall	Parpaings 20 cm
 	Join at start	Raccord au début
 	Join at end	Raccord à la fin
+	Browse…	Parcourir…
+	There is no file dialog here: type the file name.	Pas de fenêtre de fichiers ici : tapez le nom du fichier.
+	Excel workbook (XLSX)	Classeur Excel (XLSX)
+	CSV table (CSV)	Tableau CSV (CSV)

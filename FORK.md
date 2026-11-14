@@ -63,6 +63,8 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
 
 ### Fait
 
+- **Métré : bouton « Parcourir… » et dossier par défaut** (14 novembre, demandé par Guillaume). Fenêtre « Métrés CVC » (`crates/ui-egui/src/takeoffdlg.rs`) : le bouton ouvre la fenêtre de fichiers du système, qui s'ouvre dans le dossier du fichier ; le fichier par défaut est `metre.xlsx` **dans le dossier du dessin ouvert** (juste le nom si le dessin n'est pas enregistré). Tant que le fichier n'a pas été tapé ou choisi, il suit le dessin actif à chaque ouverture de la fenêtre. Hôte de bureau (`apps/cadcraft/src/main.rs`) : un nom d'enregistrement peut porter son dossier, et les types Excel (XLSX) et CSV sont proposés. Le code macOS (`sheet.rs`) est modifié de la même façon mais **n'a pas été compilé** (cible absente). Sur le web (pas de fenêtre de fichiers), le bouton dit de taper le nom.
+
 - **Murs : recalcul automatique, extrémité libre, murs en arc** (14 novembre, demandés par Guillaume). Sur `perso`.
   - **Recalcul automatique** : après toute commande qui ajoute, modifie, déplace ou efface un mur ou une ouverture, les murs sont raccordés de nouveau (`Drawing::walls_touched_since`, passe `arch::after_command`). Seules les entités dont le stockage a changé sont examinées. `WALLCLEANUP` reste en secours.
   - **Extrémité libre** : `WallParams.start_free` / `end_free` (mur ouvert) : l'extrémité n'est ni coupée ni prolongée sur les murs rencontrés (le recouvrement reste dessiné une seule fois). `WALLEDIT freeStart|freeEnd`, mots-clés `FreeStart` / `FreeEnd` à la ligne de commande, cases « Raccord au début / à la fin » dans Propriétés.

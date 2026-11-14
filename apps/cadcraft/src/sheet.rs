@@ -33,7 +33,10 @@ pub fn start_pick(window: Arc<winit::window::Window>, ui: egui::Context) -> Star
         let path = |f: rfd::FileHandle| f.path().to_string_lossy().to_string();
         let answer: Answer = match pick {
             Pick::Save(name) => {
-                let picked = dialog.set_file_name(name).save_file();
+                // A name that carries its folder opens the sheet there.
+                let (dir, file) = crate::split_save_name(&name);
+                let dialog = if dir.is_empty() { dialog } else { dialog.set_directory(dir) };
+                let picked = dialog.set_file_name(file).save_file();
                 Box::pin(async move { picked.await.map(path) })
             }
             Pick::Lisp(dir) | Pick::Pgp(dir) => {
