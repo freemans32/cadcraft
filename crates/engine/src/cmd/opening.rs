@@ -20,6 +20,13 @@ pub fn specs() -> Vec<CommandSpec> {
                  + segment? (default 0), type?: door|doubleDoor|window|bay, style?: standard|sliding|pocket|folding|tilting|centreParting|revolving|casement|doubleCasement|fixed|skylight, width? | height? | sill? (mm), flipSide?, flipHand?} → {handle, type}",
             )
             .interactive(|s| Ok(Box::new(OpeningAddM::new(s)))),
+        CommandSpec::new("cornerwindow", "Corner Window", run_corner)
+            .menu(&["Draw", "Architecture", "Corner Window"])
+            .params(
+                "{at ([x, y], near the corner two walls make), width? (mm, the length of the window along each wall from the corner, default 1200), \
+                 height? | sill? (mm), post? (mm left between the corner and each window, default 0)} → {handles: [the opening on each wall]}",
+            )
+            .interactive(|s| Ok(Box::new(CornerM::new(s)))),
         CommandSpec::new("openingconvert", "Convert to Openings", run_convert)
             .params(
                 "{handles? (the block references to look at, default all of model space), apply? (true: make the openings and set the old blocks aside on the frozen \
@@ -584,5 +591,144 @@ impl Interactive for OpeningAddM {
                 preview_entities(pieces, hit.foot - dir * hit.along + dir * along, hit.angle)
             })
             .unwrap_or_default()
+    }
+}
+
+/// The two wall segments that meet near `at`: for each, the hit at its start and whether the corner is at its end.
+fn corner_segments(d: &Drawing, at: Vec2, reach: f64) -> Option<[(Handle, usize, bool); 2]> {
+    let mut found: Vec<(f64, Handle, usize, bool, f64)> = Vec::new();
+    for e in d.model.iter() {
+        if cadcraft_doc::wall_of(e).is_none() {
+            continue;
+        }
+        for k in 0..MAX_SEGMENTS {
+            let Some(hit) = d.wall_segment(e.handle, k) else { break };
+            let (a, b) = (hit.foot, hit.foot + Vec2::from_angle(hit.angle) * hit.length);
+            for (end, v) in [(false, a), (true, b)] {
+                let dist = v.dist(at);
+                if dist <= reach {
+                    found.push((dist, e.handle, k, end, if end { hit.angle + std::f64::consts::PI } else { hit.angle }));
+                }
+            }
+        }
+    }
+    found.sort_by(|x, y| x.0.total_cmp(&y.0));
+    // The nearest, then the nearest that leaves the corner in another direction (not along the same line).
+    let first = found.first()?;
+    let second = found.iter().skip(1).find(|c| {
+        let d = (c.4 - first.4).rem_euclid(std::f64::consts::TAU);
+        d.min(std::f64::consts::TAU - d) > 0.2 && (d - std::f64::consts::PI).abs() > 0.05
+    })?;
+    Some([(first.1, first.2, first.3), (second.1, second.2, second.3)])
+}
+
+/// Most segments of one wall looked at for a corner.
+const MAX_SEGMENTS: usize = 4096;
+
+/// A window on each of the two walls that meet at a corner, from the corner along each wall.
+fn corner_window(s: &mut Session, at: Vec2, width: f64, height: f64, sill: f64, post: f64) -> Result<Vec<Handle>> {
+    let units = units_of(s.doc()?);
+    let mm = units.mm_per_unit;
+    let legs = corner_segments(s.doc()?, at, CLICK_REACH_MM / mm).ok_or_else(|| other("Click near a corner of two walls."))?;
+    // Both walls are checked before anything is placed: a corner window is two windows or none.
+    for (wall, segment, _) in legs {
+        let hit = s.doc()?.wall_segment(wall, segment).ok_or_else(|| other("Cannot find that wall segment."))?;
+        if width + post > hit.length * mm {
+            return Err(other("The window is longer than the wall."));
+        }
+    }
+    let mut handles = Vec::new();
+    for (wall, segment, at_end) in legs {
+        // The hit is read again each time: the first window changed the walls.
+        let hit = s.doc()?.wall_segment(wall, segment).ok_or_else(|| other("Cannot find that wall segment."))?;
+        let mut params = OpeningParams::new(OpeningKind::Window, units);
+        (params.width_mm, params.height_mm, params.sill_mm) = (width, height, sill);
+        let along = centre_along(&hit, width, post, at_end, mm);
+        handles.push(place(s, params, &hit, along)?);
+    }
+    Ok(handles)
+}
+
+fn run_corner(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "cornerwindow";
+    let at = super::point_param(p, "at").ok_or_else(|| bad(CMD, "`at` ([x, y]) is required"))?;
+    let (dw, dh, ds) = OpeningKind::Window.default_size_mm();
+    let width = number(CMD, p, "width")?.unwrap_or(dw);
+    let handles = corner_window(
+        s,
+        at,
+        width,
+        number(CMD, p, "height")?.unwrap_or(dh),
+        number(CMD, p, "sill")?.unwrap_or(ds),
+        number(CMD, p, "post")?.unwrap_or(0.0).max(0.0),
+    )?;
+    Ok(json!({ "handles": handles.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
+}
+
+/// CORNERWINDOW at the command line: a click near a corner makes the two windows; Width, Height and Sill are asked first.
+struct CornerM {
+    width: f64,
+    height: f64,
+    sill: f64,
+    ask: Option<char>,
+}
+
+impl CornerM {
+    fn new(_s: &Session) -> Self {
+        let (width, height, sill) = OpeningKind::Window.default_size_mm();
+        CornerM { width, height, sill, ask: None }
+    }
+}
+
+impl Interactive for CornerM {
+    fn name(&self) -> &'static str {
+        "CORNERWINDOW"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        match self.ask {
+            Some('w') => Prompt::new("Enter the length of the window along each wall (mm)", Accept::NUMBER).default(format!("{}", self.width)),
+            Some('h') => Prompt::new("Enter window height (mm)", Accept::NUMBER).default(format!("{}", self.height)),
+            Some(_) => Prompt::new("Enter sill height (mm)", Accept::NUMBER).default(format!("{}", self.sill)),
+            None => Prompt::new("Click near the corner of two walls", Accept::POINT).kw(&["Width", "Height", "Sill"]),
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if let Some(which) = self.ask {
+            let text = match &i {
+                Input::Text(t) | Input::Keyword(t) => Some(t.trim().to_string()),
+                _ => None,
+            };
+            if let Some(v) = text.and_then(|t| t.parse::<f64>().ok()).filter(|v| v.is_finite() && *v > 0.0) {
+                match which {
+                    'w' => self.width = v,
+                    'h' => self.height = v,
+                    _ => self.sill = v,
+                }
+            }
+            self.ask = None;
+            return Ok(Step::Continue);
+        }
+        match i {
+            Input::Keyword(k) => {
+                self.ask = match k.as_str() {
+                    "Width" => Some('w'),
+                    "Height" => Some('h'),
+                    "Sill" => Some('s'),
+                    _ => None,
+                };
+                Ok(Step::Continue)
+            }
+            Input::Point(at) => {
+                if let Err(e) = corner_window(s, at, self.width, self.height, self.sill, 0.0) {
+                    s.echo(e.to_string());
+                }
+                Ok(Step::Continue)
+            }
+            Input::Enter | Input::Cancel => Ok(Step::Done),
+            _ => Ok(Step::Continue),
+        }
+    }
+    fn preview(&self, _s: &Session, _c: Vec2) -> Vec<EntityKind> {
+        Vec::new()
     }
 }

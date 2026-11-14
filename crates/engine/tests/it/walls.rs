@@ -925,3 +925,23 @@ fn openingconvert_at_the_command_line_asks_before_converting() {
     s.cmdline("openingconvert").unwrap();
     assert!(s.running.is_none());
 }
+
+#[test]
+fn cornerwindow_puts_a_window_on_each_of_the_two_walls_that_meet_at_the_corner() {
+    let mut s = metric();
+    // Two walls drawn in one go meet at (5000, 0): an L.
+    s.execute("walladd", &json!({"points": [[0, 0], [5000, 0], [5000, 4000]], "style": BRICK})).unwrap();
+    let r = s.execute("cornerwindow", &json!({"at": [4900, 100], "width": 1200, "sill": 900})).unwrap();
+    assert_eq!(r["handles"].as_array().unwrap().len(), 2);
+    let o = openings(&s);
+    assert_eq!(o.len(), 2);
+    assert!(o.iter().all(|c| c.1.kind == cadcraft_doc::OpeningKind::Window && c.1.width_mm == 1200.0));
+    // One centred 600 from the corner along each wall: (4400, 0) and (5000, 600).
+    let near = |x: f64, y: f64| o.iter().any(|c| (c.2.x - x).abs() < 1e-6 && (c.2.y - y).abs() < 1e-6);
+    assert!(near(4400.0, 0.0) && near(5000.0, 600.0), "{:?}", o.iter().map(|c| c.2).collect::<Vec<_>>());
+    // Away from any corner, or with a window longer than the wall: refused, nothing added.
+    assert!(s.execute("cornerwindow", &json!({"at": [2500, 0]})).is_err());
+    assert!(s.execute("cornerwindow", &json!({"at": [5000, 0], "width": 9000})).is_err());
+    assert!(s.execute("cornerwindow", &json!({})).is_err());
+    assert_eq!(openings(&s).len(), 2);
+}

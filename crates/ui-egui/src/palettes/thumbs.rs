@@ -478,3 +478,12 @@ pub(super) fn paint_edit_slab(p: &Painter, r: Rect) {
     t.poly(&[(2.0, 7.0), (16.0, 7.0), (16.0, 16.0), (2.0, 16.0)], true, t.base);
     t.pencil();
 }
+
+/// Two walls meeting in an L with a window on each: Corner Window.
+pub(super) fn paint_corner_window(p: &Painter, r: Rect) {
+    let t = Th::new(p, r);
+    t.poly(&[(3.0, 4.0), (8.0, 4.0), (8.0, 16.0), (21.0, 16.0), (21.0, 21.0), (3.0, 21.0)], true, t.base);
+    t.l((8.0, 9.0), (8.0, 15.0), t.acc);
+    t.l((9.0, 16.0), (16.0, 16.0), t.acc);
+    t.dot(8.0, 16.0);
+}

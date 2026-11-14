@@ -501,6 +501,9 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
             }
         });
         section(ui, "Tools", true, &mut |ui| {
+            if row_button(ui, crate::i18n::t("Corner Window"), false, thumbs::paint_corner_window) {
+                start = Some("cornerwindow");
+            }
             if row_button(ui, crate::i18n::t("Edit Slab"), false, thumbs::paint_edit_slab) {
                 start = Some("slabedit");
             }
