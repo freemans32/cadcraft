@@ -212,26 +212,24 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
                 chosen_unit = Some(kind);
             }
         }
+        // In the order they are drawn: the riser, the ducts, the height zones, then terminals are connected, ducts sized and crossings settled.
+        if row_button(ui, crate::i18n::t("Riser"), false, |_, _| {}) {
+            start = Some("riseradd");
+        }
         if row_button(ui, crate::i18n::t("Duct"), false, |_, _| {}) {
             start = Some("ductadd");
         }
         if row_button(ui, crate::i18n::t("Height Zone"), false, |_, _| {}) {
             start = Some("zoneadd");
         }
-        if row_button(ui, crate::i18n::t("Riser"), false, |_, _| {}) {
-            start = Some("riseradd");
-        }
-        if row_button(ui, crate::i18n::t("Duct Crossing"), false, |_, _| {}) {
-            start = Some("ductcross");
-        }
-        if row_button(ui, crate::i18n::t("HVAC Quantities"), false, |_, _| {}) {
-            start = Some("hvactakeoff");
-        }
         if row_button(ui, crate::i18n::t("Connect Terminals"), false, |_, _| {}) {
             connect = true;
         }
         if row_button(ui, crate::i18n::t("Size Ducts"), false, |_, _| {}) {
             size = true;
+        }
+        if row_button(ui, crate::i18n::t("Duct Crossing"), false, |_, _| {}) {
+            start = Some("ductcross");
         }
         ui.add_space(6.0);
         separator(ui);
@@ -253,6 +251,12 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
             if row_button(ui, crate::i18n::t(equipment_kind_label(kind)), kind == equipment, |_, _| {}) {
                 chosen_equipment = Some(kind);
             }
+        }
+        ui.add_space(6.0);
+        separator(ui);
+        header(ui, "Quantities");
+        if row_button(ui, crate::i18n::t("HVAC Quantities"), false, |_, _| {}) {
+            start = Some("hvactakeoff");
         }
     });
     if let Some(kind) = terminal {
