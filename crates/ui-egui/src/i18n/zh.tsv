@@ -1574,3 +1574,5 @@ menu	View	视图
 	Draw one drawing per level, then open this tool on the level.	每层一张图，然后在该层上打开此工具。
 	The tables count ducts by section, fittings, terminals, units, risers and equipment.	表格统计按截面的风管、管件、风口、机组、风井和设备。
 	The spreadsheet button saves them for Excel; each level makes its own file.	电子表格按钮保存供Excel使用；每层一个文件。
+	Export Excel	导出到Excel
+	Export CSV	导出为CSV

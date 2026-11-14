@@ -39,4 +39,12 @@ fn the_quantities_dialog_shows_the_tables_and_exports_the_spreadsheet() {
     std::fs::remove_file(&path).ok();
     assert!(text.contains("Ø200"), "{text}");
     assert!(!h.state().takeoff_dlg.as_ref().unwrap().error, "{:?}", h.state().takeoff_dlg.as_ref().unwrap().message);
+    // The Excel button writes a workbook (the extension becomes .xlsx) with the calculation note.
+    let xlsx = path.with_extension("xlsx");
+    takeoffdlg::export_excel(h.state_mut());
+    let bytes = std::fs::read(&xlsx).unwrap();
+    std::fs::remove_file(&xlsx).ok();
+    assert_eq!(&bytes[..4], b"PK\x03\x04");
+    assert!(String::from_utf8_lossy(&bytes).contains("Calculation note"));
+    assert!(!h.state().takeoff_dlg.as_ref().unwrap().error);
 }

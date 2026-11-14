@@ -299,6 +299,11 @@ thread_local! {
     static CURRENT: Cell<&'static str> = const { Cell::new("en") };
 }
 
+/// The language the interface is drawn in now ("en" outside a render).
+pub fn current_language() -> &'static str {
+    CURRENT.with(|l| l.get())
+}
+
 pub fn with_language<R>(language: &'static str, draw: impl FnOnce() -> R) -> R {
     struct Restore(&'static str);
     impl Drop for Restore {

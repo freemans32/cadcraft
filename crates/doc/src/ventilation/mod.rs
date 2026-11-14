@@ -18,6 +18,7 @@ mod space;
 mod takeoff;
 mod terminal;
 pub(crate) mod xdata;
+mod xlsx;
 mod zone;
 
 pub use accessory::*;
@@ -31,6 +32,7 @@ pub use riser::*;
 pub use space::*;
 pub use takeoff::*;
 pub use terminal::*;
+pub use xlsx::{SheetCell, Workbook};
 pub use zone::*;
 
 use cadcraft_geom::{Vec2, Vec3};

@@ -926,7 +926,7 @@ fn governing_name(g: Governing) -> &'static str {
 /// Sizes `net`, then adds a reducer to each run whose diameter differs from the run it continues
 /// from and sizes again for the losses. The fittings do not change a diameter, so the second pass
 /// only adds their loss.
-fn size_with_reducers(
+pub(super) fn size_with_reducers(
     net: &cadcraft_hvac::Network,
     criteria: &DesignCriteria,
 ) -> std::result::Result<cadcraft_hvac::NetworkReport, cadcraft_hvac::HvacError> {
@@ -1038,7 +1038,7 @@ fn space_mismatches(d: &Drawing) -> Vec<Value> {
     out
 }
 
-fn criteria(p: &Value) -> Result<DesignCriteria> {
+pub(super) fn criteria(p: &Value) -> Result<DesignCriteria> {
     const CMD: &str = "ductsize";
     let mut c = DesignCriteria::default();
     for (key, slot) in [

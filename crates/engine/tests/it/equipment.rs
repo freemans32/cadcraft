@@ -153,3 +153,32 @@ fn a_riser_height_is_counted_in_the_takeoff() {
     assert_eq!(t["totals"]["riserLengthM"], 5.8);
     assert!(s.execute("riseredit", &json!({"handle": h["handle"], "height": -1})).is_err());
 }
+
+#[test]
+fn hvactakeoff_writes_an_excel_workbook_with_the_spaces_and_the_calculation_note() {
+    let mut s = metric();
+    s.execute("spaceadd", &json!({"points": [[0, 0], [6000, 0], [6000, 5000], [0, 5000]], "name": "Salle", "flow": 600})).unwrap();
+    s.execute("ahuadd", &json!({"at": [-3000, 1100]})).unwrap();
+    s.execute("ductadd", &json!({"points": [[-2400, 1250], [1000, 1250], [4000, 1250]], "diameter": 200, "air": "supply"})).unwrap();
+    s.execute("airterminaladd", &json!({"at": [4000, 1250], "flow": 300, "air": "supply"})).unwrap();
+    let path = std::env::temp_dir().join(format!("cadcraft-takeoff-{}.xlsx", std::process::id()));
+    let r = s.execute("hvactakeoff", &json!({"level": "R+1", "path": path.to_str().unwrap(), "lang": "fr"})).unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    std::fs::remove_file(&path).ok();
+    assert_eq!(&bytes[..4], b"PK\x03\x04", "a zip");
+    let text = String::from_utf8_lossy(&bytes);
+    for part in ["xl/worksheets/sheet1.xml", "Locaux", "Détail des locaux", "Note de calcul", "Salle", "Pression à fournir"] {
+        assert!(text.contains(part), "{part}");
+    }
+    // The space holds the terminal and 3 m of the duct; the note has the network with its critical run.
+    let spaces = &r["spaces"][0];
+    assert_eq!(spaces["terminalModels"][0]["count"], 1, "{spaces}");
+    assert!(spaces["ducts"][0]["lengthM"].as_f64().unwrap() > 2.0, "{spaces}");
+    let net = &r["note"]["networks"][0];
+    assert!(net["requiredPa"].as_f64().unwrap() > 0.0 && net["segments"][0]["critical"] == true, "{net}");
+    // The English labels; and no note when asked not to.
+    let en = s.execute("hvactakeoff", &json!({"path": path.to_str().unwrap(), "note": false})).unwrap();
+    std::fs::remove_file(&path).ok();
+    assert!(en.get("note").is_none());
+    assert!(s.execute("hvactakeoff", &json!({"lang": "fr\u{1}"})).is_err());
+}

@@ -24,7 +24,7 @@ pub struct TakeoffDlgState {
 
 /// Open the dialog on the quantities of the drawing as it is now; open already, count again.
 pub fn open(app: &mut CadApp) {
-    let mut st = app.takeoff_dlg.take().unwrap_or_else(|| TakeoffDlgState { path: "metre.csv".into(), ..Default::default() });
+    let mut st = app.takeoff_dlg.take().unwrap_or_else(|| TakeoffDlgState { path: "metre.xlsx".into(), ..Default::default() });
     st.raise = true;
     st.message = None;
     app.takeoff_dlg = Some(st);
@@ -47,13 +47,29 @@ pub fn refresh(app: &mut CadApp) {
 /// Write the spreadsheet through HVACTAKEOFF, and say where.
 pub fn export(app: &mut CadApp) {
     let Some((level, path)) = app.takeoff_dlg.as_ref().map(|s| (s.level.clone(), s.path.clone())) else { return };
-    let r = app.run("hvactakeoff", json!({ "level": level, "path": path }));
+    let r = app.run("hvactakeoff", json!({ "level": level, "path": path, "lang": crate::i18n::current_language() }));
     if let Some(st) = app.takeoff_dlg.as_mut() {
         match r {
             Ok(v) => (st.message, st.error) = (Some(crate::tf!("Written: {path}", path = v["path"].as_str().unwrap_or(&path))), false),
             Err(e) => (st.message, st.error) = (Some(e), true),
         }
     }
+}
+
+/// Write the Excel workbook (the file's extension becomes .xlsx), with the calculation note.
+pub fn export_excel(app: &mut CadApp) {
+    if let Some(st) = app.takeoff_dlg.as_mut() {
+        st.path = std::path::Path::new(&st.path).with_extension("xlsx").display().to_string();
+    }
+    export(app);
+}
+
+/// Write the `;`-separated file (the file's extension becomes .csv).
+pub fn export_csv(app: &mut CadApp) {
+    if let Some(st) = app.takeoff_dlg.as_mut() {
+        st.path = std::path::Path::new(&st.path).with_extension("csv").display().to_string();
+    }
+    export(app);
 }
 
 fn num(v: f64) -> String {
@@ -90,7 +106,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open_flag: &mut bool) {
         open(app);
     }
     let warn = Tokens::get().warn;
-    let (mut refresh_clicked, mut export_clicked) = (false, false);
+    let (mut refresh_clicked, mut excel_clicked, mut csv_clicked) = (false, false, false);
     let Some(st) = app.takeoff_dlg.as_mut() else { return };
     let id = egui::Id::unique("takeoff_dialog");
     if std::mem::take(&mut st.raise) {
@@ -107,8 +123,11 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open_flag: &mut bool) {
         ui.horizontal(|ui| {
             let label = ui.label(crate::tl!("File"));
             ui.add(egui::TextEdit::singleline(&mut st.path).desired_width(360.0)).labelled_by(label.id);
-            if ui.button(crate::tl!("Export spreadsheet")).clicked() {
-                export_clicked = true;
+            if ui.button(crate::tl!("Export Excel")).clicked() {
+                excel_clicked = true;
+            }
+            if ui.button(crate::tl!("Export CSV")).clicked() {
+                csv_clicked = true;
             }
         });
         if let Some(m) = &st.message {
@@ -242,7 +261,10 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open_flag: &mut bool) {
     if refresh_clicked {
         refresh(app);
     }
-    if export_clicked {
-        export(app);
+    if excel_clicked {
+        export_excel(app);
+    }
+    if csv_clicked {
+        export_csv(app);
     }
 }

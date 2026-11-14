@@ -1356,3 +1356,5 @@
 	Draw one drawing per level, then open this tool on the level.	Un dessin par niveau, puis ouvre l'outil sur le niveau.
 	The tables count ducts by section, fittings, terminals, units, risers and equipment.	Les tableaux comptent les gaines par section, les raccords, bouches, centrales, colonnes et équipements.
 	The spreadsheet button saves them for Excel; each level makes its own file.	Le bouton tableur les enregistre pour Excel ; chaque niveau fait son fichier.
+	Export Excel	Exporter vers Excel
+	Export CSV	Exporter en CSV
