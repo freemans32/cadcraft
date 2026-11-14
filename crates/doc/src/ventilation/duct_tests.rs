@@ -1632,3 +1632,27 @@ fn a_bend_mostly_under_another_duct_is_not_drawn() {
     assert_eq!(arcs(&run([11000.0, 11100.0]).generate(false).unwrap()).len(), 2, "the bend is clear of it");
     assert!(arcs(&run([11645.0, 12000.0]).generate(false).unwrap()).is_empty(), "half of the bend or more is under it");
 }
+
+#[test]
+fn the_orifice_of_a_collar_is_found_in_a_drawing_in_metres_with_the_unit_turned() {
+    // The unit's collars sit 0.1 m from the duct ends: in metres that is far less than a millimetre-sized threshold.
+    let metres = HvacUnits { mm_per_unit: 1000.0 };
+    let sized = Some(RiserSize::Rectangular { width_mm: 1580.0, height_mm: 776.0 });
+    let compact =
+        AhuParams { kind: AhuKind::StackedDoubleFlow, width_mm: 1600.0, depth_mm: 1810.0, port_sizes: vec![sized; 4], units: metres, ..ahu() };
+    let mut d = Drawing::new_metric();
+    d.header.set_i64("INSUNITS", 6);
+    d.add_ahu(&Space::Model, Common::default(), &compact, Vec2::new(0.0, 5.0), 3.0 * std::f64::consts::FRAC_PI_2).unwrap();
+    let run = |d: &mut Drawing, air: AirDirection, w: f64, a: (f64, f64), b: (f64, f64)| {
+        let p = DuctParams { air, units: metres, ..duct(w) };
+        d.add_duct(&Space::Model, Common::default(), p, Vec2::new(a.0, a.1), Vec2::new(b.0, b.1)).unwrap()
+    };
+    // Both leave the lower face (collars at y = 5 - 0.9 - 0.1), the ducts ending 0.1 m from them.
+    let ext = run(&mut d, AirDirection::Extract, 650.0, (0.0, 1.0), (0.0, 4.1));
+    let sup = run(&mut d, AirDirection::Supply, 200.0, (0.0, 1.0), (0.0, 4.1));
+    riser_at(&mut d, (-0.3, 0.8), AirDirection::Extract, Some(7000.0));
+    let nets = d.duct_networks().unwrap();
+    let widths: Vec<_> =
+        nets.iter().flat_map(|n| n.ducts.iter().zip(&n.collar_widths_mm)).filter(|(h, _)| **h == ext || **h == sup).map(|(_, w)| *w).collect();
+    assert!(!widths.is_empty() && widths.iter().all(|w| *w == Some(1580.0)), "{widths:?}");
+}

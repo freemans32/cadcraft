@@ -208,7 +208,8 @@ impl crate::Drawing {
                     .filter(|(_, t)| (**t - here).len() <= 1e-6)
                     .filter_map(|(i, _)| roles.get(i).copied().map(|role| (role, p.port_sizes.get(i).copied().flatten())))
                     .collect();
-                (d <= units.to_units(0.8 * half.y.min(half.x)) && !same.is_empty()).then_some((k, same))
+                // `half` is already in drawing units.
+                (d <= 0.8 * half.y.min(half.x) && !same.is_empty()).then_some((k, same))
             };
             let found = scan.read_unit(*handle, &inside, &port, true);
             out.extend(found);
