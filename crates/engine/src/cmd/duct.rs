@@ -23,7 +23,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|s| Ok(Box::new(AhuAddM::new(s)))),
         CommandSpec::new("ahuedit", "Edit Air Handling Unit", run_ahuedit)
             .params(
-                "{handle | handles, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox|stackedDoubleFlow, width? (mm), depth? (mm), height? (mm or null), model?, weight? (kg or null), portSizes? (one per collar: a diameter, 800x400 or null: the duct that starts on it takes that section), \
+                "{handle | handles, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox|stackedDoubleFlow, width? (mm), depth? (mm), height? (mm or null), model?, weight? (kg or null), coils? ({chilledWater?, hotWater?, changeOver?, directExpansion?}: the power of each coil, kW, or null for none; the water pipes that end at the unit take their load from it), portSizes? (one per collar: a diameter, 800x400 or null: the duct that starts on it takes that section), \
                  ports? (the direction of the air at each collar, supply|extract|fresh|exhaust, one per collar: four for a double-flux unit or a box, two for a single-flux unit; [] restores the kind's)} → {changed}",
             ),
         CommandSpec::new("ductadd", "Duct", run_ductadd)
@@ -219,11 +219,35 @@ fn run_ahuadd(s: &mut Session, p: &Value) -> Result<Value> {
         height_mm: positive(CMD, p, "height")?,
         model: str_param(p, "model").unwrap_or_default().to_string(),
         weight_kg: positive(CMD, p, "weight")?,
+        coils: coils_param(CMD, p, cadcraft_doc::AhuCoils::default())?,
         label_height_mm: positive(CMD, p, "labelHeight")?.unwrap_or(100.0),
         units: units_of(s)?,
     };
     let h = add_ahu(s, &params, at, f64_or(p, "rotation", 0.0).to_radians())?;
     Ok(json!({ "handle": h.hex(), "name": params.name }))
+}
+
+/// The `coils` of AHUADD and AHUEDIT: `{chilledWater?, hotWater?, changeOver?, directExpansion?}` in kW, each a number or null
+/// (no such coil); what is not named stays as in `base`.
+fn coils_param(cmd: &str, p: &Value, base: cadcraft_doc::AhuCoils) -> Result<cadcraft_doc::AhuCoils> {
+    let Some(c) = p.get("coils").filter(|v| !v.is_null()) else { return Ok(base) };
+    let pick = |key: &str, old: Option<f64>| -> Result<Option<f64>> {
+        match c.get(key) {
+            None => Ok(old),
+            Some(Value::Null) => Ok(None),
+            Some(v) => v
+                .as_f64()
+                .filter(|x| x.is_finite() && *x > 0.0)
+                .map(Some)
+                .ok_or_else(|| bad(cmd, format!("`coils.{key}` must be a power in kW or null"))),
+        }
+    };
+    Ok(cadcraft_doc::AhuCoils {
+        chilled_kw: pick("chilledWater", base.chilled_kw)?,
+        hot_kw: pick("hotWater", base.hot_kw)?,
+        change_over_kw: pick("changeOver", base.change_over_kw)?,
+        direct_expansion_kw: pick("directExpansion", base.direct_expansion_kw)?,
+    })
 }
 
 /// The `ports` of AHUEDIT: a direction for each collar.
@@ -282,6 +306,7 @@ fn run_ahuedit(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(m) = str_param(p, "model") {
             a.model = m.trim().to_string();
         }
+        a.coils = coils_param(CMD, p, a.coils)?;
         if let Some(sizes) = &port_sizes {
             a.port_sizes = sizes.clone();
         }
@@ -365,6 +390,7 @@ impl AhuAddM {
                     height_mm: None,
                     model: String::new(),
                     weight_kg: None,
+                    coils: Default::default(),
                     label_height_mm: 100.0,
                     units: units_of(s)?,
                 };
@@ -448,6 +474,7 @@ impl Interactive for AhuAddM {
             height_mm: None,
             model: String::new(),
             weight_kg: None,
+            coils: Default::default(),
             label_height_mm: 100.0,
             units,
         };

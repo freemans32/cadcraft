@@ -1448,3 +1448,7 @@
 	Slab	Dalle
 	Elevation of the top (m)	Cote du dessus (m)
 	Corner Window	Fenêtre d'angle
+	Chilled water coil (kW)	Batterie eau glacée (kW)
+	Hot water coil (kW)	Batterie eau chaude (kW)
+	Change-over coil (kW)	Batterie change-over (kW)
+	Direct expansion coil (kW)	Batterie à détente directe (kW)

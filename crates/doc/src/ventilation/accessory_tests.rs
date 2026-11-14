@@ -87,6 +87,7 @@ fn unit() -> AhuParams {
         height_mm: None,
         model: String::new(),
         weight_kg: None,
+        coils: AhuCoils::default(),
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     }

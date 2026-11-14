@@ -904,6 +904,23 @@ fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams], bad: &mut
             action = edit("model", json!(m));
         }
     });
+    // The coils: each power (kW) is the load of the water pipes that end at the unit; empty: no such coil.
+    for (label, key, get) in [
+        ("Chilled water coil (kW)", "chilledWater", (|u: &AhuParams| u.coils.chilled_kw) as fn(&AhuParams) -> Option<f64>),
+        ("Hot water coil (kW)", "hotWater", |u| u.coils.hot_kw),
+        ("Change-over coil (kW)", "changeOver", |u| u.coils.change_over_kw),
+        ("Direct expansion coil (kW)", "directExpansion", |u| u.coils.direct_expansion_kw),
+    ] {
+        let v = shared(&units.iter().map(|u| get(u).map_or(String::new(), |f| format!("{f}"))).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+        prop_row(ui, label, |ui| {
+            if let Some(t) = edit_field(ui, ui.scope_id().with(("ahu_coil", key, &ids)), v).filter(|t| t != VARIES) {
+                let value = if t.trim().is_empty() { Some(Value::Null) } else { number(Some(t), bad).map(|n| json!(n)) };
+                if let Some(value) = value {
+                    action = Some(("ahuedit", json!({ "handles": ids, "coils": { key: value } })));
+                }
+            }
+        });
+    }
     if let [u] = units {
         let flows = |f: Option<f64>, p: Option<f64>| match (f, p) {
             (Some(f), Some(p)) => format!("{f:.0} m³/h, {p:.0} Pa"),
@@ -1467,6 +1484,19 @@ mod hvac_tests {
         let hn = palette(app);
         assert!(hn.query_by_label("Auto (Main)").is_some(), "the type sizing gave");
         assert!(hn.query_by_label("Auto (Supply)").is_some(), "the direction sizing found");
+    }
+
+    #[test]
+    fn a_selected_air_handling_unit_takes_the_power_of_its_coils_typed_in_the_palette() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        let r = app.run("ahuadd", json!({ "at": [0, 0], "coils": { "chilledWater": 45 } })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+        app.session.set_selection(vec![h]);
+        let mut hn = palette(app);
+        type_into(&mut hn, "45", "60");
+        let u = cadcraft_doc::ahu_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!((u.coils.chilled_kw, u.coils.hot_kw), (Some(60.0), None));
     }
 
     #[test]

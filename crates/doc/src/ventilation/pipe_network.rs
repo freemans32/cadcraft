@@ -5,7 +5,7 @@
 use cadcraft_geom::Vec2;
 use cadcraft_hvac::{PipeCriteria, PipeGoverning, WaterTemperature, check_water_pipe, size_condensate_drain, size_water_pipe, water_flow_m3h};
 
-use super::{EquipmentKind, PipeLeg, PipeParams, PipeService, equipment_of, invalid};
+use super::{EquipmentKind, PipeLeg, PipeParams, PipeService, ahu_of, equipment_of, invalid};
 use crate::{EntityKind, Handle, Result};
 
 /// How close two ends are to be one point, mm; and, as a share of the wider pipe, how close to its axis.
@@ -63,15 +63,16 @@ pub struct PipeNetworkReport {
     pub warnings: Vec<String>,
 }
 
-/// An equipment's footprint (a rectangle turned about its centre), in drawing units, with its powers, kW.
+/// What a pipe can end in: an equipment or an air handling unit, a rectangle turned about its centre (drawing units),
+/// with the power it asks of each water service, kW.
 struct Equip {
     centre: Vec2,
     rotation: f64,
     half_length: f64,
     half_width: f64,
-    kind: EquipmentKind,
-    cooling_kw: Option<f64>,
-    heating_kw: Option<f64>,
+    /// A chiller: the water networks start from it.
+    chiller: bool,
+    loads: Vec<(PipeService, f64)>,
 }
 
 impl Equip {
@@ -85,11 +86,8 @@ impl Equip {
 
     /// The power it asks of a network of `service`, kW.
     fn power(&self, service: PipeService) -> Option<f64> {
-        match service {
-            PipeService::ChilledWater | PipeService::ChangeOver => self.cooling_kw,
-            PipeService::HotWater => self.heating_kw,
-            _ => None,
-        }
+        let total: f64 = self.loads.iter().filter(|(s, _)| *s == service).map(|(_, kw)| kw).sum();
+        (total > 0.0).then_some(total)
     }
 }
 
@@ -130,8 +128,8 @@ impl crate::Drawing {
         let mut reports = Vec::new();
         let mut writes: Vec<(Handle, PipeParams)> = Vec::new();
         for (i, root) in runs.iter().enumerate() {
-            let from_chiller = root.params.service.has_legs()
-                && equipment.iter().any(|q| q.kind == EquipmentKind::Chiller && q.holds(root.a, root.params.units.to_units(MEET_MM)));
+            let from_chiller =
+                root.params.service.has_legs() && equipment.iter().any(|q| q.chiller && q.holds(root.a, root.params.units.to_units(MEET_MM)));
             if !(root.params.source || from_chiller) || taken.get(i).copied().unwrap_or(true) {
                 continue;
             }
@@ -291,23 +289,43 @@ fn size_tree(runs: &[Run], nodes: &[Node], equipment: &[Equip], sizing: &PipeSiz
 }
 
 impl crate::Drawing {
-    /// The equipment of model space with their footprints.
+    /// The equipment and air handling units of model space with their footprints and powers.
     fn equipment_footprints(&self) -> Vec<Equip> {
-        self.model
-            .iter()
-            .filter_map(|e| {
-                let p = equipment_of(e)?;
-                let EntityKind::Insert(i) = &e.kind else { return None };
-                Some(Equip {
-                    centre: Vec2::new(i.insert.x, i.insert.y),
+        let mut out = Vec::new();
+        for e in self.model.iter() {
+            let EntityKind::Insert(i) = &e.kind else { continue };
+            let centre = Vec2::new(i.insert.x, i.insert.y);
+            if let Some(p) = equipment_of(e) {
+                let mut loads = Vec::new();
+                if let Some(kw) = p.capacity_kw {
+                    loads.extend([(PipeService::ChilledWater, kw), (PipeService::ChangeOver, kw)]);
+                }
+                if let Some(kw) = p.heating_kw {
+                    loads.push((PipeService::HotWater, kw));
+                }
+                out.push(Equip {
+                    centre,
                     rotation: i.rotation,
                     half_length: p.units.to_units(p.length_mm) * i.scale.x.abs() / 2.0,
                     half_width: p.units.to_units(p.width_mm) * i.scale.y.abs() / 2.0,
-                    kind: p.kind,
-                    cooling_kw: p.capacity_kw,
-                    heating_kw: p.heating_kw,
-                })
-            })
-            .collect()
+                    chiller: p.kind == EquipmentKind::Chiller,
+                    loads,
+                });
+            } else if let Some(a) = ahu_of(e) {
+                let loads = [PipeService::ChilledWater, PipeService::HotWater, PipeService::ChangeOver]
+                    .into_iter()
+                    .filter_map(|s| a.coils.power(s).map(|kw| (s, kw)))
+                    .collect();
+                out.push(Equip {
+                    centre,
+                    rotation: i.rotation,
+                    half_length: a.units.to_units(a.width_mm) * i.scale.x.abs() / 2.0,
+                    half_width: a.units.to_units(a.depth_mm) * i.scale.y.abs() / 2.0,
+                    chiller: false,
+                    loads,
+                });
+            }
+        }
+        out
     }
 }

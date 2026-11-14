@@ -250,3 +250,42 @@ fn a_network_starts_at_a_chiller_and_takes_its_loads_from_the_equipment_at_its_e
     assert_eq!(reports.len(), 1);
     assert_eq!((reports[0].source, reports[0].total_load), (h, 20.0));
 }
+
+#[test]
+fn the_coils_of_an_air_handling_unit_are_the_loads_of_the_water_pipes_that_end_at_it() {
+    let mut d = Drawing::new_metric();
+    let unit = AhuParams {
+        name: "CTA1".into(),
+        kind: AhuKind::DoubleFlow,
+        ports: vec![],
+        width_mm: 2000.0,
+        depth_mm: 1000.0,
+        port_sizes: Vec::new(),
+        height_mm: None,
+        model: String::new(),
+        weight_kg: None,
+        flow_m3h: None,
+        pressure_pa: None,
+        extract_flow_m3h: None,
+        extract_pressure_pa: None,
+        fresh_flow_m3h: None,
+        fresh_pressure_pa: None,
+        exhaust_flow_m3h: None,
+        exhaust_pressure_pa: None,
+        coils: AhuCoils { chilled_kw: Some(45.0), hot_kw: Some(30.0), change_over_kw: None, direct_expansion_kw: Some(20.0) },
+        label_height_mm: 100.0,
+        units: HvacUnits { mm_per_unit: 1.0 },
+    };
+    assert!(AhuCoils { hot_kw: Some(-1.0), ..unit.coils }.validate().is_err());
+    d.add_ahu(&Space::Model, Common::default(), &unit, cadcraft_geom::Vec2::new(6000.0, 0.0), 0.0).unwrap();
+    // A chilled-water run and a hot-water run, each from its own source to the unit, and no load typed.
+    add(&mut d, PipeService::ChilledWater, PipeLeg::Supply, (0.0, 0.0), (5500.0, 0.0), None, true);
+    add(&mut d, PipeService::HotWater, PipeLeg::Supply, (0.0, 300.0), (5500.0, 300.0), None, true);
+    let (reports, warnings) = d.size_pipes(&PipeSizingParams::default()).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let load = |s| reports.iter().find(|r| r.service == s).map(|r| r.total_load);
+    assert_eq!((load(PipeService::ChilledWater), load(PipeService::HotWater)), (Some(45.0), Some(30.0)));
+    assert!(
+        unit.spec_lines().iter().any(|l| l.contains("Batt. eau glacée 45.0kW")) && unit.spec_lines().iter().any(|l| l.contains("détente directe"))
+    );
+}

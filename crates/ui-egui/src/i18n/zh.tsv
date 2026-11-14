@@ -1590,3 +1590,7 @@ menu	View	视图
 	Edit Slab	编辑楼板
 	Slab	楼板
 	Corner Window	转角窗
+	Chilled water coil (kW)	冷冻水盘管 (kW)
+	Hot water coil (kW)	热水盘管 (kW)
+	Change-over coil (kW)	冷热切换盘管 (kW)
+	Direct expansion coil (kW)	直接膨胀盘管 (kW)

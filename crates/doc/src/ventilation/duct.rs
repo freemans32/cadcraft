@@ -202,6 +202,39 @@ impl AhuKind {
     }
 }
 
+/// The coils of an air handling unit, each with its power, kW (none when the unit has no such coil): the water
+/// networks read the loads of the pipes that end at the unit here; a direct-expansion coil is fed by a refrigerant
+/// outdoor unit (VRV and the like).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AhuCoils {
+    pub chilled_kw: Option<f64>,
+    pub hot_kw: Option<f64>,
+    pub change_over_kw: Option<f64>,
+    pub direct_expansion_kw: Option<f64>,
+}
+
+impl AhuCoils {
+    pub fn validate(&self) -> Result<()> {
+        let ok = |v: Option<f64>| v.is_none_or(|v| v.is_finite() && v > 0.0 && v <= 1.0e5);
+        if ok(self.chilled_kw) && ok(self.hot_kw) && ok(self.change_over_kw) && ok(self.direct_expansion_kw) {
+            Ok(())
+        } else {
+            Err(invalid("A coil's power is more than 0 and at most 100 000 kW."))
+        }
+    }
+
+    /// The power the unit asks of a water network of `service`, kW.
+    pub fn power(&self, service: super::PipeService) -> Option<f64> {
+        match service {
+            super::PipeService::ChilledWater => self.chilled_kw,
+            super::PipeService::HotWater => self.hot_kw,
+            super::PipeService::ChangeOver => self.change_over_kw,
+            _ => None,
+        }
+    }
+}
+
 /// An air handling unit: what its block reference keeps. The unit is centred on the block's
 /// origin, its width along the block's x axis.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -252,6 +285,9 @@ pub struct AhuParams {
     pub exhaust_flow_m3h: Option<f64>,
     #[serde(default)]
     pub exhaust_pressure_pa: Option<f64>,
+    /// The coils the unit has, with their powers.
+    #[serde(default)]
+    pub coils: AhuCoils,
     #[serde(default = "default_label_mm")]
     pub label_height_mm: f64,
     #[serde(default)]
@@ -372,6 +408,7 @@ impl AhuParams {
         if self.height_mm.is_some_and(|v| !size(v)) || self.weight_kg.is_some_and(|v| !(v.is_finite() && v > 0.0 && v <= 1e7)) {
             return Err(invalid("A unit's height and weight are more than 0 (the height at most 100 000 mm)."));
         }
+        self.coils.validate()?;
         if self.model.chars().count() > super::MAX_HVAC_NAME_CHARS || self.model.chars().any(char::is_control) {
             return Err(invalid(format!("A unit's model has at most {} characters, without control characters.", super::MAX_HVAC_NAME_CHARS)));
         }
@@ -445,6 +482,16 @@ impl AhuParams {
         }
         if let Some(w) = self.weight_kg {
             v.push(format!("Poids {w:.0}kg"));
+        }
+        for (label, kw) in [
+            ("Batt. eau glacée", self.coils.chilled_kw),
+            ("Batt. eau chaude", self.coils.hot_kw),
+            ("Batt. change-over", self.coils.change_over_kw),
+            ("Batt. détente directe", self.coils.direct_expansion_kw),
+        ] {
+            if let Some(k) = kw {
+                v.push(format!("{label} {k:.1}kW"));
+            }
         }
         v
     }
