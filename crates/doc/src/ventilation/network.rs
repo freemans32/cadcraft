@@ -29,6 +29,8 @@ pub const FLEX_ROUGHNESS_MM: f64 = 3.0;
 /// unit has two: its supply ducts with the supply terminals, its extract ducts with the extract ones.
 /// A duct leaving a junction at more than this many degrees from the way the air comes lies on the one it leaves.
 const STACKED_BACK_DEG: f64 = 170.0;
+/// Two runs' altitudes differ when they are this far apart, mm.
+const LEVEL_TOLERANCE_MM: f64 = 1.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DuctNetwork {
@@ -552,6 +554,12 @@ impl Scan<'_> {
         !self.taken.get(i).copied().unwrap_or(true) && self.ducts.get(i).is_some_and(|d| d.params.air == air || !d.params.air_set)
     }
 
+    /// The altitude of the underside of duct `i`, mm: the one it was given, else the one its height zone gives.
+    fn altitude_of(&self, i: usize) -> Option<f64> {
+        let d = self.ducts.get(i)?;
+        d.params.level_mm.or_else(|| self.void_at(d.a.mid(d.b)).and_then(|(_, b)| b))
+    }
+
     fn take(&mut self, i: usize) {
         if let Some(t) = self.taken.get_mut(i) {
             *t = true;
@@ -779,6 +787,25 @@ impl Scan<'_> {
                 }
             }
             children.retain(|c| !stacked.contains(&c.0));
+            // Where the run has a twin one over the other at another altitude (a supply and an extract on the
+            // same route), what leaves the junction at the twin's altitude is the twin's continuation, not this run's.
+            let mine = self.altitude_of(n.duct);
+            let twin_differs =
+                stacked.iter().any(|t| matches!((mine, self.altitude_of(*t)), (Some(a), Some(b)) if (a - b).abs() >= LEVEL_TOLERANCE_MM));
+            if twin_differs {
+                let own = |this: &Self, c: &(usize, Vec2, Vec2)| {
+                    this.altitude_of(c.0).is_none_or(|l| mine.is_some_and(|m| (l - m).abs() < LEVEL_TOLERANCE_MM))
+                };
+                if children.iter().any(|c| own(self, c)) {
+                    let others: Vec<usize> = children.iter().filter(|c| !own(self, c)).map(|c| c.0).collect();
+                    for i in &others {
+                        if let Some(t) = self.taken.get_mut(*i) {
+                            *t = false;
+                        }
+                    }
+                    children.retain(|c| !others.contains(&c.0));
+                }
+            }
             children.sort_by(|x, y| turn(x.1, x.2).total_cmp(&turn(y.1, y.2)));
             let many = children.len() > 1;
             for (k, (i, f, t)) in children.into_iter().enumerate() {

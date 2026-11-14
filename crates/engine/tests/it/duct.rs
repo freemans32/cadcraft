@@ -1111,3 +1111,55 @@ fn the_sizing_counts_the_loss_of_the_reducer_from_the_units_orifice_to_the_duct(
     let (none, wide) = (pressure(json!([null, null])), pressure(json!([null, "800x400"])));
     assert!(wide > none, "the reducer adds its loss: {wide} against {none}");
 }
+
+/// The supply drawn first, 80 mm up, then the extract over it on the same route, 900 mm up, both from the stacked
+/// collars of a vertical unit to a riser each (as on a roof plan): each keeps its own air direction, whichever was drawn first.
+fn superposed_roof(supply_first: bool) -> (Session, Vec<Handle>, Vec<Handle>) {
+    let mut s = metric();
+    let u = s.execute("ahuadd", &json!({"at": [0, 0], "type": "vertical"})).unwrap();
+    let tip = ahu_of(s.doc().unwrap().entity(hd(&u["handle"])).unwrap()).unwrap().port_tips()[2].0;
+    let p = tip.x;
+    s.execute("riseradd", &json!({"at": [5000, 3400], "width": 800, "depth": 600, "air": "supply", "incomingFlow": 7000})).unwrap();
+    s.execute("riseradd", &json!({"at": [7500, 3400], "width": 800, "depth": 600, "air": "extract", "incomingFlow": 7000})).unwrap();
+    let mut supply = Vec::new();
+    let mut extract = Vec::new();
+    let mut add_supply = |s: &mut Session| {
+        for pts in [json!([[p, 0], [5000, 0]]), json!([[5000, 0], [5000, 3100]])] {
+            supply.push(hd(&s.execute("ductadd", &json!({"points": pts, "altitude": 0.08})).unwrap()["handles"][0]));
+        }
+    };
+    let mut add_extract = |s: &mut Session| {
+        for pts in [json!([[p, 0], [5000, 0]]), json!([[5000, 0], [7500, 0]]), json!([[7500, 0], [7500, 3100]])] {
+            extract.push(hd(&s.execute("ductadd", &json!({"points": pts, "altitude": 0.9})).unwrap()["handles"][0]));
+        }
+    };
+    if supply_first {
+        add_supply(&mut s);
+        s.execute("ductsize", &json!({})).unwrap();
+        add_extract(&mut s);
+    } else {
+        add_extract(&mut s);
+        s.execute("ductsize", &json!({})).unwrap();
+        add_supply(&mut s);
+    }
+    s.execute("ductsize", &json!({})).unwrap();
+    (s, supply, extract)
+}
+
+#[test]
+fn two_ducts_one_over_the_other_from_stacked_collars_keep_their_air_whichever_was_drawn_first() {
+    for supply_first in [true, false] {
+        let (s, supply, extract) = superposed_roof(supply_first);
+        let air = |h: &Handle| duct_of(s.doc().unwrap().entity(*h).unwrap()).unwrap().air;
+        assert!(
+            supply.iter().all(|h| air(h) == cadcraft_doc::AirDirection::Supply),
+            "supply first {supply_first}: {:?}",
+            supply.iter().map(air).collect::<Vec<_>>()
+        );
+        assert!(
+            extract.iter().all(|h| air(h) == cadcraft_doc::AirDirection::Extract),
+            "supply first {supply_first}: {:?}",
+            extract.iter().map(air).collect::<Vec<_>>()
+        );
+    }
+}
