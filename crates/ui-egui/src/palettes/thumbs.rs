@@ -457,3 +457,24 @@ pub(super) fn paint_size_pipes(p: &Painter, r: Rect) {
     t.l((2.0, 16.0), (22.0, 16.0), t.acc);
     t.p.text(t.at(12.0, 12.0), egui::Align2::CENTER_CENTER, "DN", egui::FontId::proportional(8.0), t.pt);
 }
+
+/// A slab seen in plan, hatched; the roof one slopes, the foundation one sits on a footing line.
+pub(super) fn paint_slab(p: &Painter, r: Rect, kind: cadcraft_doc::SlabKind) {
+    let t = Th::new(p, r);
+    t.poly(&[(3.0, 6.0), (21.0, 6.0), (21.0, 18.0), (3.0, 18.0)], true, t.base);
+    for x in [7.0, 11.0, 15.0, 19.0] {
+        t.l((x, 18.0), (x + 3.0, 6.0), t.acc);
+    }
+    match kind {
+        cadcraft_doc::SlabKind::Floor => {}
+        cadcraft_doc::SlabKind::Roof => t.l((2.0, 5.0), (22.0, 5.0), t.acc),
+        cadcraft_doc::SlabKind::Foundation => t.l((2.0, 20.0), (22.0, 20.0), t.base),
+    }
+}
+
+/// A slab with a pencil: Edit Slab.
+pub(super) fn paint_edit_slab(p: &Painter, r: Rect) {
+    let t = Th::new(p, r);
+    t.poly(&[(2.0, 7.0), (16.0, 7.0), (16.0, 16.0), (2.0, 16.0)], true, t.base);
+    t.pencil();
+}

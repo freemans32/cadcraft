@@ -219,3 +219,34 @@ fn the_takeoff_counts_the_pipes_by_service_leg_size_and_insulation() {
     assert!(csv.contains("Pipes\n") && csv.contains("chilledWater;supply;DN25;0;2;8"), "{csv}");
     assert_eq!(Drawing::new_metric().takeoff("").unwrap().totals.pipe_count, 0);
 }
+
+#[test]
+fn a_network_starts_at_a_chiller_and_takes_its_loads_from_the_equipment_at_its_ends() {
+    let mut d = Drawing::new_metric();
+    let units = HvacUnits { mm_per_unit: 1.0 };
+    let equip = |d: &mut Drawing, kind: EquipmentKind, kw: f64, at: (f64, f64)| {
+        let m = EquipmentModel {
+            name: "x".into(),
+            kind,
+            reference: String::new(),
+            capacity_kw: Some(kw),
+            heating_kw: None,
+            length_mm: 1000.0,
+            width_mm: 800.0,
+            height_mm: 500.0,
+            weight_kg: None,
+            fans: 0,
+            connections: String::new(),
+        };
+        let p = EquipmentParams::from_model(&m, "E", units);
+        d.add_equipment(&Space::Model, Common::default(), &p, cadcraft_geom::Vec2::new(at.0, at.1), 0.0).unwrap();
+    };
+    equip(&mut d, EquipmentKind::Chiller, 100.0, (0.0, 0.0));
+    equip(&mut d, EquipmentKind::Ducted, 20.0, (6000.0, 0.0));
+    // The run starts inside the chiller (no "source" flag) and ends inside the unit (no typed load).
+    let h = add(&mut d, PipeService::ChilledWater, PipeLeg::Supply, (200.0, 0.0), (5800.0, 0.0), None, false);
+    let (reports, warnings) = d.size_pipes(&PipeSizingParams::default()).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(reports.len(), 1);
+    assert_eq!((reports[0].source, reports[0].total_load), (h, 20.0));
+}

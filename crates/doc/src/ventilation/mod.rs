@@ -16,6 +16,7 @@ mod network;
 mod pipe;
 mod pipe_network;
 mod riser;
+mod slab;
 mod space;
 mod takeoff;
 mod terminal;
@@ -33,6 +34,7 @@ pub use network::{DEFAULT_MARGIN_MM, DuctNetwork, FLEX_ROUGHNESS_MM, MAX_DUCTS};
 pub use pipe::*;
 pub use pipe_network::{MAX_PIPES as MAX_PIPE_RUNS, PipeNetworkReport, PipeResult, PipeSizingParams};
 pub use riser::*;
+pub use slab::*;
 pub use space::*;
 pub use takeoff::*;
 pub use terminal::*;
@@ -67,7 +69,7 @@ fn hvac_layer_color(name: &str) -> Option<cadcraft_color::Color> {
         AIR_EXHAUST_LAYER | DUCT_EXHAUST_LAYER => Some(Color::True(Rgb(0xff, 0x9a, 0x1e))),
         ZONE_LAYER => Some(Color::True(Rgb(0x2e, 0xb8, 0xa6))),
         EQUIPMENT_ZONE_LAYER => Some(Color::True(Rgb(0x9a, 0x9a, 0x9a))),
-        _ => pipe::pipe_layer_color(name),
+        _ => pipe::pipe_layer_color(name).or_else(|| slab::slab_layer_color(name)),
     }
 }
 
@@ -265,5 +267,7 @@ mod equipment_tests;
 mod pipe_tests;
 #[cfg(test)]
 mod riser_tests;
+#[cfg(test)]
+mod slab_tests;
 #[cfg(test)]
 mod tests;

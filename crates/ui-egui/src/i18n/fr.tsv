@@ -1440,3 +1440,10 @@
 	Size Pipes	Dimensionner les tuyauteries
 	Pipes sized: {n} run(s), {load}	Tuyauteries dimensionnées : {n} tronçon(s), {load}
 	Mark the run that starts at the source of each network, type the load (kW; l/h for a drain) at the free ends, then size: the flow comes from the load, the size from the flow.	Marquez le tronçon qui part de la source de chaque réseau, saisissez la charge (kW ; l/h pour un drain) aux bouts libres, puis dimensionnez : le débit vient de la charge, la taille du débit.
+	Slabs	Dalles
+	Floor slab	Dalle de plancher
+	Roof slab	Dalle de toiture
+	Foundation slab	Dalle de fondation
+	Edit Slab	Modifier la dalle
+	Slab	Dalle
+	Elevation of the top (m)	Cote du dessus (m)

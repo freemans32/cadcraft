@@ -4,8 +4,8 @@
 
 use cadcraft_doc::{
     AccessoryKind, AccessoryParams, AhuKind, AhuParams, AirDirection, Drawing, DuctKind, DuctParams, DuctShape, Handle, OpeningKind, OpeningParams,
-    PipeParams, PipeService, RiserParams, SpaceParams, TerminalKind, TerminalParams, WallJustification, ZoneParams, accessory_of, ahu_of,
-    air_terminal_of, duct_of, opening_of, pipe_of, riser_of, space_of, wall_of, zone_of,
+    PipeParams, PipeService, RiserParams, SlabParams, SpaceParams, TerminalKind, TerminalParams, WallJustification, ZoneParams, accessory_of, ahu_of,
+    air_terminal_of, duct_of, opening_of, pipe_of, riser_of, slab_of, space_of, wall_of, zone_of,
 };
 use cadcraft_hvac::RoomUse;
 use egui::{Sense, pos2, vec2};
@@ -79,7 +79,48 @@ pub(super) fn section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], len: &dyn 
     if !pipes.is_empty() && pipes.len() == sel.len() {
         return pipe_section(ui, sel, &pipes, len, bad);
     }
+    let slabs: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| slab_of(e))).collect();
+    if !slabs.is_empty() && slabs.len() == sel.len() {
+        return slab_section(ui, sel, &slabs, bad);
+    }
     None
+}
+
+/// The Properties group of slabs: their kind, name, thickness and the elevation of their top, with the area and volume.
+fn slab_section(ui: &mut egui::Ui, sel: &[Handle], ss: &[SlabParams], bad: &mut Option<String>) -> Action {
+    let ids = handles(sel);
+    let mut action: Action = None;
+    let edit = |key: &str, value: Value| Some(("slabedit", json!({ "handles": ids, key: value })));
+    group(ui, "Slab");
+    let kind = shared(&ss.iter().map(|p| p.kind).collect::<Vec<_>>());
+    prop_row(ui, "Kind", |ui| {
+        let label = |k: cadcraft_doc::SlabKind| match k {
+            cadcraft_doc::SlabKind::Floor => "Floor slab",
+            cadcraft_doc::SlabKind::Roof => "Roof slab",
+            cadcraft_doc::SlabKind::Foundation => "Foundation slab",
+        };
+        let items = [("floor", "Floor slab"), ("roof", "Roof slab"), ("foundation", "Foundation slab")];
+        if let Some(k) = choice(ui, kind.map_or(VARIES, label), &items) {
+            action = edit("kind", json!(k));
+        }
+    });
+    let thickness = shared(&ss.iter().map(|p| format!("{}", p.thickness_mm)).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Thickness (mm)", |ui| {
+        if let Some(mm) = number(edit_field(ui, ui.scope_id().with(("slab_thickness", &ids)), thickness).filter(|t| t != VARIES), bad) {
+            action = edit("thickness", json!(mm));
+        }
+    });
+    let elevation = shared(&ss.iter().map(|p| format!("{}", p.elevation_mm / 1000.0)).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Elevation of the top (m)", |ui| {
+        if let Some(m) = number(edit_field(ui, ui.scope_id().with(("slab_elevation", &ids)), elevation).filter(|t| t != VARIES), bad) {
+            action = edit("elevation", json!(m));
+        }
+    });
+    if let [p] = ss {
+        prop_row(ui, "Area", |ui| read_only(ui, &format!("{:.2} m²", p.area_m2())));
+        prop_row(ui, "Volume", |ui| read_only(ui, &format!("{:.2} m³", p.volume_m3())));
+    }
+    action
 }
 
 /// Whether object `h` is a parametric object with a Properties group of its own.
@@ -90,6 +131,7 @@ pub(crate) fn is_parametric(d: &Drawing, h: Handle) -> bool {
             || air_terminal_of(e).is_some()
             || duct_of(e).is_some()
             || pipe_of(e).is_some()
+            || slab_of(e).is_some()
             || accessory_of(e).is_some()
             || riser_of(e).is_some()
             || cadcraft_doc::equipment_of(e).is_some()
@@ -1314,6 +1356,21 @@ mod hvac_tests {
         assert_eq!(p.dn_mm, 65.0);
         assert!(p.imposed, "a typed size is the user's: sizing leaves it");
         assert!(super::is_parametric(hn.state().session.doc().unwrap(), h), "a double-click opens Properties");
+    }
+
+    #[test]
+    fn a_selected_slab_takes_a_typed_thickness() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        let r = app.run("slabadd", json!({ "points": [[0, 0], [4000, 0], [4000, 3000], [0, 3000]] })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+        app.session.set_selection(vec![h]);
+        let mut hn = palette(app);
+        assert!(hn.query_by_label("Floor slab").is_some(), "the kind is shown");
+        type_into(&mut hn, "200", "300");
+        let p = cadcraft_doc::slab_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!(p.thickness_mm, 300.0);
+        assert!(super::is_parametric(hn.state().session.doc().unwrap(), h));
     }
 
     #[test]

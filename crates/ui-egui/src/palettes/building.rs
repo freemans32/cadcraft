@@ -464,6 +464,8 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
     let mut cleanup = false;
     let last = app.session.last_used.opening.clone();
     let mut chosen: Option<Preset> = None;
+    let app_slab_kind = app.session.last_used.slab.kind;
+    let mut slab_chosen: Option<cadcraft_doc::SlabKind> = None;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         let section = |ui: &mut egui::Ui, title: &str, open: bool, body: &mut dyn FnMut(&mut egui::Ui)| {
@@ -490,7 +492,18 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
                 }
             });
         }
+        section(ui, "Slabs", true, &mut |ui| {
+            let last = app_slab_kind;
+            for (label, kind) in SLABS {
+                if row_button(ui, crate::i18n::t(label), last == *kind, |p, r| thumbs::paint_slab(p, r, *kind)) {
+                    slab_chosen = Some(*kind);
+                }
+            }
+        });
         section(ui, "Tools", true, &mut |ui| {
+            if row_button(ui, crate::i18n::t("Edit Slab"), false, thumbs::paint_edit_slab) {
+                start = Some("slabedit");
+            }
             if row_button(ui, crate::i18n::t("Wall Elevation"), false, thumbs::paint_elevation) {
                 start = Some("wallelevation");
             }
@@ -519,6 +532,12 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
         (last.kind, last.style, last.size) = (kind, style, Some(size));
         app.cmd.buffer.clear();
         app.start("openingadd");
+    } else if let Some(kind) = slab_chosen {
+        // The kind clicked becomes SLABADD's kind (and its own thickness), then it starts.
+        app.session.last_used.slab.kind = kind;
+        app.session.last_used.slab.thickness_mm = None;
+        app.cmd.buffer.clear();
+        app.start("slabadd");
     } else if let Some(cmd) = start {
         app.cmd.buffer.clear();
         app.start(cmd);
@@ -533,6 +552,13 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
         }
     }
 }
+
+/// The slabs of the Slabs group: the label and the kind.
+const SLABS: &[(&str, cadcraft_doc::SlabKind)] = &[
+    ("Floor slab", cadcraft_doc::SlabKind::Floor),
+    ("Roof slab", cadcraft_doc::SlabKind::Roof),
+    ("Foundation slab", cadcraft_doc::SlabKind::Foundation),
+];
 
 /// The pipes of the Piping group: the label, the service and the leg.
 const PIPES: &[(&str, PipeService, PipeLeg)] = &[

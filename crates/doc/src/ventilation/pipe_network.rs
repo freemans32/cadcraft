@@ -5,8 +5,8 @@
 use cadcraft_geom::Vec2;
 use cadcraft_hvac::{PipeCriteria, PipeGoverning, WaterTemperature, check_water_pipe, size_condensate_drain, size_water_pipe, water_flow_m3h};
 
-use super::{PipeLeg, PipeParams, PipeService, invalid};
-use crate::{Handle, Result};
+use super::{EquipmentKind, PipeLeg, PipeParams, PipeService, equipment_of, invalid};
+use crate::{EntityKind, Handle, Result};
 
 /// How close two ends are to be one point, mm; and, as a share of the wider pipe, how close to its axis.
 const MEET_MM: f64 = 15.0;
@@ -63,6 +63,36 @@ pub struct PipeNetworkReport {
     pub warnings: Vec<String>,
 }
 
+/// An equipment's footprint (a rectangle turned about its centre), in drawing units, with its powers, kW.
+struct Equip {
+    centre: Vec2,
+    rotation: f64,
+    half_length: f64,
+    half_width: f64,
+    kind: EquipmentKind,
+    cooling_kw: Option<f64>,
+    heating_kw: Option<f64>,
+}
+
+impl Equip {
+    /// Whether `p` is within the footprint, `margin` drawing units out.
+    fn holds(&self, p: Vec2, margin: f64) -> bool {
+        let (s, c) = self.rotation.sin_cos();
+        let (dx, dy) = (p.x - self.centre.x, p.y - self.centre.y);
+        let (x, y) = (dx * c + dy * s, -dx * s + dy * c);
+        x.abs() <= self.half_length + margin && y.abs() <= self.half_width + margin
+    }
+
+    /// The power it asks of a network of `service`, kW.
+    fn power(&self, service: PipeService) -> Option<f64> {
+        match service {
+            PipeService::ChilledWater | PipeService::ChangeOver => self.cooling_kw,
+            PipeService::HotWater => self.heating_kw,
+            _ => None,
+        }
+    }
+}
+
 struct Run {
     handle: Handle,
     params: PipeParams,
@@ -95,15 +125,18 @@ impl crate::Drawing {
         if runs.len() > MAX_PIPES {
             return Err(invalid(format!("Pipes are sized {MAX_PIPES} at a time at most.")));
         }
+        let equipment = self.equipment_footprints();
         let mut taken = vec![false; runs.len()];
         let mut reports = Vec::new();
         let mut writes: Vec<(Handle, PipeParams)> = Vec::new();
         for (i, root) in runs.iter().enumerate() {
-            if !root.params.source || taken.get(i).copied().unwrap_or(true) {
+            let from_chiller = root.params.service.has_legs()
+                && equipment.iter().any(|q| q.kind == EquipmentKind::Chiller && q.holds(root.a, root.params.units.to_units(MEET_MM)));
+            if !(root.params.source || from_chiller) || taken.get(i).copied().unwrap_or(true) {
                 continue;
             }
             let nodes = read_tree(&runs, &mut taken, i);
-            let (report, changed) = size_tree(&runs, &nodes, sizing)?;
+            let (report, changed) = size_tree(&runs, &nodes, &equipment, sizing)?;
             writes.extend(changed);
             reports.push(report);
         }
@@ -168,12 +201,26 @@ fn read_tree(runs: &[Run], taken: &mut [bool], root: usize) -> Vec<Node> {
     nodes
 }
 
-fn size_tree(runs: &[Run], nodes: &[Node], sizing: &PipeSizingParams) -> Result<(PipeNetworkReport, Vec<(Handle, PipeParams)>)> {
+fn size_tree(runs: &[Run], nodes: &[Node], equipment: &[Equip], sizing: &PipeSizingParams) -> Result<(PipeNetworkReport, Vec<(Handle, PipeParams)>)> {
     let mut warnings: Vec<String> = Vec::new();
     let Some(root_run) = nodes.first().and_then(|n| runs.get(n.run)) else { return Err(invalid("A network has a source.")) };
     let (service, leg) = group(&root_run.params);
     // The loads added up from the leaves to the source.
-    let mut total: Vec<f64> = nodes.iter().map(|n| runs.get(n.run).and_then(|r| r.params.load_kw).unwrap_or(0.0)).collect();
+    let mut total: Vec<f64> = nodes
+        .iter()
+        .map(|n| {
+            let Some(r) = runs.get(n.run) else { return 0.0 };
+            let far = if n.at_start { r.b } else { r.a };
+            let leaf = !nodes.iter().any(|m| m.parent.and_then(|p| nodes.get(p)).is_some_and(|q| q.run == n.run));
+            r.params
+                .load_kw
+                .or_else(|| {
+                    let margin = r.params.units.to_units(MEET_MM);
+                    leaf.then(|| equipment.iter().filter(|q| q.holds(far, margin)).find_map(|q| q.power(r.params.service))).flatten()
+                })
+                .unwrap_or(0.0)
+        })
+        .collect();
     let own = total.clone();
     for i in (0..nodes.len()).rev() {
         let (t, parent) = (total.get(i).copied().unwrap_or(0.0), nodes.get(i).and_then(|n| n.parent));
@@ -241,4 +288,26 @@ fn size_tree(runs: &[Run], nodes: &[Node], sizing: &PipeSizingParams) -> Result<
     }
     let total_load = total.first().copied().unwrap_or(0.0);
     Ok((PipeNetworkReport { service, leg, source: root_run.handle, total_load, runs: results, warnings }, changed))
+}
+
+impl crate::Drawing {
+    /// The equipment of model space with their footprints.
+    fn equipment_footprints(&self) -> Vec<Equip> {
+        self.model
+            .iter()
+            .filter_map(|e| {
+                let p = equipment_of(e)?;
+                let EntityKind::Insert(i) = &e.kind else { return None };
+                Some(Equip {
+                    centre: Vec2::new(i.insert.x, i.insert.y),
+                    rotation: i.rotation,
+                    half_length: p.units.to_units(p.length_mm) * i.scale.x.abs() / 2.0,
+                    half_width: p.units.to_units(p.width_mm) * i.scale.y.abs() / 2.0,
+                    kind: p.kind,
+                    cooling_kw: p.capacity_kw,
+                    heating_kw: p.heating_kw,
+                })
+            })
+            .collect()
+    }
 }
