@@ -46,12 +46,17 @@ fn hatches(p: &[WallPiece]) -> Vec<&Hatch> {
 #[test]
 fn the_standard_styles_are_valid_and_measure_what_their_names_say() {
     let all = standard_wall_styles();
-    assert_eq!(all.len(), 6);
+    assert_eq!(all.len(), 23);
+    let mut names: Vec<String> = all.iter().map(|s| s.name.to_lowercase()).collect();
+    names.sort();
+    names.dedup();
+    assert_eq!(names.len(), all.len(), "style names are unique");
     for s in &all {
         s.validate().unwrap_or_else(|e| panic!("{}: {e}", s.name));
     }
     let thickness: Vec<f64> = all.iter().map(WallStyle::thickness).collect();
-    assert_eq!(thickness, [200.0, 332.5, 327.5, 256.5, 73.0, 98.0]);
+    assert_eq!(thickness[..6], [200.0, 332.5, 327.5, 256.5, 73.0, 98.0]);
+    assert!(thickness.iter().all(|t| *t > 0.0));
 }
 
 #[test]
@@ -306,13 +311,13 @@ fn units_turn_millimetres_into_drawing_units() {
 #[test]
 fn a_drawing_style_takes_the_place_of_a_standard_one_of_the_same_name() {
     let mut d = Drawing::new_metric();
-    assert_eq!(d.available_wall_styles().len(), 6);
+    assert_eq!(d.available_wall_styles().len(), 23);
     let mut mine = style("Concrete 200");
     mine.name = "concrete 200".into();
     mine.components[0].thickness = 180.0;
     d.wall_styles.push(mine.clone());
     let all = d.available_wall_styles();
-    assert_eq!(all.len(), 6);
+    assert_eq!(all.len(), 23);
     assert_eq!(all.first(), Some(&mine));
     assert_eq!(d.wall_style_or_standard("CONCRETE 200"), Some(mine));
     assert!(d.wall_style_or_standard("Partition 72/48").is_some());

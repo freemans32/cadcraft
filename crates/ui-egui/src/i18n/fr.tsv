@@ -1358,3 +1358,48 @@
 	The spreadsheet button saves them for Excel; each level makes its own file.	Le bouton tableur les enregistre pour Excel ; chaque niveau fait son fichier.
 	Export Excel	Exporter vers Excel
 	Export CSV	Exporter en CSV
+	Doors	Portes
+	Windows	Fenêtres
+	Single door	Porte simple
+	Exterior single door	Porte extérieure simple
+	Exterior double door	Porte extérieure double
+	Door-window block	Bloc porte-fenêtre
+	Sliding door	Porte coulissante
+	Exterior sliding double door	Porte extérieure double coulissante
+	Pocket sliding door	Porte coulissante encastrée
+	Folding single door	Porte pliante simple
+	Folding double door	Porte pliante double
+	Pass-through (rectangle)	Porte passante (rectangle)
+	Tilting door	Porte basculante
+	Elevator door (centre)	Porte d'ascenseur (central)
+	Elevator door (side)	Porte d'ascenseur (latéral)
+	Revolving door	Porte tambour
+	Wide window	Fenêtre large
+	Casement window, 1 leaf	Fenêtre 1 vantail
+	Casement window, 2 leaves	Fenêtre 2 vantaux à la française
+	Sliding window	Fenêtre coulissante
+	Fixed window	Fenêtre fixe
+	Roof window	Fenêtre de toit
+	Concrete 200	Béton 200
+	Brick 200 + mineral wool 120 + plasterboard	Brique 200 + laine minérale 120 + BA13
+	Concrete block 200 + EPS 100 + plasterboard	Parpaing 200 + PSE 100 + BA13
+	Timber frame 145	Ossature bois 145
+	Partition 72/48	Cloison 72/48
+	Partition 98/48	Cloison 98/48
+	Rendered masonry + lining	Maçonnerie enduit + doublage
+	Rendered concrete + lining	Voile béton enduit + doublage
+	Rendered brick + lining	Brique enduit + doublage
+	Facing brick + concrete + lining	Brique de parement + voile béton + doublage
+	Facing brick + masonry + lining	Brique de parement + maçonnerie + doublage
+	Rubble stone + air gap + lining	Moellons bruts + lame d'air + doublage
+	Cut stone + air gap + lining	Pierres de taille + lame d'air + doublage
+	Facing brick 220	Brique de parement 220
+	Shear wall 180	Voile-refend 180
+	Foundation 550 x 300	Fondations 550 x 300
+	Partition 100/70	Cloison 100/70
+	Plaster block 50	Carreaux de plâtre 5 cm
+	Plaster block 70	Carreaux de plâtre 7 cm
+	Plaster block 100	Carreaux de plâtre 10 cm
+	Concrete block 100	Parpaings 10 cm
+	Concrete block 150	Parpaings 15 cm
+	Concrete block 200 wall	Parpaings 20 cm

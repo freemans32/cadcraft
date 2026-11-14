@@ -3,7 +3,7 @@
 //! its place along the wall by a distance). The wall under an opening is cut when the walls are
 //! joined, which both commands do.
 
-use cadcraft_doc::{Drawing, EntityKind, Handle, OpeningKind, OpeningParams, WallHit, WallUnits, opening_of, preview_entities};
+use cadcraft_doc::{Drawing, EntityKind, Handle, OpeningKind, OpeningParams, OpeningStyle, WallHit, WallUnits, opening_of, preview_entities};
 use cadcraft_geom::Vec2;
 use serde_json::{Value, json};
 
@@ -17,11 +17,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["Draw", "Architecture", "Opening"])
             .params(
                 "{at ([x, y], put on the nearest wall) | wall (handle) + distance (mm from `from` to the nearest edge of the opening) + from?: start|end \\
-                 + segment? (default 0), type?: door|doubleDoor|window|bay, width? | height? | sill? (mm), flipSide?, flipHand?} → {handle, type}",
+                 + segment? (default 0), type?: door|doubleDoor|window|bay, style?: standard|sliding|pocket|folding|tilting|centreParting|revolving|casement|doubleCasement|fixed|skylight, width? | height? | sill? (mm), flipSide?, flipHand?} → {handle, type}",
             )
             .interactive(|s| Ok(Box::new(OpeningAddM::new(s)))),
         CommandSpec::new("openingedit", "Edit Opening", run_edit).params(
-            "{handle | handles, type?, width? | height? | sill? (mm), flipSide?, flipHand?, distance? (mm from `from` to the nearest edge), \
+            "{handle | handles, type?, style?, width? | height? | sill? (mm), flipSide?, flipHand?, distance? (mm from `from` to the nearest edge), \
              from?: start|end} → {changed}",
         ),
     ]
@@ -31,6 +31,7 @@ pub fn specs() -> Vec<CommandSpec> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct OpeningLastUsed {
     pub kind: OpeningKind,
+    pub style: OpeningStyle,
     /// Width, height and sill the user gave, mm; the kind's own when none.
     pub size: Option<(f64, f64, f64)>,
     pub flip_side: bool,
@@ -77,6 +78,18 @@ fn kind_param(cmd: &str, p: &Value) -> Result<Option<OpeningKind>> {
     }
 }
 
+fn style_param(cmd: &str, p: &Value) -> Result<Option<OpeningStyle>> {
+    match str_param(p, "style") {
+        Some(t) => OpeningStyle::parse(t).map(Some).ok_or_else(|| {
+            bad(
+                cmd,
+                "`style` must be standard, sliding, pocket, folding, tilting, centreParting, revolving, casement, doubleCasement, fixed or skylight",
+            )
+        }),
+        None => Ok(None),
+    }
+}
+
 fn units_of(d: &Drawing) -> WallUnits {
     WallUnits::of(d)
 }
@@ -113,7 +126,15 @@ fn place(s: &mut Session, mut p: OpeningParams, hit: &WallHit, along: f64) -> Re
 
 fn params_of(last: &OpeningLastUsed, units: WallUnits) -> OpeningParams {
     let (width_mm, height_mm, sill_mm) = last.size_mm();
-    OpeningParams { width_mm, height_mm, sill_mm, flip_side: last.flip_side, flip_hand: last.flip_hand, ..OpeningParams::new(last.kind, units) }
+    OpeningParams {
+        style: last.style,
+        width_mm,
+        height_mm,
+        sill_mm,
+        flip_side: last.flip_side,
+        flip_hand: last.flip_hand,
+        ..OpeningParams::new(last.kind, units)
+    }
 }
 
 fn run_add(s: &mut Session, p: &Value) -> Result<Value> {
@@ -121,6 +142,7 @@ fn run_add(s: &mut Session, p: &Value) -> Result<Value> {
     let kind = kind_param(CMD, p)?.unwrap_or_default();
     let (dw, dh, ds) = kind.default_size_mm();
     let mut params = OpeningParams::new(kind, units_of(s.doc()?));
+    params.style = style_param(CMD, p)?.unwrap_or_default();
     params.width_mm = number(CMD, p, "width")?.unwrap_or(dw);
     params.height_mm = number(CMD, p, "height")?.unwrap_or(dh);
     params.sill_mm = number(CMD, p, "sill")?.unwrap_or(ds);
@@ -158,6 +180,7 @@ fn run_edit(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(CMD, format!("select 1 to {MAX_EDITED} openings")));
     }
     let kind = kind_param(CMD, p)?;
+    let style = style_param(CMD, p)?;
     let (width, height, sill) = (number(CMD, p, "width")?, number(CMD, p, "height")?, number(CMD, p, "sill")?);
     let (flip_side, flip_hand) = (flag(CMD, p, "flipSide")?, flag(CMD, p, "flipHand")?);
     let distance = number(CMD, p, "distance")?;
@@ -178,11 +201,14 @@ fn run_edit(s: &mut Session, p: &Value) -> Result<Value> {
                     return Err(other("The opening is not on a wall: it can't be placed by a distance."));
                 }
                 o.validate().map_err(doc_err)?;
-                next.push((*h, apply(o, kind, width, height, sill, flip_side, flip_hand)?, None));
+                let mut o = apply(o, kind, width, height, sill, flip_side, flip_hand)?;
+                o.style = style.unwrap_or(o.style);
+                next.push((*h, o, None));
                 continue;
             }
         };
         o = apply(o, kind, width, height, sill, flip_side, flip_hand)?;
+        o.style = style.unwrap_or(o.style);
         let units = o.units.mm_per_unit;
         let seg = d.wall_segment(hit.wall, hit.segment).ok_or_else(|| other("Cannot find the wall of the opening."))?;
         let along = match distance {
@@ -257,8 +283,9 @@ impl OpeningAddM {
     fn settings(&self, s: &mut Session) {
         let (w, h, sill) = self.last.size_mm();
         s.echo(format!(
-            "Current settings: Type = {}, Width = {w}, Height = {h}, Sill = {sill}, Swing = {}, Hinge = {}",
+            "Current settings: Type = {}, Style = {}, Width = {w}, Height = {h}, Sill = {sill}, Swing = {}, Hinge = {}",
             self.last.kind.name(),
+            self.last.style.name(),
             if self.last.flip_side { "right" } else { "left" },
             if self.last.flip_hand { "end" } else { "start" }
         ));
@@ -277,7 +304,7 @@ impl OpeningAddM {
         match (self.ask, &i, text.as_deref()) {
             (Ask::Type, _, Some(t)) => {
                 let kind = OpeningKind::parse(t).ok_or_else(|| other("Enter Door, DoubleDoor, Window or Bay."))?;
-                self.last = OpeningLastUsed { kind, size: None, ..self.last.clone() };
+                self.last = OpeningLastUsed { kind, style: OpeningStyle::Standard, size: None, ..self.last.clone() };
             }
             (Ask::Width, _, Some(t)) => {
                 let (_, h, sill) = self.last.size_mm();

@@ -182,14 +182,14 @@ fn wallstyleedit_lists_the_drawing_s_styles_then_the_standard_ones() {
     let mut s = metric();
     let r = s.execute("wallstyleedit", &json!({})).unwrap();
     let styles = r["styles"].as_array().unwrap();
-    assert_eq!(styles.len(), 6);
+    assert_eq!(styles.len(), 23);
     assert!(styles.iter().all(|st| st["standard"] == json!(true)));
     assert_eq!(styles[1]["thickness"], json!(332.5));
     s.execute("wallstyleedit", &json!({"name": "Mine", "copyFrom": "Concrete 200", "description": "A copy"})).unwrap();
     let r = s.execute("wallstyleedit", &json!({})).unwrap();
     let names: Vec<&str> = r["styles"].as_array().unwrap().iter().map(|st| st["name"].as_str().unwrap()).collect();
     assert_eq!(names.first(), Some(&"Mine"));
-    assert_eq!(names.len(), 7);
+    assert_eq!(names.len(), 24);
 }
 
 #[test]
@@ -668,4 +668,16 @@ fn moving_copying_or_erasing_an_opening_recuts_the_wall_by_itself() {
 fn openings_after_add(s: &mut Session, at: [i32; 2]) -> Handle {
     s.execute("openingadd", &json!({"at": at, "type": "door"})).unwrap();
     openings(s)[0].0
+}
+
+#[test]
+fn openingadd_takes_a_style_and_openingedit_changes_it() {
+    let mut s = metric();
+    s.execute("walladd", &json!({"points": [[0, 0], [6000, 0]], "style": "Concrete 200"})).unwrap();
+    let r = s.execute("openingadd", &json!({"at": [3000, 0], "type": "window", "style": "sliding"})).unwrap();
+    let h = r["handle"].as_str().unwrap().to_string();
+    assert!(openings(&s).iter().any(|x| x.1.style == cadcraft_doc::OpeningStyle::Sliding));
+    s.execute("openingedit", &json!({"handle": h, "style": "fixed"})).unwrap();
+    assert!(openings(&s).iter().any(|x| x.1.style == cadcraft_doc::OpeningStyle::Fixed));
+    assert!(s.execute("openingadd", &json!({"at": [3000, 0], "style": "nope"})).is_err());
 }

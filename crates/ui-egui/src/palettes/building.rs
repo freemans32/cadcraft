@@ -3,7 +3,7 @@
 //! rather than from a fixed list of tools.
 
 use cadcraft_color::Color;
-use cadcraft_doc::{AccessoryKind, AhuKind, AirDirection, ComponentFunction, OpeningKind, TerminalKind};
+use cadcraft_doc::{AccessoryKind, AhuKind, AirDirection, ComponentFunction, OpeningKind, OpeningStyle, TerminalKind};
 use egui::{Rect, Sense, Stroke, pos2, vec2};
 
 use super::hvachelp;
@@ -376,55 +376,92 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
     }
 }
 
+/// An opening the Architecture tab offers: its label, kind, drawing style, and width, height and sill, mm.
+type Preset = (&'static str, OpeningKind, OpeningStyle, (f64, f64, f64));
+
+const DOORS: &[Preset] = &[
+    ("Single door", OpeningKind::Door, OpeningStyle::Standard, (900.0, 2100.0, 0.0)),
+    ("Double door", OpeningKind::DoubleDoor, OpeningStyle::Standard, (1400.0, 2100.0, 0.0)),
+    ("Exterior single door", OpeningKind::Door, OpeningStyle::Standard, (1000.0, 2100.0, 0.0)),
+    ("Exterior double door", OpeningKind::DoubleDoor, OpeningStyle::Standard, (1800.0, 2100.0, 0.0)),
+    ("Door-window block", OpeningKind::DoubleDoor, OpeningStyle::Standard, (1800.0, 2200.0, 0.0)),
+    ("Sliding door", OpeningKind::Door, OpeningStyle::Sliding, (1800.0, 2100.0, 0.0)),
+    ("Exterior sliding double door", OpeningKind::DoubleDoor, OpeningStyle::Sliding, (2400.0, 2100.0, 0.0)),
+    ("Pocket sliding door", OpeningKind::Door, OpeningStyle::Pocket, (900.0, 2100.0, 0.0)),
+    ("Folding single door", OpeningKind::Door, OpeningStyle::Folding, (800.0, 2100.0, 0.0)),
+    ("Folding double door", OpeningKind::DoubleDoor, OpeningStyle::Folding, (1600.0, 2100.0, 0.0)),
+    ("Pass-through (rectangle)", OpeningKind::Bay, OpeningStyle::Standard, (1000.0, 2100.0, 0.0)),
+    ("Tilting door", OpeningKind::Door, OpeningStyle::Tilting, (2400.0, 2100.0, 0.0)),
+    ("Elevator door (centre)", OpeningKind::Door, OpeningStyle::CentreParting, (1100.0, 2100.0, 0.0)),
+    ("Elevator door (side)", OpeningKind::Door, OpeningStyle::Sliding, (1100.0, 2100.0, 0.0)),
+    ("Revolving door", OpeningKind::Door, OpeningStyle::Revolving, (2000.0, 2200.0, 0.0)),
+];
+
+const WINDOWS: &[Preset] = &[
+    ("Window", OpeningKind::Window, OpeningStyle::Standard, (1200.0, 1200.0, 900.0)),
+    ("Wide window", OpeningKind::Window, OpeningStyle::Standard, (2400.0, 1200.0, 900.0)),
+    ("Casement window, 1 leaf", OpeningKind::Window, OpeningStyle::Casement, (700.0, 1200.0, 900.0)),
+    ("Casement window, 2 leaves", OpeningKind::Window, OpeningStyle::DoubleCasement, (1200.0, 1200.0, 900.0)),
+    ("Sliding window", OpeningKind::Window, OpeningStyle::Sliding, (1500.0, 1200.0, 900.0)),
+    ("Fixed window", OpeningKind::Window, OpeningStyle::Fixed, (1000.0, 1200.0, 900.0)),
+    ("Roof window", OpeningKind::Window, OpeningStyle::Skylight, (780.0, 980.0, 0.0)),
+];
+
 fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
     let styles = app.session.doc().map(|d| d.available_wall_styles()).unwrap_or_default();
     let current = app.session.last_used.wall_style.clone();
     let mut draw: Option<String> = None;
     let mut start: Option<&'static str> = None;
     let mut cleanup = false;
-    let opening = app.session.last_used.opening.kind;
-    let mut chosen_opening: Option<OpeningKind> = None;
+    let last = app.session.last_used.opening.clone();
+    let mut chosen: Option<Preset> = None;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        header(ui, "Walls");
-        for (i, st) in styles.iter().enumerate() {
-            let selected = st.name.eq_ignore_ascii_case(&current) || (current.is_empty() && i == 0);
-            if row_button(ui, &st.name, selected, |p, r| paint_style(p, r, st)) {
-                draw = Some(st.name.clone());
+        let section = |ui: &mut egui::Ui, title: &str, open: bool, body: &mut dyn FnMut(&mut egui::Ui)| {
+            egui::CollapsingHeader::new(crate::i18n::t(title)).id_salt(title).default_open(open).show(ui, |ui| {
+                ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                body(ui);
+            });
+        };
+        section(ui, "Walls", true, &mut |ui| {
+            for (i, st) in styles.iter().enumerate() {
+                let selected = st.name.eq_ignore_ascii_case(&current) || (current.is_empty() && i == 0);
+                if row_button(ui, crate::i18n::t(&st.name), selected, |p, r| paint_style(p, r, st)) {
+                    draw = Some(st.name.clone());
+                }
             }
+        });
+        for (title, list) in [("Doors", DOORS), ("Windows", WINDOWS)] {
+            section(ui, title, true, &mut |ui| {
+                for &(label, kind, style, size) in list {
+                    let selected = last.kind == kind && last.style == style && last.size.unwrap_or_else(|| kind.default_size_mm()) == size;
+                    if row_button(ui, crate::i18n::t(label), selected, |_, _| {}) {
+                        chosen = Some((label, kind, style, size));
+                    }
+                }
+            });
         }
-        ui.add_space(6.0);
-        separator(ui);
-        header(ui, "Openings");
-        for (kind, label) in
-            [(OpeningKind::Door, "Door"), (OpeningKind::DoubleDoor, "Double door"), (OpeningKind::Window, "Window"), (OpeningKind::Bay, "Bay")]
-        {
-            if row_button(ui, crate::i18n::t(label), kind == opening, |_, _| {}) {
-                chosen_opening = Some(kind);
+        section(ui, "Tools", true, &mut |ui| {
+            if row_button(ui, crate::i18n::t("Edit Wall"), false, |_, _| {}) {
+                start = Some("walledit");
             }
-        }
-        ui.add_space(6.0);
-        separator(ui);
-        header(ui, "Tools");
-        if row_button(ui, crate::i18n::t("Edit Wall"), false, |_, _| {}) {
-            start = Some("walledit");
-        }
-        if row_button(ui, crate::i18n::t("Wall Styles"), false, |_, _| {}) {
-            start = Some("wallstyleedit");
-        }
-        if row_button(ui, crate::i18n::t("Wall Junctions"), false, |_, _| {}) {
-            cleanup = true;
-        }
+            if row_button(ui, crate::i18n::t("Wall Styles"), false, |_, _| {}) {
+                start = Some("wallstyleedit");
+            }
+            if row_button(ui, crate::i18n::t("Wall Junctions"), false, |_, _| {}) {
+                cleanup = true;
+            }
+        });
     });
     if let Some(name) = draw {
         // The style clicked becomes WALLADD's style, then WALLADD starts with it.
         app.session.last_used.wall_style = name;
         app.cmd.buffer.clear();
         app.start("walladd");
-    } else if let Some(kind) = chosen_opening {
-        // The type clicked becomes OPENINGADD's, at its own size, then it starts with it.
+    } else if let Some((_, kind, style, size)) = chosen {
+        // The opening clicked becomes OPENINGADD's kind, style and size, then it starts with them.
         let last = &mut app.session.last_used.opening;
-        (last.kind, last.size) = (kind, None);
+        (last.kind, last.style, last.size) = (kind, style, Some(size));
         app.cmd.buffer.clear();
         app.start("openingadd");
     } else if let Some(cmd) = start {

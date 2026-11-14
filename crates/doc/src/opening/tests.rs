@@ -211,3 +211,21 @@ fn many_openings_in_one_wall_are_all_cut_and_a_hostile_cut_is_refused() {
     odd.joints.openings = vec![crate::OpeningCut { segment: 9, from: 0.0, to: 100.0 }];
     assert!(odd.generate().is_ok());
 }
+
+#[test]
+fn every_style_draws_and_fills_the_opening_with_its_own_joinery() {
+    use crate::OpeningStyle;
+    let mut counts = Vec::new();
+    for style in OpeningStyle::ALL {
+        let mut p = OpeningParams::new(OpeningKind::Door, WallUnits::default());
+        p.style = style;
+        let pieces = p.generate().expect("a symbol");
+        assert!(pieces.len() >= 3, "{style:?} draws more than the two jambs");
+        counts.push((style, pieces.len()));
+        // The style survives its extended data, and old data without one reads as the standard symbol.
+        assert_eq!(OpeningParams::from_xdata(&p.to_xdata().unwrap()).map(|q| q.style), Some(style));
+        assert_eq!(OpeningStyle::parse(style.name()), Some(style));
+    }
+    let old = serde_json::json!({"kind": "door", "widthMm": 900.0, "heightMm": 2100.0, "sillMm": 0.0});
+    assert_eq!(serde_json::from_value::<OpeningParams>(old).map(|q| q.style).ok(), Some(OpeningStyle::Standard));
+}

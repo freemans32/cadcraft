@@ -79,12 +79,82 @@ impl OpeningKind {
     }
 }
 
+/// How an opening is drawn in plan: its joinery, with the same kind (door, window...) and sizes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OpeningStyle {
+    /// The swing of a door, the glazing lines of a window.
+    #[default]
+    Standard,
+    /// Two leaves sliding past each other (a sliding door or window, an elevator door opening to one side).
+    Sliding,
+    /// A leaf sliding into the thickness of the wall.
+    Pocket,
+    /// A folding door: a zigzag across the opening.
+    Folding,
+    /// A tilting (garage) door: a leaf across the opening, crossed.
+    Tilting,
+    /// Two leaves parting at the centre (an elevator door).
+    CentreParting,
+    /// A revolving door: a circle with its four wings.
+    Revolving,
+    /// A window with a leaf swinging on a hinge.
+    Casement,
+    /// A window with two leaves swinging.
+    DoubleCasement,
+    /// A window that does not open.
+    Fixed,
+    /// A roof window: the whole thickness of the wall, crossed.
+    Skylight,
+}
+
+impl OpeningStyle {
+    pub const ALL: [OpeningStyle; 11] = [
+        OpeningStyle::Standard,
+        OpeningStyle::Sliding,
+        OpeningStyle::Pocket,
+        OpeningStyle::Folding,
+        OpeningStyle::Tilting,
+        OpeningStyle::CentreParting,
+        OpeningStyle::Revolving,
+        OpeningStyle::Casement,
+        OpeningStyle::DoubleCasement,
+        OpeningStyle::Fixed,
+        OpeningStyle::Skylight,
+    ];
+
+    /// The name a command takes.
+    pub fn name(self) -> &'static str {
+        match self {
+            OpeningStyle::Standard => "standard",
+            OpeningStyle::Sliding => "sliding",
+            OpeningStyle::Pocket => "pocket",
+            OpeningStyle::Folding => "folding",
+            OpeningStyle::Tilting => "tilting",
+            OpeningStyle::CentreParting => "centreParting",
+            OpeningStyle::Revolving => "revolving",
+            OpeningStyle::Casement => "casement",
+            OpeningStyle::DoubleCasement => "doubleCasement",
+            OpeningStyle::Fixed => "fixed",
+            OpeningStyle::Skylight => "skylight",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<OpeningStyle> {
+        let t = text.trim().to_ascii_lowercase();
+        OpeningStyle::ALL.into_iter().find(|s| s.name().to_ascii_lowercase() == t)
+    }
+}
+
 /// An opening: what its block reference keeps. The block's origin is the opening's centre on the
 /// wall's path; its x axis runs along the wall and its y axis to the left of the wall's direction.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpeningParams {
     pub kind: OpeningKind,
+    /// How it is drawn; absent in drawings made before styles existed (the standard symbol).
+    #[serde(default)]
+    pub style: OpeningStyle,
     pub width_mm: f64,
     pub height_mm: f64,
     /// Height of the sill above the floor, mm.
@@ -117,7 +187,18 @@ impl OpeningParams {
     /// A new opening of `kind` at its default size, across a wall of 200 mm.
     pub fn new(kind: OpeningKind, units: WallUnits) -> OpeningParams {
         let (width_mm, height_mm, sill_mm) = kind.default_size_mm();
-        OpeningParams { kind, width_mm, height_mm, sill_mm, flip_side: false, flip_hand: false, left_mm: 100.0, right_mm: -100.0, units }
+        OpeningParams {
+            kind,
+            style: OpeningStyle::Standard,
+            width_mm,
+            height_mm,
+            sill_mm,
+            flip_side: false,
+            flip_hand: false,
+            left_mm: 100.0,
+            right_mm: -100.0,
+            units,
+        }
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -168,6 +249,7 @@ impl OpeningParams {
             kind: EntityKind::Arc(crate::Arc { center: v3(centre), radius, start, end }),
         };
         let mut v = vec![line(DOOR_LAYER, Vec2::new(-hw, right), Vec2::new(-hw, left)), line(DOOR_LAYER, Vec2::new(hw, right), Vec2::new(hw, left))];
+        let lay = if self.kind == OpeningKind::Window { WINDOW_LAYER } else { DOOR_LAYER };
         let (pi, half_pi) = (std::f64::consts::PI, std::f64::consts::FRAC_PI_2);
         // A leaf of `len` hinged at x = `hinge_x`, open to the side the door swings to: the leaf
         // across the wall, the arc of its swing back to the closed position.
@@ -177,7 +259,7 @@ impl OpeningParams {
             let half = u(LEAF_MM) / 2.0;
             let tip = y_face + s * len;
             let leaf = rect(
-                DOOR_LAYER,
+                lay,
                 [
                     Vec2::new(hinge_x - half, y_face),
                     Vec2::new(hinge_x + half, y_face),
@@ -193,8 +275,75 @@ impl OpeningParams {
                 (false, false) => (half_pi, pi),
                 (false, true) => (pi, 3.0 * half_pi),
             };
-            vec![leaf, arc(DOOR_LAYER, Vec2::new(hinge_x, y_face), len, a0, a1)]
+            vec![leaf, arc(lay, Vec2::new(hinge_x, y_face), len, a0, a1)]
         };
+        let mid = (left + right) / 2.0;
+        let gap = 0.15 * (left - right);
+        let leaf_h = u(LEAF_MM) / 2.0;
+        // A leaf across the opening between `x0` and `x1`, centred on `y`.
+        let slab = |x0: f64, x1: f64, y: f64| {
+            rect(lay, [Vec2::new(x0, y - leaf_h), Vec2::new(x1, y - leaf_h), Vec2::new(x1, y + leaf_h), Vec2::new(x0, y + leaf_h)])
+        };
+        match self.style {
+            OpeningStyle::Standard => {}
+            OpeningStyle::Sliding => {
+                v.push(slab(-hw, 0.1 * hw, mid + gap));
+                v.push(slab(-0.1 * hw, hw, mid - gap));
+                return Ok(v);
+            }
+            OpeningStyle::Pocket => {
+                // The leaf drawn half drawn into the wall, on the side of the hinge.
+                let (x0, x1) = if self.flip_hand { (-2.0 * hw, 0.0) } else { (0.0, 2.0 * hw) };
+                v.push(slab(x0, x1, mid));
+                return Ok(v);
+            }
+            OpeningStyle::Folding => {
+                for k in 0..4 {
+                    let (x0, x1) = (-hw + f64::from(k) * hw / 2.0, -hw + f64::from(k + 1) * hw / 2.0);
+                    let sign = if k % 2 == 0 { 1.0 } else { -1.0 };
+                    v.push(line(lay, Vec2::new(x0, mid - sign * gap), Vec2::new(x1, mid + sign * gap)));
+                }
+                return Ok(v);
+            }
+            OpeningStyle::Tilting => {
+                v.push(slab(-hw, hw, mid));
+                v.push(line(lay, Vec2::new(-hw, mid - gap), Vec2::new(hw, mid + gap)));
+                v.push(line(lay, Vec2::new(-hw, mid + gap), Vec2::new(hw, mid - gap)));
+                return Ok(v);
+            }
+            OpeningStyle::CentreParting => {
+                v.push(slab(-hw, 0.0, mid));
+                v.push(slab(0.0, hw, mid));
+                return Ok(v);
+            }
+            OpeningStyle::Revolving => {
+                v.push(HvacPiece { layer: lay, kind: EntityKind::Circle(crate::Circle { center: v3(Vec2::new(0.0, mid)), radius: hw }) });
+                v.push(line(lay, Vec2::new(-hw, mid), Vec2::new(hw, mid)));
+                v.push(line(lay, Vec2::new(0.0, mid - hw), Vec2::new(0.0, mid + hw)));
+                return Ok(v);
+            }
+            OpeningStyle::Fixed => {
+                v.push(line(WINDOW_LAYER, Vec2::new(-hw, mid), Vec2::new(hw, mid)));
+                return Ok(v);
+            }
+            OpeningStyle::Skylight => {
+                v.push(line(WINDOW_LAYER, Vec2::new(-hw, left), Vec2::new(hw, right)));
+                v.push(line(WINDOW_LAYER, Vec2::new(-hw, right), Vec2::new(hw, left)));
+                return Ok(v);
+            }
+            OpeningStyle::Casement => {
+                v.push(line(WINDOW_LAYER, Vec2::new(-hw, mid), Vec2::new(hw, mid)));
+                let (hinge_x, toward_right_end) = if self.flip_hand { (hw, false) } else { (-hw, true) };
+                v.extend(leaf(hinge_x, 2.0 * hw, toward_right_end));
+                return Ok(v);
+            }
+            OpeningStyle::DoubleCasement => {
+                v.push(line(WINDOW_LAYER, Vec2::new(-hw, mid), Vec2::new(hw, mid)));
+                v.extend(leaf(-hw, hw, true));
+                v.extend(leaf(hw, hw, false));
+                return Ok(v);
+            }
+        }
         match self.kind {
             OpeningKind::Door => {
                 // The hinge at the start of the opening by default, the leaf swinging toward the end.
@@ -207,8 +356,6 @@ impl OpeningParams {
             }
             OpeningKind::Window => {
                 // Three lines of glazing across the width, the middle one on the path's side of the wall's middle.
-                let mid = (left + right) / 2.0;
-                let gap = 0.15 * (left - right);
                 for y in [mid - gap, mid, mid + gap] {
                     v.push(line(WINDOW_LAYER, Vec2::new(-hw, y), Vec2::new(hw, y)));
                 }
