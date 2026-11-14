@@ -365,6 +365,43 @@ impl OpeningParams {
         Ok(v)
     }
 
+    /// The two temporary dimensions shown while the opening is placed, in the block's coordinates:
+    /// from the face at the start of the wall to the nearer edge of the opening (`to_start`), and
+    /// from the other edge to the face at the end (`to_end`), both in drawing units, drawn beside
+    /// the wall's left face with their value in millimetres. `flip`: the text is turned over, for a
+    /// wall running leftward, so it reads the right way up.
+    pub fn provisional_dimensions(&self, to_start: f64, to_end: f64, flip: bool) -> Vec<HvacPiece> {
+        let u = |mm: f64| self.units.to_units(mm);
+        let (hw, y) = (u(self.width_mm) / 2.0, u(self.left_mm) + u(300.0));
+        let (tick, height) = (u(60.0), u(120.0));
+        let line = |a: Vec2, b: Vec2| HvacPiece { layer: DOOR_LAYER, kind: EntityKind::Line(Line { a: v3(a), b: v3(b) }) };
+        let mut out = Vec::new();
+        for (from, to, value) in [(-hw - to_start, -hw, to_start), (hw, hw + to_end, to_end)] {
+            if !(value.is_finite() && value > 1e-9) {
+                continue;
+            }
+            out.push(line(Vec2::new(from, y), Vec2::new(to, y)));
+            for x in [from, to] {
+                out.push(line(Vec2::new(x, y - tick), Vec2::new(x, y + tick)));
+            }
+            let at = Vec2::new((from + to) / 2.0, y + if flip { -2.0 } else { 2.0 } * tick);
+            let text = crate::Text {
+                insert: v3(at),
+                align_pt: Some(v3(at)),
+                height,
+                value: format!("{:.0}", value * self.units.mm_per_unit),
+                rotation: if flip { std::f64::consts::PI } else { 0.0 },
+                width_factor: 1.0,
+                oblique: 0.0,
+                style: "Standard".into(),
+                halign: crate::HAlign::Center,
+                valign: crate::VAlign::Middle,
+            };
+            out.push(HvacPiece { layer: DOOR_LAYER, kind: EntityKind::Text(text) });
+        }
+        out
+    }
+
     pub fn to_xdata(&self) -> Result<Vec<RawTag>> {
         xdata::to_xdata(OPENING_APP, XDATA_FORMAT, self)
     }
@@ -401,6 +438,19 @@ pub struct WallHit {
     pub right_mm: f64,
     /// How far the point is from the path.
     pub off: f64,
+    /// Where the face of the wall the segment's start meets is, along the segment from its start
+    /// (0 when it meets none), and where the face at its end is (the length when it meets none):
+    /// distances to an opening are taken from these.
+    pub start_face: f64,
+    pub end_face: f64,
+}
+
+impl WallHit {
+    /// The part of the segment an opening may take: from the face at the start (never before the
+    /// segment's start) to the face at the end (never past its end).
+    pub fn room(&self) -> (f64, f64) {
+        (self.start_face.max(0.0), self.end_face.min(self.length))
+    }
 }
 
 impl crate::Drawing {
@@ -446,11 +496,13 @@ impl crate::Drawing {
                         left_mm: left,
                         right_mm: right,
                         off,
+                        start_face: 0.0,
+                        end_face: length,
                     });
                 }
             }
         }
-        best
+        best.map(|h| self.with_faces(h))
     }
 
     /// Segment `segment` of wall `wall` as a [`WallHit`] at its start: the base for placing an
@@ -473,17 +525,39 @@ impl crate::Drawing {
         }
         let (a, b) = (place.to_world(*path.get(segment)?), place.to_world(*path.get((segment + 1) % n)?));
         let length = a.dist(b);
-        (length > 1e-9).then(|| WallHit {
-            wall,
-            segment,
-            foot: a,
-            angle: (b - a).angle(),
-            along: 0.0,
-            length,
-            left_mm: left,
-            right_mm: right,
-            off: 0.0,
-        })
+        (length > 1e-9)
+            .then(|| WallHit {
+                wall,
+                segment,
+                foot: a,
+                angle: (b - a).angle(),
+                along: 0.0,
+                length,
+                left_mm: left,
+                right_mm: right,
+                off: 0.0,
+                start_face: 0.0,
+                end_face: length,
+            })
+            .map(|h| self.with_faces(h))
+    }
+
+    /// `hit` with the faces of the walls its segment's ends meet: only the first and the last segment
+    /// of an open wall have ends that meet a wall.
+    fn with_faces(&self, mut hit: WallHit) -> WallHit {
+        let Some(w) = self.entity(hit.wall).and_then(|e| crate::wall_of(e)) else { return hit };
+        let segments = w.centreline().len().saturating_sub(1);
+        if w.closed || (hit.segment != 0 && hit.segment + 1 != segments) {
+            return hit;
+        }
+        let (start, end) = self.wall_end_faces(hit.wall);
+        if hit.segment == 0 {
+            hit.start_face = start.unwrap_or(0.0);
+        }
+        if hit.segment + 1 == segments {
+            hit.end_face = hit.length - end.unwrap_or(0.0);
+        }
+        hit
     }
 
     /// Where opening `h` lies in its wall, when it is in one.
@@ -528,6 +602,9 @@ impl crate::Drawing {
         Ok(())
     }
 }
+
+mod recognize;
+pub use recognize::{DOOR_WORDS, OLD_OPENING_LAYER, OpeningCandidate, WINDOW_WORDS};
 
 #[cfg(test)]
 mod tests;

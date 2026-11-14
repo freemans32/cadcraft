@@ -20,6 +20,13 @@ pub fn specs() -> Vec<CommandSpec> {
                  + segment? (default 0), type?: door|doubleDoor|window|bay, style?: standard|sliding|pocket|folding|tilting|centreParting|revolving|casement|doubleCasement|fixed|skylight, width? | height? | sill? (mm), flipSide?, flipHand?} → {handle, type}",
             )
             .interactive(|s| Ok(Box::new(OpeningAddM::new(s)))),
+        CommandSpec::new("openingconvert", "Convert to Openings", run_convert)
+            .params(
+                "{handles? (the block references to look at, default all of model space), apply? (true: make the openings and set the old blocks aside on the frozen \
+                 layer A-OPENING-OLD; default false: only list them), doors? | windows? (words that name a door or a window in a block or layer name, replacing the \
+                 defaults door, porte / window, fenetre, vitr, glaz)} → {found: [{handle, type, width, wall, ...}], created?, skipped?}",
+            )
+            .interactive(|s| Ok(Box::new(ConvertM::new(s)))),
         CommandSpec::new("openingedit", "Edit Opening", run_edit).params(
             "{handle | handles, type?, style?, width? | height? | sill? (mm), flipSide?, flipHand?, distance? (mm from `from` to the nearest edge), \
              from?: start|end} → {changed}",
@@ -94,15 +101,25 @@ fn units_of(d: &Drawing) -> WallUnits {
     WallUnits::of(d)
 }
 
-/// Whether the opening of width `width_mm` fits in the segment of `hit`.
+/// Whether the opening of width `width_mm` fits in the part of the segment of `hit` between the
+/// faces of the walls at its ends.
 fn fits(hit: &WallHit, width_mm: f64, mm_per_unit: f64) -> bool {
-    width_mm / mm_per_unit <= hit.length + 1e-9
+    let (lo, hi) = hit.room();
+    width_mm / mm_per_unit <= hi - lo + 1e-9
 }
 
-/// The centre of an opening whose nearest edge is `distance_mm` from the start (or the end) of the segment.
+/// Whether an opening of `width` (drawing units) centred `along` the segment of `hit` is between
+/// the faces of the walls at its ends.
+fn within(hit: &WallHit, along: f64, width: f64) -> bool {
+    let (lo, hi) = hit.room();
+    along - width / 2.0 >= lo - 1e-9 && along + width / 2.0 <= hi + 1e-9
+}
+
+/// The centre of an opening whose nearest edge is `distance_mm` from the face at the start (or the
+/// end) of the segment: the face of the wall the segment meets there, or its end when it meets none.
 fn centre_along(hit: &WallHit, width_mm: f64, distance_mm: f64, from_end: bool, mm_per_unit: f64) -> f64 {
     let (w, d) = (width_mm / mm_per_unit, distance_mm / mm_per_unit);
-    if from_end { hit.length - d - w / 2.0 } else { d + w / 2.0 }
+    if from_end { hit.end_face - d - w / 2.0 } else { hit.start_face + d + w / 2.0 }
 }
 
 /// Puts the opening on `hit`'s segment with its centre `along` from the segment's start, kept inside it.
@@ -112,7 +129,8 @@ fn place(s: &mut Session, mut p: OpeningParams, hit: &WallHit, along: f64) -> Re
         return Err(other("The opening is wider than the wall segment."));
     }
     let half = p.width() / 2.0;
-    let along = along.clamp(half, (hit.length - half).max(half));
+    let (lo, hi) = hit.room();
+    let along = along.clamp(half + lo, (hi - half).max(half + lo));
     let d = Vec2::from_angle(hit.angle);
     let centre = hit.foot - d * hit.along + d * along;
     (p.left_mm, p.right_mm) = (hit.left_mm, hit.right_mm);
@@ -163,7 +181,7 @@ fn run_add(s: &mut Session, p: &Value) -> Result<Value> {
         let hit = s.doc()?.wall_segment(wall, segment).ok_or_else(|| other("Cannot find that wall segment."))?;
         let along = centre_along(&hit, params.width_mm, distance, from_end, units);
         // A distance that puts the opening off the wall is refused, not moved.
-        if along - params.width() / 2.0 < -1e-9 || along + params.width() / 2.0 > hit.length + 1e-9 {
+        if !within(&hit, along, params.width()) {
             return Err(other("The opening does not fit there: the distance puts it off the wall."));
         }
         place(s, params, &hit, along)?
@@ -171,6 +189,126 @@ fn run_add(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(CMD, "`at` ([x, y]) or `wall` + `distance` is required"));
     };
     Ok(json!({ "handle": h.hex(), "type": kind.name() }))
+}
+
+/// The layer the blocks of a converted plan are set aside on (frozen).
+const OLD_LAYER: &str = cadcraft_doc::OLD_OPENING_LAYER;
+/// Most openings one conversion makes.
+const MAX_CONVERTED: usize = 2_000;
+
+fn words_param(cmd: &str, p: &Value, key: &str) -> Result<Vec<String>> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(a)) if a.len() <= 64 => {
+            a.iter().map(|w| w.as_str().map(str::to_string).ok_or_else(|| bad(cmd, format!("`{key}` must be a list of words")))).collect()
+        }
+        Some(_) => Err(bad(cmd, format!("`{key}` must be a list of at most 64 words"))),
+    }
+}
+
+fn candidate_value(c: &cadcraft_doc::OpeningCandidate) -> Value {
+    json!({
+        "handle": c.block_ref.hex(),
+        "type": c.kind.name(),
+        "width": c.width_mm,
+        "at": [c.centre.x, c.centre.y],
+        "wall": c.wall.hex(),
+    })
+}
+
+/// OPENINGCONVERT: the door and window blocks of a plan that lie on walls, as openings.
+fn run_convert(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "openingconvert";
+    let only = match p.get("handles") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(super::arch::handles_param(CMD, p)?),
+    };
+    let (doors, windows) = (words_param(CMD, p, "doors")?, words_param(CMD, p, "windows")?);
+    let found = s.doc()?.recognise_openings(only.as_deref(), &doors, &windows);
+    let list: Vec<Value> = found.iter().map(candidate_value).collect();
+    if !flag(CMD, p, "apply")?.unwrap_or(false) {
+        return Ok(json!({ "found": list }));
+    }
+    let units = units_of(s.doc()?);
+    let (mut created, mut skipped) = (Vec::new(), Vec::new());
+    for c in found.iter().take(MAX_CONVERTED) {
+        let mut params = OpeningParams::new(c.kind, units);
+        params.width_mm = c.width_mm;
+        let Some(hit) = s.doc()?.wall_segment(c.wall, c.segment) else {
+            skipped.push(c.block_ref.hex());
+            continue;
+        };
+        match place(s, params, &hit, c.along) {
+            Ok(h) => {
+                created.push(h.hex());
+                // The old block is set aside, not erased: on a frozen layer of its own.
+                let d = s.doc_mut()?;
+                if d.ensure_layer(OLD_LAYER)
+                    && let Some(l) = d.layer_mut(OLD_LAYER)
+                {
+                    l.frozen = true;
+                }
+                d.modify_entity(c.block_ref, |e| e.common.layer = OLD_LAYER.into()).map_err(doc_err)?;
+            }
+            Err(_) => skipped.push(c.block_ref.hex()),
+        }
+    }
+    Ok(json!({ "found": list, "created": created, "skipped": skipped }))
+}
+
+/// The prompt of OPENINGCONVERT: what was found, then whether to convert it.
+struct ConvertM {
+    only: Option<Vec<Handle>>,
+}
+
+impl ConvertM {
+    fn new(s: &Session) -> Self {
+        let selected = s.selection();
+        ConvertM { only: (!selected.is_empty()).then_some(selected) }
+    }
+    fn handles_json(&self) -> Value {
+        self.only.as_ref().map_or(Value::Null, |h| json!(h.iter().map(|x| x.hex()).collect::<Vec<_>>()))
+    }
+}
+
+impl Interactive for ConvertM {
+    fn name(&self) -> &'static str {
+        "OPENINGCONVERT"
+    }
+    fn begin(&mut self, s: &mut Session) -> Result<Step> {
+        let r = run_convert(s, &json!({ "handles": self.handles_json() }))?;
+        let found = r["found"].as_array().map_or(0, Vec::len);
+        if found == 0 {
+            s.echo("No door or window block found on a wall.");
+            return Ok(Step::Done);
+        }
+        let count = |t: &str| r["found"].as_array().map_or(0, |a| a.iter().filter(|c| c["type"] == t).count());
+        s.echo(format!(
+            "{found} block(s) found on walls: {} door(s), {} double door(s), {} window(s).",
+            count("door"),
+            count("doubleDoor"),
+            count("window")
+        ));
+        Ok(Step::Continue)
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new("Convert them to openings? The old blocks are kept on a frozen layer", super::curves::KW).kw(&["Yes", "No"]).default("Yes")
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Enter => self.input(s, Input::Keyword("Yes".into())),
+            Input::Keyword(k) | Input::Text(k) if k.eq_ignore_ascii_case("yes") || k.eq_ignore_ascii_case("y") => {
+                let r = run_convert(s, &json!({ "handles": self.handles_json(), "apply": true }))?;
+                let n = |k: &str| r[k].as_array().map_or(0, Vec::len);
+                s.echo(format!("{} opening(s) made, {} left as they were.", n("created"), n("skipped")));
+                Ok(Step::Done)
+            }
+            _ => Ok(Step::Done),
+        }
+    }
+    fn preview(&self, _s: &Session, _c: Vec2) -> Vec<EntityKind> {
+        Vec::new()
+    }
 }
 
 fn run_edit(s: &mut Session, p: &Value) -> Result<Value> {
@@ -215,7 +353,7 @@ fn run_edit(s: &mut Session, p: &Value) -> Result<Value> {
             Some(dist) => centre_along(&seg, o.width_mm, dist, from_end, units),
             None => hit.along,
         };
-        if !fits(&seg, o.width_mm, units) || along - o.width() / 2.0 < -1e-9 || along + o.width() / 2.0 > seg.length + 1e-9 {
+        if !fits(&seg, o.width_mm, units) || !within(&seg, along, o.width()) {
             return Err(other("The opening does not fit there: it would go off the wall."));
         }
         let dir = Vec2::from_angle(seg.angle);
@@ -340,7 +478,7 @@ impl OpeningAddM {
                 let params = params_of(&self.last, units);
                 let hit = s.doc()?.wall_segment(wall, segment).ok_or_else(|| other("Cannot find that wall."))?;
                 let along = centre_along(&hit, params.width_mm, dist, from_end, units.mm_per_unit);
-                if along - params.width() / 2.0 < -1e-9 || along + params.width() / 2.0 > hit.length + 1e-9 {
+                if !within(&hit, along, params.width()) {
                     s.echo("The opening does not fit there: the distance puts it off the wall.");
                     return Ok(Step::Continue);
                 }
@@ -430,11 +568,21 @@ impl Interactive for OpeningAddM {
         let mut p = params_of(&self.last, units);
         (p.left_mm, p.right_mm) = (hit.left_mm, hit.right_mm);
         let half = p.width() / 2.0;
-        if hit.length < 2.0 * half {
+        let (lo, hi) = hit.room();
+        if hi - lo < 2.0 * half {
             return Vec::new();
         }
-        let along = hit.along.clamp(half, hit.length - half);
+        let along = hit.along.clamp(half + lo, hi - half);
         let dir = Vec2::from_angle(hit.angle);
-        p.generate().map(|pieces| preview_entities(pieces, hit.foot - dir * hit.along + dir * along, hit.angle)).unwrap_or_default()
+        // The symbol, and the two dimensions from the faces at the ends of the wall to it.
+        let flip = dir.x < 0.0;
+        let to_start = along - half - hit.start_face;
+        let to_end = hit.end_face - along - half;
+        p.generate()
+            .map(|mut pieces| {
+                pieces.extend(p.provisional_dimensions(to_start, to_end, flip));
+                preview_entities(pieces, hit.foot - dir * hit.along + dir * along, hit.angle)
+            })
+            .unwrap_or_default()
     }
 }

@@ -397,3 +397,25 @@ pub(super) fn paint_quantities(p: &Painter, r: Rect) {
     t.l((3.0, 14.0), (21.0, 14.0), t.acc);
     t.l((10.0, 4.0), (10.0, 20.0), t.acc);
 }
+
+/// A wall seen straight on: its outline with a door and a window.
+pub(super) fn paint_elevation(p: &Painter, r: Rect) {
+    let t = Th::new(p, r);
+    t.rect(2.0, 5.0, 20.0, 14.0, t.base);
+    t.rect(5.0, 10.0, 5.0, 9.0, t.acc);
+    t.rect(13.0, 9.0, 6.0, 5.0, t.acc);
+    t.l((16.0, 9.0), (16.0, 14.0), t.acc);
+}
+
+/// A block turned into an opening: a door symbol and an arrow to the opening in the wall.
+pub(super) fn paint_convert(p: &Painter, r: Rect) {
+    let t = Th::new(p, r);
+    t.l((2.0, 9.0), (8.0, 9.0), t.base);
+    t.l((2.0, 15.0), (8.0, 15.0), t.base);
+    t.l((8.0, 15.0), (8.0, 5.0), t.pt);
+    t.arrow((11.0, 12.0), (15.0, 12.0), t.acc);
+    t.l((16.0, 9.0), (22.0, 9.0), t.base);
+    t.l((16.0, 15.0), (22.0, 15.0), t.base);
+    t.l((17.0, 15.0), (17.0, 9.0), t.acc);
+    t.l((21.0, 15.0), (21.0, 9.0), t.acc);
+}

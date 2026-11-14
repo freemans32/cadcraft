@@ -1576,3 +1576,5 @@ menu	View	视图
 	The spreadsheet button saves them for Excel; each level makes its own file.	电子表格按钮保存供Excel使用；每层一个文件。
 	Export Excel	导出到Excel
 	Export CSV	导出为CSV
+	Wall Elevation	墙立面
+	Convert to Openings	转换为开口

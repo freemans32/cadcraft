@@ -232,3 +232,34 @@ fn every_style_draws_and_fills_the_opening_with_its_own_joinery() {
     let old = serde_json::json!({"kind": "door", "widthMm": 900.0, "heightMm": 2100.0, "sillMm": 0.0});
     assert_eq!(serde_json::from_value::<OpeningParams>(old).map(|q| q.style).ok(), Some(OpeningStyle::Standard));
 }
+
+#[test]
+fn the_temporary_dimensions_run_from_the_faces_to_the_edges_and_say_millimetres() {
+    let p = OpeningParams::new(OpeningKind::Door, WallUnits::default());
+    let texts = |pieces: &[crate::ventilation::HvacPiece]| -> Vec<String> {
+        pieces
+            .iter()
+            .filter_map(|x| match &x.kind {
+                EntityKind::Text(t) => Some(t.value.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    // 300 mm from the face at the start, 700 mm from the one at the end: two dimensions, each a line,
+    // its two ticks and its value.
+    let both = p.provisional_dimensions(300.0, 700.0, false);
+    assert_eq!(both.len(), 8);
+    assert_eq!(texts(&both), ["300", "700"]);
+    // Touching a face: no dimension there.
+    let one = p.provisional_dimensions(0.0, 700.0, false);
+    assert_eq!(texts(&one), ["700"]);
+    assert!(p.provisional_dimensions(f64::NAN, -5.0, false).is_empty());
+    // The first starts at the face and ends on the opening's edge, beside the wall's left face.
+    let EntityKind::Line(l) = &both[0].kind else { panic!("a dimension line") };
+    let hw = p.width() / 2.0;
+    assert!((l.a.x + hw + 300.0).abs() < 1e-9 && (l.b.x + hw).abs() < 1e-9 && l.a.y > p.left_mm);
+    // A wall running leftward gets its text turned over.
+    let turned = p.provisional_dimensions(300.0, 700.0, true);
+    let EntityKind::Text(t) = &turned[3].kind else { panic!("a text") };
+    assert!((t.rotation - std::f64::consts::PI).abs() < 1e-9);
+}

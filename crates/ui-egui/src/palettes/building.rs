@@ -442,6 +442,12 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
             });
         }
         section(ui, "Tools", true, &mut |ui| {
+            if row_button(ui, crate::i18n::t("Wall Elevation"), false, thumbs::paint_elevation) {
+                start = Some("wallelevation");
+            }
+            if row_button(ui, crate::i18n::t("Convert to Openings"), false, thumbs::paint_convert) {
+                start = Some("openingconvert");
+            }
             if row_button(ui, crate::i18n::t("Edit Wall"), false, thumbs::paint_edit_wall) {
                 start = Some("walledit");
             }

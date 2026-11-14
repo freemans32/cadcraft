@@ -593,6 +593,8 @@ struct Hit<'a> {
     /// segment's normal.
     h: f64,
     across: f64,
+    /// A point on the face of the segment's wall nearest the end (the one the end reaches first).
+    near: Vec2,
     /// When the end meets a free end of the other wall (an L corner): the direction that wall
     /// leaves the corner along.
     corner: Option<Vec2>,
@@ -637,8 +639,9 @@ fn end_cut<'a>(p: Vec2, d: Vec2, reach: f64, others: &'a [Vec<Seg>]) -> Option<H
             continue;
         }
         let cut = EndCut { point: s.a + nv * o, dir: u };
+        let near_o = [lo, hi].into_iter().map(|f| ((f - h) / across, f)).min_by(|x, y| x.0.total_cmp(&y.0)).map_or(o, |(_, f)| f);
         if best.as_ref().is_none_or(|(bd, _)| dist < *bd) {
-            best = Some((dist, Hit { cut, seg: s, h, across, corner }));
+            best = Some((dist, Hit { cut, seg: s, h, across, near: s.a + nv * near_o, corner }));
         }
     }
     best.map(|(_, c)| c)
@@ -692,6 +695,35 @@ fn bbox(p: &[Vec2]) -> (Vec2, Vec2) {
 
 fn overlaps(a: &(Vec2, Vec2), b: &(Vec2, Vec2), tol: f64) -> bool {
     a.0.x <= b.1.x + tol && b.0.x <= a.1.x + tol && a.0.y <= b.1.y + tol && b.0.y <= a.1.y + tol
+}
+
+/// Where the visible face of the wall that each end of wall `i` meets lies along the wall: the
+/// distance from the end of its path to that face, inward (drawing units), for the start and for
+/// the end. `None` at an end that meets no wall, and for a closed wall. It is the face nearest the
+/// wall's own body, the one a dimension is taken from.
+pub fn end_faces(walls: &[Placed], i: usize) -> (Option<f64>, Option<f64>) {
+    let Some(w) = walls.get(i).filter(|w| !w.params.closed) else { return (None, None) };
+    let p = w.params.centreline();
+    let others: Vec<Vec<Seg>> = walls.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, x)| segs(x)).collect();
+    let reach = w.params.thickness();
+    let face = |at: Option<&Vec2>, toward: Option<&Vec2>| -> Option<f64> {
+        let (pw, tw) = (w.at.to_world(*at?), w.at.to_world(*toward?));
+        let len = pw.dist(tw);
+        if len <= 0.0 {
+            return None;
+        }
+        let inward = (tw - pw) / len;
+        let hit = end_cut(pw, -inward, reach, &others)?;
+        let seg_len = hit.seg.a.dist(hit.seg.b);
+        if seg_len <= 0.0 {
+            return None;
+        }
+        let nv = ((hit.seg.b - hit.seg.a) / seg_len).perp();
+        let denom = inward.dot(nv);
+        (denom.abs() > 1e-9).then(|| (hit.near - pw).dot(nv) / denom).filter(|s| s.is_finite())
+    };
+    let n = p.len();
+    (face(p.first(), p.get(1)), face(p.last(), n.checked_sub(2).and_then(|k| p.get(k))))
 }
 
 /// The junctions of every wall in `walls` with the others: each wall's new joints, in the

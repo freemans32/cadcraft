@@ -467,12 +467,13 @@ fn opening_section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], openings: &[O
             }
         });
     }
-    // Distances to the edge of the opening, from each end of the wall segment it is in: typing one moves it.
+    // Distances to the edge of the opening, from the face at each end of the wall segment it is in (the
+    // face of the wall it meets, or its end): typing one moves it.
     if let ([o], [h]) = (openings, sel)
         && let Some((_, hit)) = d.opening_host(*h)
     {
         let mm = o.units.mm_per_unit;
-        let (from_start, from_end) = ((hit.along - o.width() / 2.0) * mm, (hit.length - hit.along - o.width() / 2.0) * mm);
+        let (from_start, from_end) = ((hit.along - o.width() / 2.0 - hit.start_face) * mm, (hit.end_face - hit.along - o.width() / 2.0) * mm);
         for (from, label, value) in [("start", "From the start (mm)", from_start), ("end", "From the end (mm)", from_end)] {
             prop_row(ui, label, |ui| {
                 if let Some(v) = number(edit_field(ui, ui.scope_id().with(("opening_distance", from, &ids)), format!("{value:.0}")), bad) {

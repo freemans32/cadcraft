@@ -21,7 +21,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{DocError, EntityKind, Hatch, HatchLoop, Line, LwPolyline, OpeningParams, RawTag, Result, opening_of};
 
+mod elevation;
 mod joint;
+pub use elevation::{ELEVATION_DIM_LAYER, ELEVATION_DOOR_LAYER, ELEVATION_LAYER, ELEVATION_WINDOW_LAYER, ElevationSide};
 pub use joint::{EndCut, ForeignBand, MAX_FOREIGN_BANDS, MAX_OPENINGS_PER_WALL, OpeningCut, Placement, WallJoints};
 
 /// The registered application name of a wall's extended data.
@@ -754,6 +756,33 @@ impl crate::Drawing {
             }
         }
         Ok(redrawn)
+    }
+
+    /// Where the faces of the walls that wall `h` meets lie at its two ends (see [`joint::end_faces`]):
+    /// from the start and from the end of its path, inward, in drawing units; `None` at an end that
+    /// meets no wall.
+    pub fn wall_end_faces(&self, h: crate::Handle) -> (Option<f64>, Option<f64>) {
+        let mut placed = Vec::new();
+        let mut index = None;
+        for e in self.model.iter() {
+            let (EntityKind::Insert(i), Some(p)) = (&e.kind, wall_of(e)) else { continue };
+            if !self.wall_is_intact(e.handle) {
+                continue;
+            }
+            if e.handle == h {
+                index = Some(placed.len());
+            }
+            if placed.len() >= MAX_CLEANUP_WALLS {
+                break;
+            }
+            let at = joint::Placement {
+                insert: Vec2::new(i.insert.x, i.insert.y),
+                rotation: i.rotation,
+                scale: Vec2::new(i.scale.x.signum(), i.scale.y.signum()),
+            };
+            placed.push(joint::Placed { params: p, at });
+        }
+        index.map_or((None, None), |i| joint::end_faces(&placed, i))
     }
 
     /// Whether wall `h`'s block still holds the geometry its parameters generate, and the

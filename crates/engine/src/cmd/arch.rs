@@ -24,6 +24,13 @@ pub fn specs() -> Vec<CommandSpec> {
              patternAngle?, color?, priority?, function?: structure|insulation|finish|membrane|airGap, returnsAtOpenings?}], \
              defaultHeight? (mm), copyFrom?} → {style, regenerated, kept} | {delete: name} | {name, rename: newName}",
         ),
+        CommandSpec::new("wallelevation", "Wall Elevation", run_wallelevation)
+            .params(
+                "{handle | handles, at? ([x, y]: the lower left corner of the first, default below the drawing), side?: right|left (the side the wall is \
+                 seen from, default right: the start of the wall on the left)} → {created: [handles], width}: draws the face of each wall straight on, with \
+                 its openings at their sills and heights and a chain of dimensions below",
+            )
+            .interactive(|s| Ok(Box::new(WallElevationM::new(s)))),
         CommandSpec::new("wallcleanup", "Wall Junctions", run_wallcleanup)
             .params("{} → {regenerated}: joins the walls where they meet (L, T, X), after walls were moved, copied or erased"),
         CommandSpec::new("walledit", "Edit Wall", run_walledit)
@@ -711,6 +718,126 @@ fn wall_spaces(d: &Drawing) -> Vec<cadcraft_doc::Space> {
         }
     }
     v
+}
+
+/// Most walls one WALLELEVATION draws.
+const MAX_ELEVATIONS: usize = 64;
+
+fn side_param(cmd: &str, p: &Value) -> Result<cadcraft_doc::ElevationSide> {
+    match str_param(p, "side") {
+        Some(t) => cadcraft_doc::ElevationSide::parse(t).ok_or_else(|| bad(cmd, "`side` must be right or left")),
+        None => Ok(Default::default()),
+    }
+}
+
+fn run_wallelevation(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "wallelevation";
+    let handles = handles_param(CMD, p)?;
+    if handles.is_empty() || handles.len() > MAX_ELEVATIONS {
+        return Err(bad(CMD, format!("select 1 to {MAX_ELEVATIONS} walls")));
+    }
+    let side = side_param(CMD, p)?;
+    let space = s.space();
+    let units = WallUnits::of(s.doc()?);
+    let gap = units.to_units(2000.0);
+    let mut at = match super::point_param(p, "at") {
+        Some(a) => a,
+        None => {
+            // Below the drawing, at its left edge.
+            let b = s.doc()?.extents(&space);
+            if b.min.is_finite() && b.max.is_finite() { Vec2::new(b.min.x, b.min.y - units.to_units(5000.0)) } else { Vec2::ZERO }
+        }
+    };
+    // Every wall is checked before anything is drawn.
+    for h in &handles {
+        s.doc()?.wall_elevation_pieces(&space, *h, side).map_err(|e| other(e.to_string()))?;
+    }
+    let mut created = Vec::with_capacity(handles.len());
+    let mut width = 0.0;
+    for h in &handles {
+        let common = s.current_common();
+        let (e, w) = s.doc_mut()?.add_wall_elevation(&space, common, *h, at, side).map_err(|e| other(e.to_string()))?;
+        created.push(e.hex());
+        width = w;
+        at.x += w + gap;
+    }
+    Ok(json!({ "created": created, "width": width }))
+}
+
+/// What WALLELEVATION is asking for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ElevAsk {
+    Select,
+    Place,
+}
+
+struct WallElevationM {
+    walls: Vec<Handle>,
+    side: cadcraft_doc::ElevationSide,
+    ask: ElevAsk,
+}
+
+impl WallElevationM {
+    fn new(s: &Session) -> Self {
+        let walls: Vec<Handle> =
+            s.doc().map(|d| s.selection().into_iter().filter(|h| d.entity(*h).and_then(|e| wall_of(e)).is_some()).collect()).unwrap_or_default();
+        let ask = if walls.is_empty() { ElevAsk::Select } else { ElevAsk::Place };
+        WallElevationM { walls, side: Default::default(), ask }
+    }
+}
+
+impl Interactive for WallElevationM {
+    fn name(&self) -> &'static str {
+        "WALLELEVATION"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        match self.ask {
+            ElevAsk::Select => Prompt::new("Select walls", Accept::SELECT),
+            ElevAsk::Place => Prompt::new("Specify the lower left corner of the elevation", Accept::POINT).kw(&["Side"]),
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match (self.ask, i) {
+            (ElevAsk::Select, Input::Pick(hs)) => {
+                let d = s.doc()?;
+                let new: Vec<Handle> =
+                    hs.into_iter().filter(|h| d.entity(*h).and_then(|e| wall_of(e)).is_some() && !self.walls.contains(h)).collect();
+                self.walls.extend(new);
+                Ok(Step::Continue)
+            }
+            (ElevAsk::Select, Input::Enter) if !self.walls.is_empty() => {
+                self.ask = ElevAsk::Place;
+                Ok(Step::Continue)
+            }
+            (ElevAsk::Place, Input::Keyword(k)) if k == "Side" => {
+                self.side = match self.side {
+                    cadcraft_doc::ElevationSide::Right => cadcraft_doc::ElevationSide::Left,
+                    cadcraft_doc::ElevationSide::Left => cadcraft_doc::ElevationSide::Right,
+                };
+                s.echo(format!("Seen from the {}.", if self.side == cadcraft_doc::ElevationSide::Left { "left" } else { "right" }));
+                Ok(Step::Continue)
+            }
+            (ElevAsk::Place, Input::Point(at)) => {
+                let side = if self.side == cadcraft_doc::ElevationSide::Left { "left" } else { "right" };
+                let hexes: Vec<String> = self.walls.iter().map(|h| h.hex()).collect();
+                match run_wallelevation(s, &json!({ "handles": hexes, "at": [at.x, at.y], "side": side })) {
+                    Ok(r) => s.echo(format!("{} elevation(s) drawn.", r["created"].as_array().map_or(0, Vec::len))),
+                    Err(e) => s.echo(e.to_string()),
+                }
+                Ok(Step::Done)
+            }
+            (_, Input::Enter | Input::Cancel) => Ok(Step::Done),
+            _ => Ok(Step::Continue),
+        }
+    }
+    fn preview(&self, _s: &Session, _c: Vec2) -> Vec<EntityKind> {
+        Vec::new()
+    }
+    fn preview_objects(&self, s: &Session, c: Vec2) -> Vec<Entity> {
+        // The first wall's elevation under the cursor.
+        let (ElevAsk::Place, Some(h), Ok(d)) = (self.ask, self.walls.first(), s.doc()) else { return Vec::new() };
+        d.wall_elevation_pieces(&s.space(), *h, self.side).map(|(_, pieces)| cadcraft_doc::preview_entities(pieces, c, 0.0)).unwrap_or_default()
+    }
 }
 
 fn run_wallcleanup(s: &mut Session, _p: &Value) -> Result<Value> {

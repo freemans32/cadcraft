@@ -753,3 +753,175 @@ fn an_arc_wall_joins_the_straight_wall_that_leaves_it_and_can_be_edited() {
     s.execute("move", &json!({"handles": [a.hex()], "delta": [-20000, 0]})).unwrap();
     assert!(!joined(&s, a) && !joined(&s, b));
 }
+
+#[test]
+fn an_opening_distance_is_taken_from_the_face_of_the_wall_the_end_meets() {
+    let mut s = metric();
+    s.execute("walladd", &json!({"points": [[0, 0], [8000, 0]], "style": BRICK})).unwrap();
+    // The partition's start is inside the brick wall, 200 mm below its path; the brick wall's face
+    // on this side is at y = 0, so the partition's body starts 200 mm from its start.
+    let p = h(&s.execute("walladd", &json!({"points": [[3000, -200], [3000, 4000]], "style": PARTITION})).unwrap());
+    let d = s.doc().unwrap();
+    let hit = d.wall_segment(p, 0).expect("the partition's segment");
+    assert!((hit.start_face - 200.0).abs() < 1e-6, "the face is 200 from the start: {}", hit.start_face);
+    assert!((hit.end_face - hit.length).abs() < 1e-6, "its free end meets nothing");
+    // 100 mm from that face, a door of 900: its centre is 200 + 100 + 450 from the start.
+    let r = s.execute("openingadd", &json!({"wall": p.hex(), "distance": 100, "from": "start", "type": "door"})).unwrap();
+    let o = h(&r);
+    let centre_y = match &s.doc().unwrap().entity(o).unwrap().kind {
+        EntityKind::Insert(i) => i.insert.y,
+        _ => panic!("an opening is a block reference"),
+    };
+    assert!((centre_y - (-200.0 + 750.0)).abs() < 1e-6, "centre at {centre_y}");
+    // Edited by distance from the face: 400 from it moves the door 300 further.
+    s.execute("openingedit", &json!({"handle": o.hex(), "distance": 400, "from": "start"})).unwrap();
+    let moved = match &s.doc().unwrap().entity(o).unwrap().kind {
+        EntityKind::Insert(i) => i.insert.y,
+        _ => panic!("an opening is a block reference"),
+    };
+    assert!((moved - (-200.0 + 1050.0)).abs() < 1e-6, "centre at {moved}");
+    // The distance the palette shows is the same one.
+    let (op, host) = s.doc().unwrap().opening_host(o).expect("in its wall");
+    let from_face = host.along - op.width() / 2.0 - host.start_face;
+    assert!((from_face - 400.0).abs() < 1e-6, "{from_face}");
+    // The same distance from the other end, which meets nothing, is from the end of the wall.
+    let r2 = s.execute("openingadd", &json!({"wall": p.hex(), "distance": 100, "from": "end", "type": "window", "width": 1000})).unwrap();
+    let y2 = match &s.doc().unwrap().entity(h(&r2)).unwrap().kind {
+        EntityKind::Insert(i) => i.insert.y,
+        _ => panic!("an opening is a block reference"),
+    };
+    assert!((y2 - (4000.0 - 100.0 - 500.0)).abs() < 1e-6, "centre at {y2}");
+}
+
+#[test]
+fn wallelevation_draws_the_face_of_a_wall_with_its_openings_beside_the_plan() {
+    let mut s = metric();
+    let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [6000, 0]], "style": BRICK})).unwrap());
+    s.execute("openingadd", &json!({"wall": a.hex(), "distance": 800, "from": "start", "type": "door"})).unwrap();
+    s.execute("openingadd", &json!({"wall": a.hex(), "distance": 1200, "from": "end", "type": "window"})).unwrap();
+    let r = s.execute("wallelevation", &json!({"handle": a.hex()})).unwrap();
+    assert_eq!(r["width"], json!(6000.0));
+    let e = h(&json!({"handle": r["created"][0]}));
+    let d = s.doc().unwrap();
+    let EntityKind::Insert(i) = &d.entity(e).unwrap().kind else { panic!("one block reference") };
+    assert!(i.insert.y < -4000.0, "below the plan by default: {}", i.insert.y);
+    let layers: Vec<&str> = d.block(&i.block).unwrap().entities.iter().map(|x| x.common.layer.as_str()).collect();
+    for l in
+        [cadcraft_doc::ELEVATION_LAYER, cadcraft_doc::ELEVATION_DOOR_LAYER, cadcraft_doc::ELEVATION_WINDOW_LAYER, cadcraft_doc::ELEVATION_DIM_LAYER]
+    {
+        assert!(layers.contains(&l), "{l} in {layers:?}");
+    }
+    // At a place of its own, seen from the left; several walls side by side.
+    let b = h(&s.execute("walladd", &json!({"points": [[0, 3000], [3000, 3000]], "style": PARTITION})).unwrap());
+    let r2 = s.execute("wallelevation", &json!({"handles": [a.hex(), b.hex()], "at": [0, -20000], "side": "left"})).unwrap();
+    assert_eq!(r2["created"].as_array().unwrap().len(), 2);
+    let second = h(&json!({"handle": r2["created"][1]}));
+    let EntityKind::Insert(i2) = &s.doc().unwrap().entity(second).unwrap().kind else { panic!("a block reference") };
+    assert_eq!((i2.insert.x, i2.insert.y), (6000.0 + 2000.0, -20000.0), "the next one starts after the first and a gap");
+    // What it refuses draws nothing.
+    let n = s.doc().unwrap().model.len();
+    let not_a_wall = h(&json!({"handle": r["created"][0]}));
+    for bad in
+        [json!({"handle": not_a_wall.hex()}), json!({"handles": [a.hex(), not_a_wall.hex()]}), json!({"handle": a.hex(), "side": "up"}), json!({})]
+    {
+        assert!(s.execute("wallelevation", &bad).is_err(), "{bad}");
+    }
+    assert_eq!(s.doc().unwrap().model.len(), n);
+}
+
+#[test]
+fn wallelevation_at_the_command_line_takes_the_selected_wall_and_a_point() {
+    let mut s = metric();
+    let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [4000, 0]], "style": BRICK})).unwrap());
+    s.set_selection(vec![a]);
+    let n = s.doc().unwrap().model.len();
+    for t in ["wallelevation", "0,-9000"] {
+        s.cmdline(t).unwrap();
+    }
+    assert!(s.running.is_none());
+    assert_eq!(s.doc().unwrap().model.len(), n + 1);
+}
+
+fn door_block(name: &str, width: f64) -> cadcraft_doc::Block {
+    use cadcraft_doc::{Arc as DocArc, Entity, EntityKind, Line};
+    let mut b = cadcraft_doc::Block::new(name);
+    // A leaf along x from the hinge at the origin, and the arc of its swing.
+    let leaf = EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(width, 0.0, 0.0) });
+    let swing = EntityKind::Arc(DocArc { center: Vec3::ZERO, radius: width, start: 0.0, end: std::f64::consts::FRAC_PI_2 });
+    for kind in [leaf, swing] {
+        b.entities.push(Entity::new(Handle(0), kind));
+    }
+    b
+}
+
+#[test]
+fn openingconvert_makes_openings_of_the_door_and_window_blocks_on_walls_and_keeps_the_old_blocks() {
+    let mut s = metric();
+    let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [8000, 0]], "style": BRICK})).unwrap());
+    {
+        let d = s.doc_mut().unwrap();
+        for (name, w) in [("PORTE_90", 900.0), ("Fenêtre 1200", 1200.0), ("TABLE", 1500.0), ("Porte-Hangar", 7000.0)] {
+            d.blocks.insert(name.into(), Arc::new(door_block(name, w)));
+        }
+    }
+    // A door at 1000, a window at 4000 (both with their origin on the wall), a table on the wall that is
+    // not a door, a door far from any wall, and a door too wide to be one.
+    let mut refs = Vec::new();
+    for (name, x, y) in
+        [("PORTE_90", 1000.0, 0.0), ("Fenêtre 1200", 4000.0, -50.0), ("TABLE", 6000.0, 0.0), ("PORTE_90", 1000.0, 5000.0), ("Porte-Hangar", 0.0, 0.0)]
+    {
+        refs.push(h(&s.execute("insert", &json!({"name": name, "at": [x, y]})).unwrap()));
+    }
+    let n_before = s.doc().unwrap().model.len();
+    // Looking only: nothing changes.
+    let r = s.execute("openingconvert", &json!({})).unwrap();
+    let found = r["found"].as_array().unwrap();
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(found[0]["type"], json!("door"));
+    assert_eq!(found[0]["width"], json!(900.0));
+    assert_eq!(found[1]["type"], json!("window"));
+    assert_eq!(found[1]["width"], json!(1200.0));
+    assert_eq!(s.doc().unwrap().model.len(), n_before);
+    // Converting: two openings on the wall, the old blocks on a frozen layer.
+    let r = s.execute("openingconvert", &json!({"apply": true})).unwrap();
+    assert_eq!(r["created"].as_array().unwrap().len(), 2);
+    assert!(r["skipped"].as_array().unwrap().is_empty());
+    let o = openings(&s);
+    assert_eq!(o.len(), 2);
+    assert!(o.iter().any(|x| x.1.kind == OpeningKind::Door && x.1.width_mm == 900.0));
+    assert!(o.iter().any(|x| x.1.kind == OpeningKind::Window && x.1.width_mm == 1200.0));
+    let d = s.doc().unwrap();
+    assert_eq!(d.entity(refs[0]).unwrap().common.layer, "A-OPENING-OLD");
+    assert!(d.layer("A-OPENING-OLD").unwrap().frozen);
+    assert_eq!(d.entity(refs[2]).unwrap().common.layer, "0", "the table is left alone");
+    assert!(joined(&s, a), "the wall is cut by its openings");
+    // Again: the old blocks on the frozen layer are not proposed a second time.
+    assert!(s.execute("openingconvert", &json!({})).unwrap()["found"].as_array().unwrap().is_empty());
+    assert!(s.execute("openingconvert", &json!({"handles": [refs[0].hex()]})).unwrap()["found"].as_array().unwrap().is_empty());
+    // Own words: a block named "TABLE" is a door when told so.
+    let r = s.execute("openingconvert", &json!({"doors": ["table"]})).unwrap();
+    assert!(r["found"].as_array().unwrap().iter().any(|c| c["width"] == json!(1500.0)));
+    assert!(s.execute("openingconvert", &json!({"doors": "porte"})).is_err());
+}
+
+#[test]
+fn openingconvert_at_the_command_line_asks_before_converting() {
+    let mut s = metric();
+    s.execute("walladd", &json!({"points": [[0, 0], [5000, 0]], "style": BRICK})).unwrap();
+    s.doc_mut().unwrap().blocks.insert("DOOR".into(), Arc::new(door_block("DOOR", 900.0)));
+    s.execute("insert", &json!({"name": "DOOR", "at": [1000, 0]})).unwrap();
+    // No: nothing is made.
+    for t in ["openingconvert", "n"] {
+        s.cmdline(t).unwrap();
+    }
+    assert!(s.running.is_none() && openings(&s).is_empty());
+    // Enter answers Yes.
+    for t in ["openingconvert", ""] {
+        s.cmdline(t).unwrap();
+    }
+    assert!(s.running.is_none());
+    assert_eq!(openings(&s).len(), 1);
+    // Nothing to find: it says so and ends.
+    s.cmdline("openingconvert").unwrap();
+    assert!(s.running.is_none());
+}
