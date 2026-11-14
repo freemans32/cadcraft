@@ -138,6 +138,7 @@ impl crate::Drawing {
         let m = p.units.mm_per_unit;
         let length = a.dist(b) * m;
         // Each stretch it passes under, with the part of it inside the other's width (its sides are dashed there).
+        let across = cross_point(a, b, c, d).is_some();
         let new_gaps: Vec<([f64; 2], [f64; 2])> = match cross_point(a, b, c, d) {
             Some((_, along, along_over)) => {
                 let sin = (b - a).normalized().cross((d - c).normalized()).abs().max(0.05);
@@ -187,7 +188,14 @@ impl crate::Drawing {
                 .filter(|c| !(c.gap_mm[1] < gap[0] || c.gap_mm[0] > gap[1]))
                 .fold(dash, |acc, c| [acc[0].min(c.dash_mm[0]), acc[1].max(c.dash_mm[1])]);
             p.covers.retain(|c| c.gap_mm[1] < gap[0] || c.gap_mm[0] > gap[1]);
-            p.covers.push(CoverMark { gap_mm: merged, dash_mm: dash, over_air: po.air, over: over.0 });
+            p.covers.push(CoverMark {
+                gap_mm: merged,
+                dash_mm: dash,
+                over_air: po.air,
+                over: over.0,
+                over_width_mm: po.plan_width_mm(),
+                along: !across,
+            });
         }
         self.regenerate_duct(under, &p)?;
         // The duct over is drawn after the one under, so the mask of the crossing is not over its own sides.

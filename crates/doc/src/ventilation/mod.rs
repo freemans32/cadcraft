@@ -230,15 +230,20 @@ impl crate::Drawing {
         let mut b = crate::Block::new(&name);
         b.anonymous = true;
         for piece in pieces {
-            // A piece's layer may carry a linetype after a bar: `layer|linetype`.
-            let (layer, linetype) = piece.layer.split_once('|').unwrap_or((piece.layer, "ByLayer"));
+            // A piece's layer may carry a linetype after a bar, and then the layer whose colour it takes:
+            // `layer|linetype|colour layer`.
+            let (layer, rest) = piece.layer.split_once('|').unwrap_or((piece.layer, "ByLayer"));
+            let (linetype, colour_of) = rest.split_once('|').map_or((rest, None), |(l, c)| (l, Some(c)));
             if self.ensure_layer(layer)
                 && let Some(c) = hvac_layer_color(layer)
                 && let Some(l) = self.layers.iter_mut().find(|l| l.name == layer)
             {
                 l.color = c;
             }
-            let common = crate::Common { layer: layer.into(), linetype: linetype.into(), ..Default::default() };
+            let mut common = crate::Common { layer: layer.into(), linetype: linetype.into(), ..Default::default() };
+            if let Some(c) = colour_of.and_then(hvac_layer_color) {
+                common.color = c;
+            }
             b.entities.push(crate::Entity { handle: self.new_handle(), common, kind: piece.kind });
         }
         self.blocks.insert(name.clone(), std::sync::Arc::new(b));

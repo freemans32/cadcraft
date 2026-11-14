@@ -1721,13 +1721,108 @@ fn the_label_of_a_run_under_another_duct_sits_beside_it_and_not_under_the_other_
     p.label_height_mm = 100.0;
     assert!(text_y(&p, false).abs() < 1e-9, "alone, the label is on the run");
     // Under another duct along its middle: the label is beside the run, past its side (200) by a bit more than a text's height.
-    p.covers = vec![CoverMark { gap_mm: [1000.0, 3000.0], dash_mm: [1200.0, 2800.0], over_air: AirDirection::Extract, over: 1 }];
+    p.covers = vec![CoverMark {
+        gap_mm: [1000.0, 3000.0],
+        dash_mm: [1200.0, 2800.0],
+        over_air: AirDirection::Extract,
+        over: 1,
+        over_width_mm: 0.0,
+        along: false,
+    }];
     p.gaps_mm = vec![[1000.0, 3000.0]];
     assert!(text_y(&p, false) > 200.0 + 100.0, "beside the run: {}", text_y(&p, false));
     // A run drawn leftwards has its text turned over: the label stays on the same side as it reads.
     assert!(text_y(&p, true) < -(200.0 + 100.0));
     // Under the other duct elsewhere than at the label: it stays on the run.
-    p.covers = vec![CoverMark { gap_mm: [100.0, 600.0], dash_mm: [200.0, 500.0], over_air: AirDirection::Extract, over: 1 }];
+    p.covers = vec![CoverMark {
+        gap_mm: [100.0, 600.0],
+        dash_mm: [200.0, 500.0],
+        over_air: AirDirection::Extract,
+        over: 1,
+        over_width_mm: 0.0,
+        along: false,
+    }];
     p.gaps_mm = vec![[100.0, 600.0]];
     assert!(text_y(&p, false).abs() < 1e-9, "not under the other duct there: {}", text_y(&p, false));
+}
+
+fn dashed_layers(p: &DuctParams) -> Vec<&'static str> {
+    p.generate(false).unwrap().iter().filter(|x| x.layer.contains("HVAC_HIDDEN")).map(|x| x.layer).collect()
+}
+
+#[test]
+fn the_hidden_sides_are_dashed_in_the_colour_of_the_duct_underneath_and_not_where_they_coincide_with_the_duct_over() {
+    let mut p = duct(400.0);
+    p.units = HvacUnits { mm_per_unit: 1.0 };
+    p.length = 4000.0;
+    p.air = AirDirection::Supply;
+    p.gaps_mm = vec![[0.0, 4000.0]];
+    let mark = |over_width_mm: f64, along: bool| CoverMark {
+        gap_mm: [0.0, 4000.0],
+        dash_mm: [0.0, 4000.0],
+        over_air: AirDirection::Extract,
+        over: 1,
+        over_width_mm,
+        along,
+    };
+    // One over the other on the same route and the same width: its sides are the other's own, nothing is dashed.
+    p.covers = vec![mark(400.0, true)];
+    assert!(dashed_layers(&p).is_empty(), "{:?}", dashed_layers(&p));
+    // Under a wider one on the same route: the two sides are hidden, dashed on the layer of the one over it (so that hiding
+    // that layer hides them) in the colour of this one, the supply duct underneath.
+    p.covers = vec![mark(600.0, true)];
+    assert_eq!(dashed_layers(&p), ["M-HVAC-DUCT-EXTR|HVAC_HIDDEN|M-HVAC-DUCT-SUP"; 2]);
+    // Across another duct the sides are hidden under it, whatever its width.
+    p.covers = vec![mark(400.0, false)];
+    assert_eq!(dashed_layers(&p).len(), 2);
+    // The duct underneath is an extract one: the dashes are pink, whatever the duct over it.
+    p.air = AirDirection::Extract;
+    p.covers = vec![CoverMark { over_air: AirDirection::Supply, ..mark(600.0, true) }];
+    assert_eq!(dashed_layers(&p), ["M-HVAC-DUCT-SUP|HVAC_HIDDEN|M-HVAC-DUCT-EXTR"; 2]);
+}
+
+#[test]
+fn the_dashes_stop_where_a_cone_begins_and_a_run_under_another_keeps_its_bend() {
+    let mut p = duct(400.0);
+    p.units = HvacUnits { mm_per_unit: 1.0 };
+    p.length = 4000.0;
+    p.gaps_mm = vec![[0.0, 4000.0]];
+    p.covers = vec![CoverMark {
+        gap_mm: [0.0, 4000.0],
+        dash_mm: [0.0, 4000.0],
+        over_air: AirDirection::Extract,
+        over: 1,
+        over_width_mm: 900.0,
+        along: true,
+    }];
+    // A cone of 1000 mm at the start: the dashes start where the straight sides do.
+    p.reducer = Some(DuctReducer { from_mm: 900.0, at_end: false });
+    let pieces = p.generate(false).unwrap();
+    let xs: Vec<f64> = pieces
+        .iter()
+        .filter(|x| x.layer.contains("HVAC_HIDDEN"))
+        .filter_map(|x| match &x.kind {
+            EntityKind::LwPolyline(l) => l.vertices.first().map(|v| v.p.x),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(xs.len(), 2);
+    assert!(xs.iter().all(|x| *x > 100.0), "the dashes begin after the cone: {xs:?}");
+    // The bend at the end of a run under another that goes the same way is drawn (hiding the duct over shows it).
+    p.reducer = None;
+    p.trim_end_mm = 650.0;
+    p.elbow = Some(DuctElbow { angle_deg: -90.0, radius_mm: 650.0, at_end: true });
+    let arcs = |p: &DuctParams| {
+        p.generate(false)
+            .unwrap()
+            .iter()
+            .filter(|x| {
+                matches!(&x.kind, EntityKind::LwPolyline(l) if l.vertices.iter().any(|v| v.bulge != 0.0)) || matches!(x.kind, EntityKind::Arc(_))
+            })
+            .count()
+    };
+    let with_elbow = arcs(&p);
+    p.covers = vec![CoverMark { along: false, ..p.covers[0] }];
+    let crossing = arcs(&p);
+    assert!(with_elbow > crossing, "across another duct a covered bend is left out ({with_elbow} against {crossing})");
 }

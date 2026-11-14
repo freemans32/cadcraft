@@ -1163,3 +1163,42 @@ fn two_ducts_one_over_the_other_from_stacked_collars_keep_their_air_whichever_wa
         );
     }
 }
+
+#[test]
+fn a_duct_keeps_the_air_direction_a_sizing_gave_it_when_a_later_edit_leaves_both_readings_possible() {
+    let (mut s, supply, extract) = superposed_roof(true);
+    let air = |s: &Session, h: &Handle| duct_of(s.doc().unwrap().entity(*h).unwrap()).unwrap().air;
+    // The middle run of the extract is brought down to the altitude of the supply: at the junction both are at one
+    // altitude, and either reading reaches a riser. The directions stay as they were found.
+    s.execute("ductedit", &json!({"handle": extract[1].hex(), "altitude": 0.08})).unwrap();
+    s.execute("ductsize", &json!({})).unwrap();
+    assert!(supply.iter().all(|h| air(&s, h) == cadcraft_doc::AirDirection::Supply), "{:?}", supply.iter().map(|h| air(&s, h)).collect::<Vec<_>>());
+    assert!(
+        extract.iter().all(|h| air(&s, h) == cadcraft_doc::AirDirection::Extract),
+        "{:?}",
+        extract.iter().map(|h| air(&s, h)).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn a_step_is_drawn_on_the_straight_part_of_its_run_and_not_over_the_bend_at_its_end() {
+    let mut s = metric();
+    s.execute("ahuadd", &json!({"at": [0, 0], "type": "supplyUnit"})).unwrap();
+    s.execute("riseradd", &json!({"at": [4000, 3600], "width": 800, "depth": 600, "air": "supply", "incomingFlow": 3000})).unwrap();
+    // A run along, then up to the riser: 2.7 m up, 0.8 m lower than the run before it, turning 90° at the corner.
+    s.execute("ductadd", &json!({"points": [[1300, 0], [4000, 0]], "air": "supply", "altitude": 0.9})).unwrap();
+    let up = s.execute("ductadd", &json!({"points": [[4000, 0], [4000, 3300]], "air": "supply", "altitude": 0.08})).unwrap();
+    s.execute("ductsize", &json!({})).unwrap();
+    let p = duct_of(s.doc().unwrap().entity(hd(&up["handles"][0])).unwrap()).unwrap();
+    let length_mm = p.length * p.units.mm_per_unit;
+    let step = p.steps.first().expect("a step to the lower level");
+    assert!(p.trim_start_mm > 0.0, "the run leaves the corner by a bend: {}", p.trim_start_mm);
+    assert!(
+        step.at_mm >= p.trim_start_mm - 1e-6 && step.at_mm + step.shift_mm.abs() <= length_mm - p.trim_end_mm + 1e-6,
+        "the two elbows of the step ({:.0} to {:.0}) are on the straight part ({:.0} to {:.0})",
+        step.at_mm,
+        step.at_mm + step.shift_mm.abs(),
+        p.trim_start_mm,
+        length_mm - p.trim_end_mm
+    );
+}

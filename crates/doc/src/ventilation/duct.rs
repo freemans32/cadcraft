@@ -64,6 +64,12 @@ pub struct CoverMark {
     pub over_air: AirDirection,
     /// That duct's handle, to follow its layer when its air direction changes.
     pub over: u64,
+    /// The width of the duct over it in plan, mm (0 in older drawings: unknown).
+    #[serde(default)]
+    pub over_width_mm: f64,
+    /// Whether the duct over runs along this one (one over the other on the same route), not across it.
+    #[serde(default)]
+    pub along: bool,
 }
 
 /// A duct that goes over or under another by four 45° elbows: it leaves its line, runs level past
@@ -849,7 +855,7 @@ impl DuctParams {
     }
 
     /// Under another duct: a mask over each crossing and the hidden sides dashed, on the other duct's layer.
-    fn cover_pieces(&self, r: f64, pieces: &mut Vec<HvacPiece>) {
+    fn cover_pieces(&self, r: f64, (x0, x1): (f64, f64), pieces: &mut Vec<HvacPiece>) {
         for c in &self.covers {
             let (g0, g1) = (self.units.to_units(c.gap_mm[0]), self.units.to_units(c.gap_mm[1]));
             let rr = r * 1.02;
@@ -859,11 +865,14 @@ impl DuctParams {
                     boundary: vec![Vec2::new(g0, -rr), Vec2::new(g1, -rr), Vec2::new(g1, rr), Vec2::new(g0, rr)],
                 }),
             });
-            let (d0, d1) = (self.units.to_units(c.dash_mm[0]), self.units.to_units(c.dash_mm[1]));
-            if d1 > d0 {
+            // The hidden sides are dashed where the run's sides are drawn (not in a cone), and only where they are
+            // inside the duct over: when that one is no wider the sides coincide with its own, and nothing is hidden.
+            let (d0, d1) = (self.units.to_units(c.dash_mm[0]).max(x0), self.units.to_units(c.dash_mm[1]).min(x1));
+            let hidden = !c.along || c.over_width_mm <= 0.0 || self.units.to_units(c.over_width_mm) / 2.0 > r + self.units.to_units(0.5);
+            if d1 > d0 && hidden {
                 for y in [-r, r] {
                     pieces.push(HvacPiece {
-                        layer: self.cover_layer(c.over_air, true),
+                        layer: self.dash_layer(c.over_air),
                         kind: EntityKind::LwPolyline(LwPolyline {
                             vertices: vec![
                                 PolyVertex { p: Vec2::new(d0, y), bulge: 0.0, start_width: 0.0, end_width: 0.0 },
@@ -880,18 +889,38 @@ impl DuctParams {
         }
     }
 
-    /// The layer of the mask (or of the dashes, coded `layer|HVAC_HIDDEN`: the block's pieces take
-    /// the linetype after the bar) of a crossing under a duct of direction `air`.
-    fn cover_layer(&self, air: AirDirection, dashed: bool) -> &'static str {
-        match (air, dashed) {
-            (AirDirection::Supply, false) => DUCT_LAYER,
-            (AirDirection::Extract, false) => DUCT_EXTRACT_LAYER,
-            (AirDirection::Fresh, false) => DUCT_FRESH_LAYER,
-            (AirDirection::Exhaust, false) => DUCT_EXHAUST_LAYER,
-            (AirDirection::Supply, true) => "M-HVAC-DUCT-SUP|HVAC_HIDDEN",
-            (AirDirection::Extract, true) => "M-HVAC-DUCT-EXTR|HVAC_HIDDEN",
-            (AirDirection::Fresh, true) => "M-HVAC-DUCT-FRESH|HVAC_HIDDEN",
-            (AirDirection::Exhaust, true) => "M-HVAC-DUCT-EXH|HVAC_HIDDEN",
+    /// The layer of the mask of a crossing under a duct of direction `air`.
+    fn cover_layer(&self, air: AirDirection, _dashed: bool) -> &'static str {
+        match air {
+            AirDirection::Supply => DUCT_LAYER,
+            AirDirection::Extract => DUCT_EXTRACT_LAYER,
+            AirDirection::Fresh => DUCT_FRESH_LAYER,
+            AirDirection::Exhaust => DUCT_EXHAUST_LAYER,
+        }
+    }
+
+    /// The layer of the dashes of a crossing under a duct of direction `over`: on its layer, so hiding that
+    /// layer hides them with the mask, but in the colour of this duct, the one underneath. Coded
+    /// `layer|HVAC_HIDDEN|colour layer`: the block's pieces take the linetype and the colour after the bars.
+    fn dash_layer(&self, over: AirDirection) -> &'static str {
+        use AirDirection::{Exhaust, Extract, Fresh, Supply};
+        match (over, self.air) {
+            (Supply, Supply) => "M-HVAC-DUCT-SUP|HVAC_HIDDEN|M-HVAC-DUCT-SUP",
+            (Supply, Extract) => "M-HVAC-DUCT-SUP|HVAC_HIDDEN|M-HVAC-DUCT-EXTR",
+            (Supply, Fresh) => "M-HVAC-DUCT-SUP|HVAC_HIDDEN|M-HVAC-DUCT-FRESH",
+            (Supply, Exhaust) => "M-HVAC-DUCT-SUP|HVAC_HIDDEN|M-HVAC-DUCT-EXH",
+            (Extract, Supply) => "M-HVAC-DUCT-EXTR|HVAC_HIDDEN|M-HVAC-DUCT-SUP",
+            (Extract, Extract) => "M-HVAC-DUCT-EXTR|HVAC_HIDDEN|M-HVAC-DUCT-EXTR",
+            (Extract, Fresh) => "M-HVAC-DUCT-EXTR|HVAC_HIDDEN|M-HVAC-DUCT-FRESH",
+            (Extract, Exhaust) => "M-HVAC-DUCT-EXTR|HVAC_HIDDEN|M-HVAC-DUCT-EXH",
+            (Fresh, Supply) => "M-HVAC-DUCT-FRESH|HVAC_HIDDEN|M-HVAC-DUCT-SUP",
+            (Fresh, Extract) => "M-HVAC-DUCT-FRESH|HVAC_HIDDEN|M-HVAC-DUCT-EXTR",
+            (Fresh, Fresh) => "M-HVAC-DUCT-FRESH|HVAC_HIDDEN|M-HVAC-DUCT-FRESH",
+            (Fresh, Exhaust) => "M-HVAC-DUCT-FRESH|HVAC_HIDDEN|M-HVAC-DUCT-EXH",
+            (Exhaust, Supply) => "M-HVAC-DUCT-EXH|HVAC_HIDDEN|M-HVAC-DUCT-SUP",
+            (Exhaust, Extract) => "M-HVAC-DUCT-EXH|HVAC_HIDDEN|M-HVAC-DUCT-EXTR",
+            (Exhaust, Fresh) => "M-HVAC-DUCT-EXH|HVAC_HIDDEN|M-HVAC-DUCT-FRESH",
+            (Exhaust, Exhaust) => "M-HVAC-DUCT-EXH|HVAC_HIDDEN|M-HVAC-DUCT-EXH",
         }
     }
 
@@ -1001,11 +1030,13 @@ impl DuctParams {
             let total = self.length_m() * 1000.0;
             let zone = if e.at_end { (total - self.trim_end_mm, total) } else { (0.0, self.trim_start_mm) };
             let covered: f64 = self.gaps_mm.iter().map(|g| (g[1].min(zone.1) - g[0].max(zone.0)).max(0.0)).sum();
-            if covered < 0.5 * (zone.1 - zone.0) - 1e-6 {
+            // A run under another one that goes the same way has its bend drawn: the two bends coincide, and hiding the one over
+            // shows this one.
+            if covered < 0.5 * (zone.1 - zone.0) - 1e-6 || self.covers.iter().any(|c| c.along) {
                 pieces.extend(self.elbow_pieces(e, r, layer));
             }
         }
-        self.cover_pieces(r, &mut pieces);
+        self.cover_pieces(r, (x0, x1), &mut pieces);
         // An arrow a quarter of the way along, the way the air runs.
         if let Some(forward) = self.flow_forward {
             let len = (1.6 * r).min(0.15 * (ex - sx));

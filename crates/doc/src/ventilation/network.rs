@@ -29,6 +29,8 @@ pub const FLEX_ROUGHNESS_MM: f64 = 3.0;
 /// unit has two: its supply ducts with the supply terminals, its extract ducts with the extract ones.
 /// A duct leaving a junction at more than this many degrees from the way the air comes lies on the one it leaves.
 const STACKED_BACK_DEG: f64 = 170.0;
+/// A step needs at least this much straight run beyond its own length, mm, to be moved off a bend.
+const STEP_CLEARANCE_MM: f64 = 100.0;
 /// Two runs' altitudes differ when they are this far apart, mm.
 const LEVEL_TOLERANCE_MM: f64 = 1.0;
 
@@ -369,6 +371,19 @@ impl crate::Drawing {
             next.push(Some(p));
         }
         draw_elbows(net, &mut next);
+        // A step (two 45° elbows) is drawn on the straight part of its run, not over the bend that end is already
+        // taking: the two would draw their arcs on one another.
+        for (i, p) in next.iter_mut().enumerate() {
+            let Some(p) = p else { continue };
+            let at_end = net.entered_at_end.get(i).copied().unwrap_or(false);
+            let (lo, hi) = (p.trim_start_mm, p.length * p.units.mm_per_unit - p.trim_end_mm);
+            for st in &mut p.steps {
+                let run = st.shift_mm.abs();
+                if hi - lo >= run + STEP_CLEARANCE_MM {
+                    st.at_mm = if at_end { hi - run } else { lo };
+                }
+            }
+        }
         for (h, p) in net.ducts.iter().zip(&next) {
             if let Some(p) = p {
                 self.regenerate_duct(*h, p)?;
@@ -613,6 +628,14 @@ impl Scan<'_> {
             } else {
                 roles.iter().copied().chain((0..airs.len()).filter(|k| !roles.contains(k))).collect()
             };
+            // A duct sized before keeps the direction it was given then (when it was not fixed by hand): two ducts
+            // one over the other at stacked collars cannot always be told apart from their drawing, and the
+            // reading that was made is not changed by a later edit that leaves both readings possible.
+            let kept = (!d.params.air_set && d.params.flow_m3h.is_some()).then(|| airs.iter().position(|a| *a == d.params.air)).flatten();
+            let candidates: Vec<usize> = match kept {
+                Some(k) if candidates.contains(&k) => std::iter::once(k).chain(candidates.iter().copied().filter(|c| *c != k)).collect(),
+                _ => candidates,
+            };
             // The first direction whose tree reaches a terminal without taking in stubs that lead
             // nowhere; else the one whose tree explains the most runs (two ducts one over the other
             // at stacked collars: the supply one read as the extract's branch is the wrong reading).
@@ -624,7 +647,7 @@ impl Scan<'_> {
                 let tree = self.tree(i, from, to, airs[k]);
                 if tree.first().is_some_and(|n| n.terminals_below > 0) {
                     let live = tree.iter().filter(|n| n.terminals_below > 0).count();
-                    if live == tree.len() {
+                    if live == tree.len() || kept == Some(k) {
                         chosen = Some((k, tree));
                         break;
                     }
