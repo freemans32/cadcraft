@@ -52,6 +52,7 @@ fn clear(s: &mut Session, hs: &[Handle]) -> Result<usize> {
     for h in hs {
         let (mut p, ..) = d.duct_ends(*h).ok_or_else(|| other("Select ducts only."))?;
         p.gaps_mm.clear();
+        p.covers.clear();
         p.jogs.clear();
         next.push((*h, p));
     }

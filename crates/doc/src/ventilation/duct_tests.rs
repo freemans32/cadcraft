@@ -50,6 +50,7 @@ fn duct(diameter_mm: f64) -> DuctParams {
         flow_forward: None,
         open_flow_m3h: None,
         gaps_mm: Vec::new(),
+        covers: Vec::new(),
         jogs: Vec::new(),
         level_mm: None,
         steps: Vec::new(),
@@ -1427,7 +1428,8 @@ fn a_duct_running_inside_the_width_of_another_passes_under_it_along_the_stretch_
     assert_eq!(polylines(&d, small), 2);
     let gap = d.pass_duct_under(small, big, 30.0).unwrap();
     assert_eq!(gap, [0.0, 2000.0]);
-    assert_eq!(polylines(&d, small), 0, "wholly under the other");
+    // Drawn whole (2 sides) with its hidden sides dashed (2): the mask over the other duct hides them while its layer is shown.
+    assert_eq!(polylines(&d, small), 4, "wholly under the other");
     assert!(d.duct_crossings()[0].resolved);
     // The one that turns away comes out from under the other's edge: from its axis to its side, with the clearance.
     let gap = d.pass_duct_under(turn, big, 30.0).unwrap();
@@ -1655,4 +1657,50 @@ fn the_orifice_of_a_collar_is_found_in_a_drawing_in_metres_with_the_unit_turned(
     let widths: Vec<_> =
         nets.iter().flat_map(|n| n.ducts.iter().zip(&n.collar_widths_mm)).filter(|(h, _)| **h == ext || **h == sup).map(|(_, w)| *w).collect();
     assert!(!widths.is_empty() && widths.iter().all(|w| *w == Some(1580.0)), "{widths:?}");
+}
+
+#[test]
+fn a_duct_passing_under_is_drawn_whole_with_a_mask_and_dashes_on_the_layer_of_the_duct_over_it() {
+    let mut d = Drawing::new_metric();
+    let under = add_wide(&mut d, (-2000.0, 0.0), (2000.0, 0.0), 200.0);
+    let over = {
+        let p = DuctParams { air: AirDirection::Extract, air_set: true, ..duct(400.0) };
+        d.add_duct(&Space::Model, Common::default(), p, Vec2::new(0.0, -2000.0), Vec2::new(0.0, 2000.0)).unwrap()
+    };
+    // Something else drawn after both: the duct over must still end up above the one under.
+    add_wide(&mut d, (5000.0, 5000.0), (6000.0, 5000.0), 200.0);
+    d.pass_duct_under(under, over, 30.0).unwrap();
+    let EntityKind::Insert(i) = &d.entity(under).unwrap().kind else { panic!("not a block reference") };
+    let block = d.block(&i.block).unwrap();
+    let on = |layer: &str, f: &dyn Fn(&EntityKind) -> bool| block.entities.iter().filter(|e| e.common.layer == layer && f(&e.kind)).count();
+    let sides = block.entities.iter().filter(|e| matches!(e.kind, EntityKind::LwPolyline(_)) && e.common.linetype == "ByLayer").count();
+    assert_eq!(sides, 2, "the duct is whole");
+    assert_eq!(on("M-HVAC-DUCT-EXTR", &|k| matches!(k, EntityKind::Wipeout(_))), 1, "one mask, on the layer of the duct over it");
+    let dashed: Vec<_> = block.entities.iter().filter(|e| e.common.linetype == "HVAC_HIDDEN").collect();
+    assert_eq!(dashed.len(), 2, "the two hidden sides");
+    assert!(dashed.iter().all(|e| e.common.layer == "M-HVAC-DUCT-EXTR"));
+    assert!(d.linetypes.iter().any(|l| l.name == "HVAC_HIDDEN"));
+    assert_eq!(d.header.i64("WIPEOUTFRAME", 1), 0, "no frame round the masks");
+    // The duct over comes after the one under in the draw order.
+    let order: Vec<_> = d.model.iter().map(|e| e.handle).collect();
+    assert!(order.iter().position(|h| *h == over) > order.iter().position(|h| *h == under));
+    // The dashes cover the width of the duct over it (400 mm), the mask that and the clearance.
+    let (p, ..) = d.duct_ends(under).unwrap();
+    assert_eq!(p.covers.len(), 1);
+    assert!((p.covers[0].dash_mm[1] - p.covers[0].dash_mm[0] - 400.0).abs() < 1e-6, "{:?}", p.covers[0]);
+    assert!(p.covers[0].gap_mm[1] - p.covers[0].gap_mm[0] > 400.0);
+    // When the duct over changes its air direction, the mask follows its layer.
+    let (mut po, ..) = d.duct_ends(over).unwrap();
+    po.air = AirDirection::Supply;
+    d.regenerate_duct(over, &po).unwrap();
+    let EntityKind::Insert(i) = &d.entity(under).unwrap().kind else { panic!("not a block reference") };
+    let block = d.block(&i.block).unwrap();
+    assert!(block.entities.iter().any(|e| matches!(e.kind, EntityKind::Wipeout(_)) && e.common.layer == "M-HVAC-DUCT-SUP"));
+    assert!(!block.entities.iter().any(|e| matches!(e.kind, EntityKind::Wipeout(_)) && e.common.layer == "M-HVAC-DUCT-EXTR"));
+    // Clearing the crossing draws the duct plain again.
+    let (mut p, ..) = d.duct_ends(under).unwrap();
+    (p.gaps_mm, p.covers) = (Vec::new(), Vec::new());
+    d.regenerate_duct(under, &p).unwrap();
+    let EntityKind::Insert(i) = &d.entity(under).unwrap().kind else { panic!("not a block reference") };
+    assert!(!d.block(&i.block).unwrap().entities.iter().any(|e| matches!(e.kind, EntityKind::Wipeout(_))));
 }

@@ -4,7 +4,7 @@
 
 use cadcraft_geom::Vec2;
 
-use super::duct::{AXIS_REACH, DuctJog, MAX_GAPS, MAX_JOGS};
+use super::duct::{AXIS_REACH, CoverMark, DuctJog, MAX_GAPS, MAX_JOGS};
 use super::{DuctParams, DuctShape, HvacUnits, MAX_DUCTS, invalid};
 use crate::{Handle, Result};
 
@@ -137,18 +137,22 @@ impl crate::Drawing {
         let (po, c, d) = self.duct_ends(over).ok_or_else(|| invalid("Select ducts only."))?;
         let m = p.units.mm_per_unit;
         let length = a.dist(b) * m;
-        let new_gaps: Vec<[f64; 2]> = match cross_point(a, b, c, d) {
+        // Each stretch it passes under, with the part of it inside the other's width (its sides are dashed there).
+        let new_gaps: Vec<([f64; 2], [f64; 2])> = match cross_point(a, b, c, d) {
             Some((_, along, along_over)) => {
                 let sin = (b - a).normalized().cross((d - c).normalized()).abs().max(0.05);
-                let half = po.plan_width_mm() / 2.0 / sin + clearance_mm;
+                let inside = po.plan_width_mm() / 2.0 / sin;
+                let half = inside + clearance_mm;
                 // The crossing was drawn the other way before: that duct is whole again.
                 let mut reverse = po.clone();
                 let u = along_over * po.units.mm_per_unit;
                 if reverse.gaps_mm.iter().any(|g| g[0] <= u && u <= g[1]) {
                     reverse.gaps_mm.retain(|g| !(g[0] <= u && u <= g[1]));
+                    reverse.covers.retain(|c| !(c.gap_mm[0] <= u && u <= c.gap_mm[1]));
                     self.regenerate_duct(over, &reverse)?;
                 }
-                vec![[((along * m) - half).max(0.0), ((along * m) + half).min(length)]]
+                let at = along * m;
+                vec![([(at - half).max(0.0), (at + half).min(length)], [(at - inside).max(0.0), (at + inside).min(length)])]
             }
             None => {
                 // Parallel: the duct lies under the other, and under the pieces of its run, along the stretches
@@ -161,11 +165,11 @@ impl crate::Drawing {
                     }
                     return self.pass_duct_under(over, under, clearance_mm);
                 }
-                stretches.into_iter().map(|(lo, hi)| [lo * m, hi * m]).collect()
+                stretches.into_iter().map(|(lo, hi)| ([lo * m, hi * m], [lo * m, hi * m])).collect()
             }
         };
         let mut hull = [f64::MAX, f64::MIN];
-        for gap in new_gaps {
+        for (gap, dash) in new_gaps {
             // A new stretch absorbs the ones it overlaps.
             let mut gaps: Vec<[f64; 2]> = p.gaps_mm.iter().copied().filter(|g| g[1] < gap[0] || g[0] > gap[1]).collect();
             let merged = p.gaps_mm.iter().filter(|g| !(g[1] < gap[0] || g[0] > gap[1])).fold(gap, |acc, g| [acc[0].min(g[0]), acc[1].max(g[1])]);
@@ -176,8 +180,18 @@ impl crate::Drawing {
             }
             p.gaps_mm = gaps;
             hull = [hull[0].min(merged[0]), hull[1].max(merged[1])];
+            // Its mark: the stretches it absorbed are one, and the dashes cover what theirs did.
+            let dash = p
+                .covers
+                .iter()
+                .filter(|c| !(c.gap_mm[1] < gap[0] || c.gap_mm[0] > gap[1]))
+                .fold(dash, |acc, c| [acc[0].min(c.dash_mm[0]), acc[1].max(c.dash_mm[1])]);
+            p.covers.retain(|c| c.gap_mm[1] < gap[0] || c.gap_mm[0] > gap[1]);
+            p.covers.push(CoverMark { gap_mm: merged, dash_mm: dash, over_air: po.air, over: over.0 });
         }
         self.regenerate_duct(under, &p)?;
+        // The duct over is drawn after the one under, so the mask of the crossing is not over its own sides.
+        self.model.bring_to_front(over);
         Ok(hull)
     }
 

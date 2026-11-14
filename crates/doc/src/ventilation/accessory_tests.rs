@@ -117,6 +117,7 @@ fn ducted(accessory_at: Option<(AccessoryKind, f64, f64)>) -> (Drawing, Option<H
         flow_forward: None,
         open_flow_m3h: None,
         gaps_mm: Vec::new(),
+        covers: Vec::new(),
         jogs: Vec::new(),
         level_mm: None,
         steps: Vec::new(),

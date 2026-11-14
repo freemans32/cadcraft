@@ -50,6 +50,22 @@ pub struct DuctStep {
     pub shift_mm: f64,
 }
 
+/// Where this duct passes under another, as drawn: it is drawn whole, and the other duct's layer
+/// carries a mask over the crossing (so hiding that layer shows this duct whole) and the hidden
+/// sides dashed. The layer of the duct over it follows its air direction.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoverMark {
+    /// The stretch of this duct that passes under (the same as one of its `gaps_mm`), mm from its start.
+    pub gap_mm: [f64; 2],
+    /// The part of it that lies inside the width of the duct over it: the sides are dashed there.
+    pub dash_mm: [f64; 2],
+    /// The air direction of the duct over it: the mask and the dashes are on its layer.
+    pub over_air: AirDirection,
+    /// That duct's handle, to follow its layer when its air direction changes.
+    pub over: u64,
+}
+
 /// A duct that goes over or under another by four 45° elbows: it leaves its line, runs level past
 /// the other duct, then comes back. The plan shows the four elbows across it; the flat part lies
 /// between the second and the third.
@@ -635,6 +651,10 @@ pub struct DuctParams {
     /// broken there (a plan's way of showing which duct goes over).
     #[serde(default)]
     pub gaps_mm: Vec<[f64; 2]>,
+    /// How each of those stretches is drawn: the run whole, a mask and dashes on the other duct's layer.
+    /// A stretch with no mark here (older drawings) is drawn broken.
+    #[serde(default)]
+    pub covers: Vec<CoverMark>,
     /// The rises or dips the run makes round other ducts, four 45° elbows each.
     #[serde(default)]
     pub jogs: Vec<DuctJog>,
@@ -755,6 +775,15 @@ impl DuctParams {
         {
             return Err(invalid(format!("A duct passes under at most {MAX_GAPS} others, each over a stretch of its length.")));
         }
+        if self.covers.len() > MAX_GAPS
+            || self.covers.iter().any(|c| {
+                !c.gap_mm.iter().chain(&c.dash_mm).all(|v| v.is_finite() && (0.0..=1e9).contains(v))
+                    || c.gap_mm[0] >= c.gap_mm[1]
+                    || c.dash_mm[0] > c.dash_mm[1]
+            })
+        {
+            return Err(invalid("A duct's crossings are not usable."));
+        }
         let length_mm = self.length * self.units.mm_per_unit;
         if self.level_mm.is_some_and(|b| !(b.is_finite() && (-100_000.0..=1_000_000.0).contains(&b))) {
             return Err(invalid("The altitude of a duct's underside is a number of millimetres."));
@@ -816,6 +845,53 @@ impl DuctParams {
             AirDirection::Extract => DUCT_EXTRACT_LAYER,
             AirDirection::Fresh => DUCT_FRESH_LAYER,
             AirDirection::Exhaust => DUCT_EXHAUST_LAYER,
+        }
+    }
+
+    /// Under another duct: a mask over each crossing and the hidden sides dashed, on the other duct's layer.
+    fn cover_pieces(&self, r: f64, pieces: &mut Vec<HvacPiece>) {
+        for c in &self.covers {
+            let (g0, g1) = (self.units.to_units(c.gap_mm[0]), self.units.to_units(c.gap_mm[1]));
+            let rr = r * 1.02;
+            pieces.push(HvacPiece {
+                layer: self.cover_layer(c.over_air, false),
+                kind: EntityKind::Wipeout(crate::Wipeout {
+                    boundary: vec![Vec2::new(g0, -rr), Vec2::new(g1, -rr), Vec2::new(g1, rr), Vec2::new(g0, rr)],
+                }),
+            });
+            let (d0, d1) = (self.units.to_units(c.dash_mm[0]), self.units.to_units(c.dash_mm[1]));
+            if d1 > d0 {
+                for y in [-r, r] {
+                    pieces.push(HvacPiece {
+                        layer: self.cover_layer(c.over_air, true),
+                        kind: EntityKind::LwPolyline(LwPolyline {
+                            vertices: vec![
+                                PolyVertex { p: Vec2::new(d0, y), bulge: 0.0, start_width: 0.0, end_width: 0.0 },
+                                PolyVertex { p: Vec2::new(d1, y), bulge: 0.0, start_width: 0.0, end_width: 0.0 },
+                            ],
+                            closed: false,
+                            const_width: 0.0,
+                            elevation: 0.0,
+                            plinegen: false,
+                        }),
+                    });
+                }
+            }
+        }
+    }
+
+    /// The layer of the mask (or of the dashes, coded `layer|HVAC_HIDDEN`: the block's pieces take
+    /// the linetype after the bar) of a crossing under a duct of direction `air`.
+    fn cover_layer(&self, air: AirDirection, dashed: bool) -> &'static str {
+        match (air, dashed) {
+            (AirDirection::Supply, false) => DUCT_LAYER,
+            (AirDirection::Extract, false) => DUCT_EXTRACT_LAYER,
+            (AirDirection::Fresh, false) => DUCT_FRESH_LAYER,
+            (AirDirection::Exhaust, false) => DUCT_EXHAUST_LAYER,
+            (AirDirection::Supply, true) => "M-HVAC-DUCT-SUP|HVAC_HIDDEN",
+            (AirDirection::Extract, true) => "M-HVAC-DUCT-EXTR|HVAC_HIDDEN",
+            (AirDirection::Fresh, true) => "M-HVAC-DUCT-FRESH|HVAC_HIDDEN",
+            (AirDirection::Exhaust, true) => "M-HVAC-DUCT-EXH|HVAC_HIDDEN",
         }
     }
 
@@ -929,6 +1005,7 @@ impl DuctParams {
                 pieces.extend(self.elbow_pieces(e, r, layer));
             }
         }
+        self.cover_pieces(r, &mut pieces);
         // An arrow a quarter of the way along, the way the air runs.
         if let Some(forward) = self.flow_forward {
             let len = (1.6 * r).min(0.15 * (ex - sx));
@@ -998,7 +1075,10 @@ impl DuctParams {
     /// for a rigid duct, a zigzag for a flexible one.
     /// `x0`–`x1` less the stretches the run passes under other ducts, in drawing units along the run.
     fn solid_stretches(&self, x0: f64, x1: f64) -> Vec<(f64, f64)> {
-        let mut gaps: Vec<(f64, f64)> = self.gaps_mm.iter().map(|g| (self.units.to_units(g[0]), self.units.to_units(g[1]))).collect();
+        // A stretch with a mark is drawn whole (its mask hides it); the others are broken.
+        let marked = |g: &[f64; 2]| self.covers.iter().any(|c| c.gap_mm[0] < g[1] && g[0] < c.gap_mm[1]);
+        let mut gaps: Vec<(f64, f64)> =
+            self.gaps_mm.iter().filter(|g| !marked(g)).map(|g| (self.units.to_units(g[0]), self.units.to_units(g[1]))).collect();
         gaps.sort_by(|a, b| a.0.total_cmp(&b.0));
         let (mut out, mut from) = (Vec::new(), x0);
         for (g0, g1) in gaps {
@@ -1106,6 +1186,7 @@ impl crate::Drawing {
         p.length = a.dist(b);
         let rotation = (b - a).angle();
         let pieces = p.generate(reads_upside_down(rotation))?;
+        self.prepare_covers(&p);
         common.xdata = xdata::replace(DUCT_APP, &common.xdata, p.to_xdata()?);
         common.layer = p.layer().into();
         let block = self.hvac_block(pieces);
@@ -1120,10 +1201,50 @@ impl crate::Drawing {
         let EntityKind::Insert(i) = &e.kind else { return Err(invalid("The object is not a block reference.")) };
         let pieces = p.generate(reads_upside_down(i.rotation))?;
         let tags = xdata::replace(DUCT_APP, &e.common.xdata, p.to_xdata()?);
+        let air_before = duct_of(e).map(|q| q.air);
+        self.prepare_covers(p);
         self.regenerate_hvac(h, pieces, tags)?;
         // The run's layer follows its air direction.
         let layer = p.layer();
         self.modify_entity(h, |e| e.common.layer = layer.into())?;
+        // The ducts that pass under this one have their mask and dashes on its layer: they follow it.
+        if air_before.is_some_and(|a| a != p.air) {
+            self.follow_cover_layer(h, p.air)?;
+        }
+        Ok(())
+    }
+
+    /// What drawing the crossings of `p` needs: the dashed linetype (in the drawing's units) and no
+    /// frame round the masks.
+    fn prepare_covers(&mut self, p: &DuctParams) {
+        if p.covers.is_empty() {
+            return;
+        }
+        if !self.linetypes.iter().any(|l| l.name.eq_ignore_ascii_case("HVAC_HIDDEN")) {
+            let unit = |mm: f64| mm / p.units.mm_per_unit;
+            self.linetypes.push(crate::Linetype::simple("HVAC_HIDDEN", "Hidden sides of ducts", &[unit(150.0), -unit(100.0)]));
+        }
+        // The masks' own frames would draw a rectangle round every crossing.
+        if self.header.i64("WIPEOUTFRAME", 1) == 1 {
+            self.header.set_i64("WIPEOUTFRAME", 0);
+        }
+    }
+
+    /// The ducts that pass under `over` take its new air direction (their masks are on its layer).
+    fn follow_cover_layer(&mut self, over: crate::Handle, air: AirDirection) -> Result<()> {
+        let dependents: Vec<(crate::Handle, DuctParams)> = self
+            .model
+            .iter()
+            .filter_map(|e| duct_of(e).filter(|p| p.covers.iter().any(|c| c.over == over.0 && c.over_air != air)).map(|p| (e.handle, p)))
+            .collect();
+        for (h, mut p) in dependents {
+            for c in &mut p.covers {
+                if c.over == over.0 {
+                    c.over_air = air;
+                }
+            }
+            self.regenerate_duct(h, &p)?;
+        }
         Ok(())
     }
 
@@ -1176,6 +1297,12 @@ impl crate::Drawing {
         if index != 1 {
             let dl = if index == 0 { new_mm - old_mm } else { 0.0 };
             p.gaps_mm = p.gaps_mm.iter().map(|g| [g[0] + dl, g[1] + dl]).filter(|g| g[0] >= 0.0 && g[1] <= new_mm).collect();
+            p.covers = p
+                .covers
+                .iter()
+                .map(|c| CoverMark { gap_mm: c.gap_mm.map(|v| v + dl), dash_mm: c.dash_mm.map(|v| v + dl), ..*c })
+                .filter(|c| c.gap_mm[0] >= 0.0 && c.gap_mm[1] <= new_mm && c.dash_mm[0] >= 0.0 && c.dash_mm[1] <= new_mm)
+                .collect();
             p.jogs = p
                 .jogs
                 .iter()
@@ -1218,15 +1345,27 @@ impl crate::Drawing {
                 .map(|j| DuctJog { centre_mm: j.centre_mm - lo, ..*j })
                 .collect()
         };
+        let covers_in = |lo: f64, hi: f64| -> Vec<CoverMark> {
+            p.covers
+                .iter()
+                .filter_map(|c| {
+                    let gap_mm = clip(&c.gap_mm, lo, hi)?;
+                    let dash_mm = clip(&c.dash_mm, lo, hi).unwrap_or([gap_mm[0], gap_mm[0]]);
+                    Some(CoverMark { gap_mm, dash_mm, ..*c })
+                })
+                .collect()
+        };
         let first = DuctParams {
             length: a.dist(cut),
             gaps_mm: p.gaps_mm.iter().filter_map(|g| clip(g, 0.0, cut_mm)).collect(),
+            covers: covers_in(0.0, cut_mm),
             jogs: jogs_in(0.0, cut_mm),
             steps: Vec::new(),
             ..p.clone()
         };
         let second_params = DuctParams {
             gaps_mm: p.gaps_mm.iter().filter_map(|g| clip(g, cut_mm, cut_mm + rest_mm)).collect(),
+            covers: covers_in(cut_mm, cut_mm + rest_mm),
             jogs: jogs_in(cut_mm, cut_mm + rest_mm),
             steps: Vec::new(),
             ..p
