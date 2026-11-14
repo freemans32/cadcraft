@@ -57,9 +57,16 @@ Remotes : `origin` = ce fork, `upstream` = `storytold/cadcraft`. Ne pousse jamai
 
 Cette section sert à reprendre le travail dans une nouvelle conversation, avec n'importe quelle IA. Elle est mise à jour en continu (règle n° 2) : date, ce qui est fait, ce qui reste.
 
-*Dernière mise à jour : 13 novembre 2026 (base 0.20.1, 18 nouvelles PR intégrées).*
+*Dernière mise à jour : 14 novembre 2026 (base 0.20.1, 18 nouvelles PR intégrées ; onglet Architecture étendu).*
 
 ### Fait
+
+- **Onglet Architecture étendu** (14 novembre, demandé et validé par Guillaume d'après les palettes d'AutoCAD Architecture, observées seulement par leurs noms : aucune icône ni image reprise). Commit `77d14aac` sur `perso`.
+  - Onglet en sections repliables : Murs, Portes, Fenêtres, Outils (`crates/ui-egui/src/palettes/building.rs`).
+  - 17 styles de murs en plus des 6 (23 au total, `crates/doc/src/wall_library.rs`) : maçonnerie/voile/brique avec enduit et doublage, brique de parement, moellons, pierres de taille, fondations 550 x 300, cloison 100/70, carreaux de plâtre 5/7/10, parpaings 10/15/20. Noms traduits dans `fr.tsv`.
+  - `OpeningStyle` : nouveau paramètre `style` des ouvertures (coulissante, encastrée, pliante, basculante, ascenseur central, tambour, 1 et 2 vantaux, fixe, fenêtre de toit), pris par `openingadd` et `openingedit`. Anciens dessins lus comme avant. 15 portes et 7 fenêtres dans la palette.
+  - Vérifié : tests de `doc`, `engine`, `io`, `ui-egui` (debug), clippy, fmt. Pas vérifié : `cargo xtask ci` complet (wasm, layers, assets), rendu dans l'interface.
+  - Pas fait : fenêtres d'angle (une ouverture sur deux murs), dalles et planchers (objet à créer), objets de Conception (escalier, garde-corps, toit, poteau, poutre, mur-rideau, grille de plafond, espace, coupes). Les variantes vitrée, tiercée, bois, PVC ont le même symbole en plan que la version de base.
 
 - **Base passée sur l'officiel 0.20.0** (11 novembre, validé par Guillaume : « fais au mieux ») : `main` du fork avancé en fast-forward sur `upstream/main` `e5021f01` (0.20.0 plus 6 commits) et poussé ; `upstream/main` fusionné dans `perso` (commit de fusion, pas de réécriture). `feat/murs` sur `origin` est une ancienne version (les commits récents des murs ne vivent que dans `perso`) : pas rebasé.
   - 10 conflits, tous avec des PR de `perso` que l'officiel a refaites autrement. Règle suivie : le code officiel gagne, et la fonction de la PR est portée dessus quand c'est simple.
