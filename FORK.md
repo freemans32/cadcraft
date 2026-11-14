@@ -35,6 +35,8 @@ Remotes : `origin` = ce fork, `upstream` = `storytold/cadcraft`. Ne pousse jamai
 
 ## Mises à jour sans perte
 
+- **Deux dossiers, deux rôles** (14 novembre) : `/mnt/Jeux/artcraft/cadcraft-perso` est le dossier d'installation de `cadcraft-maj`, qui le remet de force en HEAD détaché sur `origin/perso` (`checkout --force --detach`) : tout ce qui n'y est pas poussé peut être perdu. **Le travail (modifications, commits) se fait dans `/mnt/Jeux/artcraft/cadcraft-perso-dev`**, worktree rattaché à la branche `perso`, que le script ne touche pas. Pousser après chaque commit.
+
 - Les modifications personnelles vivent dans des commits sur le fork, jamais dans le dossier d'installation.
 - La mise à jour se fait par le script `cadcraft-maj` sur son PC. Il récupère `origin/perso` dans un worktree séparé, compile et installe « CADCraft Perso » à côté de la version officielle du launcher ArtCraft. Le launcher n'est jamais modifié.
 - Pour réassembler `perso` : partir de `upstream/main`, fusionner les PR de `perso/pr-integrees.tsv` dans l'ordre, puis les branches `feat/*` du fork, puis ce fichier. Une PR qui casse la compilation ou les tests est retirée et notée avec la raison.
