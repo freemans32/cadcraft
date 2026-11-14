@@ -147,6 +147,7 @@ pub(super) fn pipe_service_label(s: PipeService) -> &'static str {
         PipeService::Condensate => "Condensate drain",
         PipeService::RefrigerantLiquid => "Refrigerant liquid line",
         PipeService::RefrigerantGas => "Refrigerant gas line",
+        PipeService::RefrigerantPair => "Refrigerant link (liquid + gas)",
     }
 }
 
@@ -165,6 +166,7 @@ fn pipe_section(ui: &mut egui::Ui, sel: &[Handle], ps: &[PipeParams], len: &dyn 
             ("condensate", "Condensate drain"),
             ("refrigerantLiquid", "Refrigerant liquid line"),
             ("refrigerantGas", "Refrigerant gas line"),
+            ("refrigerantPair", "Refrigerant link (liquid + gas)"),
         ];
         if let Some(k) = choice(ui, service.map_or(VARIES, pipe_service_label), &items) {
             action = edit("service", json!(k));
@@ -191,12 +193,34 @@ fn pipe_section(ui: &mut egui::Ui, sel: &[Handle], ps: &[PipeParams], len: &dyn 
         }
     });
     let refrigerant = ps.iter().all(|p| p.service.is_refrigerant());
-    let dn = shared(&ps.iter().map(|p| format!("{}", p.dn_mm)).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
-    prop_row(ui, if refrigerant { "Outer diameter (mm)" } else { "Nominal diameter (mm)" }, |ui| {
-        if let Some(mm) = number(edit_field(ui, ui.scope_id().with(("pipe_dn", &ids)), dn).filter(|t| t != VARIES), bad) {
-            action = edit("dn", json!(mm));
+    if refrigerant {
+        // A refrigerant tube is sized in inches ("3/8"); a size typed in mm is understood too.
+        let pair = ps.iter().all(|p| p.service == PipeService::RefrigerantPair);
+        let mut tube = |ui: &mut egui::Ui, label: &str, key: &'static str, get: fn(&PipeParams) -> f64, action: &mut Action| {
+            let shown = shared(&ps.iter().map(|p| cadcraft_doc::refrigerant_size_label(get(p)).replace('"', "")).collect::<Vec<_>>())
+                .unwrap_or_else(|| VARIES.into());
+            prop_row(ui, label, |ui| {
+                if let Some(t) = edit_field(ui, ui.scope_id().with(("pipe_tube", key, &ids)), shown).filter(|t| t != VARIES) {
+                    if cadcraft_doc::parse_refrigerant_size(&t).is_some() {
+                        *action = edit(key, json!(t));
+                    } else {
+                        *bad = Some(crate::i18n::t("Requires a size in inches (3/8, 1 1/8) or millimetres.").to_string());
+                    }
+                }
+            });
+        };
+        tube(ui, if pair { "Liquid tube (inches)" } else { "Tube diameter (inches)" }, "dn", |p| p.dn_mm, &mut action);
+        if pair {
+            tube(ui, "Gas tube (inches)", "gas", |p| p.gas_dn_mm, &mut action);
         }
-    });
+    } else {
+        let dn = shared(&ps.iter().map(|p| format!("{}", p.dn_mm)).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+        prop_row(ui, "Nominal diameter (mm)", |ui| {
+            if let Some(mm) = number(edit_field(ui, ui.scope_id().with(("pipe_dn", &ids)), dn).filter(|t| t != VARIES), bad) {
+                action = edit("dn", json!(mm));
+            }
+        });
+    }
     let insulation = shared(&ps.iter().map(|p| format!("{}", p.insulation_mm)).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
     prop_row(ui, "Insulation (mm)", |ui| {
         if let Some(mm) = number(edit_field(ui, ui.scope_id().with(("pipe_insulation", &ids)), insulation).filter(|t| t != VARIES), bad) {
@@ -1373,6 +1397,20 @@ mod hvac_tests {
         assert_eq!(p.dn_mm, 65.0);
         assert!(p.imposed, "a typed size is the user's: sizing leaves it");
         assert!(super::is_parametric(hn.state().session.doc().unwrap(), h), "a double-click opens Properties");
+    }
+
+    #[test]
+    fn a_selected_refrigerant_link_shows_its_tubes_in_inches_and_takes_inches_typed() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        let r = app.run("pipeadd", json!({ "points": [[0, 0], [3000, 0]], "service": "refrigerantPair" })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handles"][0].as_str().unwrap()).unwrap();
+        app.session.set_selection(vec![h]);
+        let mut hn = palette(app);
+        assert!(hn.query_by_label("Refrigerant link (liquid + gas)").is_some(), "the service is shown");
+        type_into(&mut hn, "5/8", "3/4");
+        let p = cadcraft_doc::pipe_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!((p.dn_mm, p.gas_dn_mm), (9.52, 19.05));
     }
 
     #[test]

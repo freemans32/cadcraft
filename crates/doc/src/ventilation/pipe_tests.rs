@@ -42,7 +42,7 @@ fn a_pipe_is_drawn_to_its_outer_diameter_and_its_insulation_with_the_service_wri
     // A refrigerant line is the copper tube's outer diameter.
     let r = pipe(PipeService::RefrigerantLiquid, PipeLeg::Supply, 9.52);
     assert_eq!(r.outer_diameter_mm(), 9.52);
-    assert!(r.label_text().starts_with("Ø9.5 REF-L"));
+    assert!(r.label_text().starts_with("3/8\" REF-L"));
     // Sized: the flow and the altitude are written, and an arrow shows the way.
     let mut s = pipe(PipeService::ChilledWater, PipeLeg::Return, 50.0);
     (s.flow_m3h, s.level_mm, s.flow_forward) = (Some(8.6), Some(2800.0), Some(true));
@@ -288,4 +288,56 @@ fn the_coils_of_an_air_handling_unit_are_the_loads_of_the_water_pipes_that_end_a
     assert!(
         unit.spec_lines().iter().any(|l| l.contains("Batt. eau glacée 45.0kW")) && unit.spec_lines().iter().any(|l| l.contains("détente directe"))
     );
+}
+
+#[test]
+fn refrigerant_sizes_are_typed_and_written_in_inches() {
+    for (text, mm) in [
+        ("1/4", 6.35),
+        ("3/8", 9.52),
+        ("3/8\"", 9.52),
+        ("1/2in", 12.7),
+        ("5/8", 15.88),
+        ("7/8", 22.2),
+        ("1 1/8", 28.58),
+        ("1-3/8\"", 34.9),
+        ("9.52", 9.52),
+        ("12 mm", 12.0),
+        ("0.375\"", 9.52),
+    ] {
+        let got = parse_refrigerant_size(text).unwrap_or(f64::NAN);
+        assert!((got - mm).abs() < 0.01, "{text}: {got}");
+    }
+    for bad in ["", "abc", "3/0", "-5", "1/"] {
+        assert_eq!(parse_refrigerant_size(bad), None, "{bad:?}");
+    }
+    assert_eq!(
+        (refrigerant_size_label(9.52).as_str(), refrigerant_size_label(15.88).as_str(), refrigerant_size_label(11.0).as_str()),
+        ("3/8\"", "5/8\"", "Ø11.0")
+    );
+}
+
+#[test]
+fn a_refrigerant_pair_is_one_run_with_the_liquid_and_the_gas_tubes_side_by_side() {
+    let mut p = pipe(PipeService::RefrigerantPair, PipeLeg::Supply, 9.52);
+    p.gas_dn_mm = 15.88;
+    assert_eq!(p.size_text(), "3/8\" - 5/8\"");
+    assert_eq!(p.label_text(), "3/8\" - 5/8\" REF");
+    // 9.52 + 15.88 and the gap between them.
+    assert!((p.plan_width_mm() - 45.4).abs() < 1e-9, "{}", p.plan_width_mm());
+    p.insulation_mm = 10.0;
+    assert!((p.plan_width_mm() - 85.4).abs() < 1e-9);
+    let pieces = p.generate(false).unwrap();
+    let on = |layer: &str| pieces.iter().filter(|x| x.layer == layer && matches!(x.kind, EntityKind::Line(_))).count();
+    assert_eq!((on(PIPE_REFRIGERANT_LIQUID_LAYER), on(PIPE_REFRIGERANT_GAS_LAYER)), (2, 2), "each tube is two lines on its own layer");
+    assert!(PipeParams { gas_dn_mm: 0.0, ..p.clone() }.validate().is_err(), "a pair needs its gas tube");
+    // In a drawing: its own layer, its data kept, and counted by size in the takeoff.
+    let mut d = Drawing::new_metric();
+    let h = d.add_pipe(&Space::Model, Common::default(), p, cadcraft_geom::Vec2::ZERO, cadcraft_geom::Vec2::new(4000.0, 0.0)).unwrap();
+    assert_eq!(d.entity(h).unwrap().common.layer, PIPE_REFRIGERANT_PAIR_LAYER);
+    let back = pipe_of(d.entity(h).unwrap()).unwrap();
+    assert_eq!((back.service, back.dn_mm, back.gas_dn_mm), (PipeService::RefrigerantPair, 9.52, 15.88));
+    assert_eq!(PipeService::parse("liaison frigo"), Some(PipeService::RefrigerantPair));
+    let t = d.takeoff("").unwrap();
+    assert_eq!(t.pipes.first().map(|q| q.size.as_str()), Some("3/8\" - 5/8\""));
 }

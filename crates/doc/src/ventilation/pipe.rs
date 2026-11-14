@@ -32,6 +32,74 @@ pub const PIPE_CO_RETURN_LAYER: &str = "M-PIPE-COR";
 pub const PIPE_CONDENSATE_LAYER: &str = "M-PIPE-COND";
 pub const PIPE_REFRIGERANT_LIQUID_LAYER: &str = "M-PIPE-REFL";
 pub const PIPE_REFRIGERANT_GAS_LAYER: &str = "M-PIPE-REFG";
+/// A refrigerant link drawn as one run for the liquid and the gas lines together.
+pub const PIPE_REFRIGERANT_PAIR_LAYER: &str = "M-PIPE-REFP";
+
+/// Copper refrigeration tube sizes, which are given in inches: the label and the outer diameter, mm.
+pub const REFRIGERANT_TUBES: [(&str, f64); 12] = [
+    ("1/4", 6.35),
+    ("3/8", 9.52),
+    ("1/2", 12.7),
+    ("5/8", 15.88),
+    ("3/4", 19.05),
+    ("7/8", 22.2),
+    ("1 1/8", 28.58),
+    ("1 3/8", 34.9),
+    ("1 5/8", 41.28),
+    ("2 1/8", 53.98),
+    ("2 5/8", 66.68),
+    ("3 1/8", 79.38),
+];
+
+/// The size of a refrigerant tube of outer diameter `mm`, as it is spoken: in inches ("3/8\"") when it is a standard
+/// size, else the diameter in millimetres.
+pub fn refrigerant_size_label(mm: f64) -> String {
+    match REFRIGERANT_TUBES.iter().find(|(_, d)| (d - mm).abs() < 0.15) {
+        Some((l, _)) => format!("{l}\""),
+        None => format!("Ø{mm:.1}"),
+    }
+}
+
+/// A refrigerant tube size typed as inches ("3/8", "3/8\"", "1 1/8", "1-1/8", "5/8in", "1.125\"") or as millimetres
+/// ("9.52", "12 mm"): the outer diameter in millimetres. A bare number is millimetres; a mark (`"`, `in`) or a fraction
+/// makes it inches.
+pub fn parse_refrigerant_size(text: &str) -> Option<f64> {
+    let t = text.trim().to_ascii_lowercase().replace(['”', '″'], "\"");
+    let (body, inches_mark) = if let Some(b) = t.strip_suffix('"').or_else(|| t.strip_suffix("in")).or_else(|| t.strip_suffix("pouces")) {
+        (b.trim().to_string(), true)
+    } else if let Some(b) = t.strip_suffix("mm") {
+        (b.trim().to_string(), false)
+    } else {
+        (t.clone(), false)
+    };
+    if body.trim_start().starts_with('-') {
+        return None;
+    }
+    let body = body.replace('-', " ");
+    let mm = if body.contains('/') {
+        let mut whole = 0.0;
+        let mut frac = None;
+        for part in body.split_whitespace() {
+            if let Some((n, d)) = part.split_once('/') {
+                let (n, d) = (n.parse::<f64>().ok()?, d.parse::<f64>().ok()?);
+                (d != 0.0).then_some(())?;
+                frac = Some(n / d);
+            } else {
+                whole = part.parse::<f64>().ok()?;
+            }
+        }
+        (whole + frac?) * 25.4
+    } else {
+        let v = body.trim().parse::<f64>().ok()?;
+        if inches_mark { v * 25.4 } else { v }
+    };
+    // A standard size is the tube's real outer diameter (3/8" is 9.52 mm, not 9.525).
+    let mm = REFRIGERANT_TUBES.iter().find(|(_, d)| (d - mm).abs() < 0.1).map_or(mm, |(_, d)| *d);
+    (mm.is_finite() && mm > 0.0).then_some(mm)
+}
+
+/// The gap between the two tubes of a refrigerant pair, mm.
+const PAIR_GAP_MM: f64 = 20.0;
 
 /// Smallest and largest nominal diameter (outer diameter for a refrigerant line), mm.
 pub const PIPE_DIAMETER_MM: (f64, f64) = (4.0, 600.0);
@@ -76,16 +144,19 @@ pub enum PipeService {
     RefrigerantLiquid,
     /// A refrigerant gas (suction) line.
     RefrigerantGas,
+    /// The liquid and the gas lines of a refrigerant link, drawn together as one run.
+    RefrigerantPair,
 }
 
 impl PipeService {
-    pub const ALL: [PipeService; 6] = [
+    pub const ALL: [PipeService; 7] = [
         PipeService::ChilledWater,
         PipeService::HotWater,
         PipeService::ChangeOver,
         PipeService::Condensate,
         PipeService::RefrigerantLiquid,
         PipeService::RefrigerantGas,
+        PipeService::RefrigerantPair,
     ];
 
     /// The name a command takes.
@@ -97,6 +168,7 @@ impl PipeService {
             PipeService::Condensate => "condensate",
             PipeService::RefrigerantLiquid => "refrigerantLiquid",
             PipeService::RefrigerantGas => "refrigerantGas",
+            PipeService::RefrigerantPair => "refrigerantPair",
         }
     }
 
@@ -109,6 +181,7 @@ impl PipeService {
             "cond" | "condensats" | "condensat" | "evacuation" | "drain" => Some(PipeService::Condensate),
             "refl" | "liquide" | "liquid" | "frigoliquide" => Some(PipeService::RefrigerantLiquid),
             "refg" | "gaz" | "gas" | "frigogaz" => Some(PipeService::RefrigerantGas),
+            "ref" | "refp" | "pair" | "paire" | "liaison" | "liaisonfrigo" | "frigo" | "liquidegaz" => Some(PipeService::RefrigerantPair),
             _ => None,
         })
     }
@@ -121,7 +194,7 @@ impl PipeService {
     /// Whether the diameter of a pipe of the service is the outer diameter of a copper tube (refrigerant),
     /// not the nominal diameter of a steel pipe.
     pub fn is_refrigerant(self) -> bool {
-        matches!(self, PipeService::RefrigerantLiquid | PipeService::RefrigerantGas)
+        matches!(self, PipeService::RefrigerantLiquid | PipeService::RefrigerantGas | PipeService::RefrigerantPair)
     }
 }
 
@@ -168,6 +241,9 @@ pub struct PipeParams {
     pub leg: PipeLeg,
     /// The nominal diameter of a steel pipe, mm; the outer diameter of a refrigerant line's copper tube.
     pub dn_mm: f64,
+    /// The outer diameter of the gas tube of a refrigerant pair, mm (`dn_mm` is then the liquid tube); 0 for the others.
+    #[serde(default)]
+    pub gas_dn_mm: f64,
     /// Whether the user chose the size: sizing then leaves it.
     #[serde(default)]
     pub imposed: bool,
@@ -210,6 +286,7 @@ impl PipeParams {
             service,
             leg: PipeLeg::Supply,
             dn_mm,
+            gas_dn_mm: if service == PipeService::RefrigerantPair { 15.88 } else { 0.0 },
             imposed: false,
             insulation_mm: 0.0,
             load_kw: None,
@@ -230,6 +307,11 @@ impl PipeParams {
         }
         if !(self.dn_mm.is_finite() && (PIPE_DIAMETER_MM.0..=PIPE_DIAMETER_MM.1).contains(&self.dn_mm)) {
             return Err(invalid(format!("A pipe is {} to {} mm across.", PIPE_DIAMETER_MM.0, PIPE_DIAMETER_MM.1)));
+        }
+        if self.service == PipeService::RefrigerantPair
+            && !(self.gas_dn_mm.is_finite() && (PIPE_DIAMETER_MM.0..=PIPE_DIAMETER_MM.1).contains(&self.gas_dn_mm))
+        {
+            return Err(invalid(format!("The gas tube is {} to {} mm across.", PIPE_DIAMETER_MM.0, PIPE_DIAMETER_MM.1)));
         }
         if !(self.insulation_mm.is_finite() && (0.0..=MAX_PIPE_INSULATION_MM).contains(&self.insulation_mm)) {
             return Err(invalid(format!("The insulation is 0 to {MAX_PIPE_INSULATION_MM} mm.")));
@@ -252,9 +334,28 @@ impl PipeParams {
         STEEL_PIPE_SIZES.iter().min_by(|a, b| (a.0 - self.dn_mm).abs().total_cmp(&(b.0 - self.dn_mm).abs())).map_or(self.dn_mm, |(_, od)| *od)
     }
 
-    /// The width a plan shows: the outer diameter and the insulation either side.
+    /// The width a plan shows: the outer diameter and the insulation either side; for a refrigerant pair, the two
+    /// tubes side by side with a small gap.
     pub fn plan_width_mm(&self) -> f64 {
+        if self.service == PipeService::RefrigerantPair {
+            let (l, g) = self.pair_widths_mm();
+            return l + g + PAIR_GAP_MM;
+        }
         self.outer_diameter_mm() + 2.0 * self.insulation_mm
+    }
+
+    /// The widths of the liquid tube and of the gas tube of a refrigerant pair, with their insulation, mm.
+    fn pair_widths_mm(&self) -> (f64, f64) {
+        (self.dn_mm + 2.0 * self.insulation_mm, self.gas_dn_mm + 2.0 * self.insulation_mm)
+    }
+
+    /// The size as written: "DN50", the inches of a refrigerant tube ("3/8\""), or both tubes of a pair ("3/8\" - 5/8\"").
+    pub fn size_text(&self) -> String {
+        match self.service {
+            PipeService::RefrigerantPair => format!("{} - {}", refrigerant_size_label(self.dn_mm), refrigerant_size_label(self.gas_dn_mm)),
+            PipeService::RefrigerantLiquid | PipeService::RefrigerantGas => refrigerant_size_label(self.dn_mm),
+            _ => format!("DN{:.0}", self.dn_mm),
+        }
     }
 
     /// The layer of the run.
@@ -279,13 +380,13 @@ impl PipeParams {
             (PipeService::Condensate, _) => "COND",
             (PipeService::RefrigerantLiquid, _) => "REF-L",
             (PipeService::RefrigerantGas, _) => "REF-G",
+            (PipeService::RefrigerantPair, _) => "REF",
         }
     }
 
     /// The text written on the run: its size, its service and what sizing found.
     pub fn label_text(&self) -> String {
-        let size = if self.service.is_refrigerant() { format!("Ø{:.1}", self.dn_mm) } else { format!("DN{:.0}", self.dn_mm) };
-        let mut text = format!("{size} {}", self.tag());
+        let mut text = format!("{} {}", self.size_text(), self.tag());
         if let Some(f) = self.flow_m3h {
             if self.service == PipeService::Condensate {
                 text.push_str(&format!(" {:.1} l/h", f * 1000.0));
@@ -307,7 +408,20 @@ impl PipeParams {
         let r = self.units.to_units(self.plan_width_mm()) / 2.0;
         let layer = self.layer();
         let line = |layer: &'static str, a: Vec2, b: Vec2| HvacPiece { layer, kind: EntityKind::Line(Line { a: v3(a), b: v3(b) }) };
-        let mut pieces = vec![line(layer, Vec2::new(0.0, -r), Vec2::new(self.length, -r)), line(layer, Vec2::new(0.0, r), Vec2::new(self.length, r))];
+        let mut pieces = if self.service == PipeService::RefrigerantPair {
+            // The liquid tube on one side, the gas tube on the other, each as two lines on its own layer.
+            let (wl, wg) = self.pair_widths_mm();
+            let u = |mm: f64| self.units.to_units(mm);
+            let (liquid, gas) = (PIPE_REFRIGERANT_LIQUID_LAYER, PIPE_REFRIGERANT_GAS_LAYER);
+            let l_lo = -r;
+            let l_hi = -r + u(wl);
+            let g_hi = r;
+            let g_lo = r - u(wg);
+            let run = |layer: &'static str, y: f64| line(layer, Vec2::new(0.0, y), Vec2::new(self.length, y));
+            vec![run(liquid, l_lo), run(liquid, l_hi), run(gas, g_lo), run(gas, g_hi)]
+        } else {
+            vec![line(layer, Vec2::new(0.0, -r), Vec2::new(self.length, -r)), line(layer, Vec2::new(0.0, r), Vec2::new(self.length, r))]
+        };
         if let Some(band) = band_layer(self.service, self.leg) {
             pieces.push(line(band, Vec2::ZERO, Vec2::new(self.length, 0.0)));
         }
@@ -356,6 +470,7 @@ fn layer_of(service: PipeService, leg: PipeLeg) -> &'static str {
         (PipeService::Condensate, _) => PIPE_CONDENSATE_LAYER,
         (PipeService::RefrigerantLiquid, _) => PIPE_REFRIGERANT_LIQUID_LAYER,
         (PipeService::RefrigerantGas, _) => PIPE_REFRIGERANT_GAS_LAYER,
+        (PipeService::RefrigerantPair, _) => PIPE_REFRIGERANT_PAIR_LAYER,
     }
 }
 
@@ -386,6 +501,7 @@ pub fn pipe_layer_color(name: &str) -> Option<cadcraft_color::Color> {
         PIPE_CO_RETURN_LAYER => Some(Color::True(Rgb(0xc3, 0x9b, 0xd3))),
         PIPE_REFRIGERANT_LIQUID_LAYER => Some(Color::True(Rgb(0xe6, 0x7e, 0x22))),
         PIPE_REFRIGERANT_GAS_LAYER => Some(Color::True(Rgb(0x8d, 0x99, 0xa3))),
+        PIPE_REFRIGERANT_PAIR_LAYER => Some(Color::True(Rgb(0xc8, 0x9a, 0x6a))),
         _ => None,
     }
 }

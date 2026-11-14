@@ -1594,3 +1594,7 @@ menu	View	视图
 	Hot water coil (kW)	热水盘管 (kW)
 	Change-over coil (kW)	冷热切换盘管 (kW)
 	Direct expansion coil (kW)	直接膨胀盘管 (kW)
+	Refrigerant link (liquid + gas)	制冷剂连接管（液管 + 气管）
+	Liquid tube (inches)	液管（英寸）
+	Gas tube (inches)	气管（英寸）
+	Tube diameter (inches)	管径（英寸）

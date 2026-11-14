@@ -140,3 +140,42 @@ fn pipesize_sizes_a_network_from_the_loads_at_its_ends_and_refuses_what_is_not_a
         assert!(s.execute("pipesize", &bad).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn a_refrigerant_link_is_drawn_as_one_run_with_its_tubes_given_in_inches() {
+    let mut s = metric();
+    let r = s.execute("pipeadd", &json!({"points": [[0, 0], [4000, 0]], "service": "refrigerantPair", "dn": "3/8", "gas": "5/8"})).unwrap();
+    let h = hd(&r["handles"][0]);
+    let p = pipe(&s, h);
+    assert_eq!((p.service, p.dn_mm, p.gas_dn_mm, p.imposed), (PipeService::RefrigerantPair, 9.52, 15.88, true));
+    // By default: 3/8 and 5/8.
+    let d = s.execute("pipeadd", &json!({"points": [[0, 1000], [2000, 1000]], "service": "refrigerantPair"})).unwrap();
+    let p = pipe(&s, hd(&d["handles"][0]));
+    assert_eq!((p.dn_mm, p.gas_dn_mm), (9.52, 15.88));
+    // Changed in inches, or in millimetres.
+    s.execute("pipeedit", &json!({"handle": h.hex(), "dn": "1/2", "gas": "7/8"})).unwrap();
+    let p = pipe(&s, h);
+    assert_eq!((p.dn_mm, p.gas_dn_mm), (12.7, 22.2));
+    s.execute("pipeedit", &json!({"handle": h.hex(), "gas": 19.05})).unwrap();
+    assert_eq!(pipe(&s, h).gas_dn_mm, 19.05);
+    // A single liquid line takes inches too; a size that is not one is refused.
+    let l = s.execute("pipeadd", &json!({"points": [[0, 2000], [2000, 2000]], "service": "refrigerantLiquid", "dn": "1/4"})).unwrap();
+    assert_eq!(pipe(&s, hd(&l["handles"][0])).dn_mm, 6.35);
+    assert!(s.execute("pipeadd", &json!({"points": [[0, 3000], [2000, 3000]], "service": "refrigerantPair", "dn": "abc"})).is_err());
+    assert!(s.execute("pipeedit", &json!({"handle": h.hex(), "gas": "x/y"})).is_err());
+    // A water pipe is in millimetres: an inch fraction is no size there.
+    assert!(s.execute("pipeadd", &json!({"points": [[0, 4000], [2000, 4000]], "service": "chilledWater", "dn": "3/8"})).is_err());
+    // Sizing leaves refrigerant alone.
+    let n = s.execute("pipesize", &json!({})).unwrap();
+    assert!(n["networks"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn pipeadd_at_the_command_line_takes_the_refrigerant_sizes_in_inches() {
+    let mut s = metric();
+    for t in ["pipeadd", "se", "refrigerantpair", "d", "1/4", "g", "1/2", "0,0", "3000,0", ""] {
+        s.cmdline(t).unwrap();
+    }
+    let p = s.doc().unwrap().model.iter().filter_map(|e| pipe_of(e)).next().unwrap();
+    assert_eq!((p.service, p.dn_mm, p.gas_dn_mm), (PipeService::RefrigerantPair, 6.35, 12.7));
+}

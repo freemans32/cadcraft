@@ -574,6 +574,7 @@ const PIPES: &[(&str, PipeService, PipeLeg)] = &[
     ("Condensate drain", PipeService::Condensate, PipeLeg::Supply),
     ("Refrigerant liquid line", PipeService::RefrigerantLiquid, PipeLeg::Supply),
     ("Refrigerant gas line", PipeService::RefrigerantGas, PipeLeg::Supply),
+    ("Refrigerant link (liquid + gas)", PipeService::RefrigerantPair, PipeLeg::Supply),
 ];
 
 /// The label of an equipment kind in the Tool Sets and in Properties.

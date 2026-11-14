@@ -433,6 +433,16 @@ pub(super) fn paint_pipe(p: &Painter, r: Rect, service: PipeService, leg: PipeLe
     let t = Th::new(p, r);
     let layer = cadcraft_doc::pipe_layer_of(service, leg);
     let side = pipe_color(layer, t.base);
+    if service == PipeService::RefrigerantPair {
+        // The liquid and the gas tubes together: orange and grey.
+        let (liquid, gas) =
+            (pipe_color(cadcraft_doc::PIPE_REFRIGERANT_LIQUID_LAYER, t.base), pipe_color(cadcraft_doc::PIPE_REFRIGERANT_GAS_LAYER, t.base));
+        t.poly(&[(5.0, 20.0), (5.0, 9.0), (21.0, 9.0)], false, liquid);
+        t.poly(&[(9.0, 20.0), (9.0, 13.0), (21.0, 13.0)], false, liquid);
+        t.poly(&[(3.0, 20.0), (3.0, 6.0), (21.0, 6.0)], false, gas);
+        t.poly(&[(11.0, 20.0), (11.0, 15.0), (21.0, 15.0)], false, gas);
+        return;
+    }
     t.poly(&[(3.0, 20.0), (3.0, 7.0), (21.0, 7.0)], false, side);
     t.poly(&[(9.0, 20.0), (9.0, 13.0), (21.0, 13.0)], false, side);
     match service {

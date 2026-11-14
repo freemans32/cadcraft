@@ -874,7 +874,7 @@ impl crate::Drawing {
         for e in self.model.iter() {
             let Some((p, ..)) = self.pipe_ends(e.handle) else { continue };
             let leg = if p.service.has_legs() { p.leg } else { super::PipeLeg::Supply };
-            let size = if p.service.is_refrigerant() { format!("Ø{:.1}", p.dn_mm) } else { format!("DN{:.0}", p.dn_mm) };
+            let size = p.size_text();
             match pipes.iter_mut().find(|q| q.service == p.service && q.leg == leg && q.size == size && q.insulation_mm == p.insulation_mm) {
                 Some(q) => {
                     q.count += 1;

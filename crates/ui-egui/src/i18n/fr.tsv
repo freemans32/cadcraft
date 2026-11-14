@@ -1452,3 +1452,8 @@
 	Hot water coil (kW)	Batterie eau chaude (kW)
 	Change-over coil (kW)	Batterie change-over (kW)
 	Direct expansion coil (kW)	Batterie à détente directe (kW)
+	Refrigerant link (liquid + gas)	Liaison frigorifique (liquide + gaz)
+	Liquid tube (inches)	Tube liquide (pouces)
+	Gas tube (inches)	Tube gaz (pouces)
+	Tube diameter (inches)	Diamètre du tube (pouces)
+	Requires a size in inches (3/8, 1 1/8) or millimetres.	Taille en pouces (3/8, 1 1/8) ou en millimètres.

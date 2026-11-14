@@ -188,7 +188,9 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open_flag: &mut bool) {
                 .pipes
                 .iter()
                 .map(|q| {
-                    use cadcraft_doc::PipeService::{ChangeOver, ChilledWater, Condensate, HotWater, RefrigerantGas, RefrigerantLiquid};
+                    use cadcraft_doc::PipeService::{
+                        ChangeOver, ChilledWater, Condensate, HotWater, RefrigerantGas, RefrigerantLiquid, RefrigerantPair,
+                    };
                     let service = match q.service {
                         ChilledWater => "Chilled water",
                         HotWater => "Hot water",
@@ -196,6 +198,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open_flag: &mut bool) {
                         Condensate => "Condensate drain",
                         RefrigerantLiquid => "Refrigerant liquid line",
                         RefrigerantGas => "Refrigerant gas line",
+                        RefrigerantPair => "Refrigerant link (liquid + gas)",
                     };
                     let leg = if q.service.has_legs() {
                         crate::i18n::t(if q.leg == cadcraft_doc::PipeLeg::Supply { "Supply" } else { "Return" }).to_string()
