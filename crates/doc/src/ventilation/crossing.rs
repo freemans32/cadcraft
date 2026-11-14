@@ -5,7 +5,7 @@
 use cadcraft_geom::Vec2;
 
 use super::duct::{AXIS_REACH, CoverMark, DuctJog, MAX_GAPS, MAX_JOGS};
-use super::{DuctParams, DuctShape, HvacUnits, MAX_DUCTS, invalid};
+use super::{DuctParams, DuctShape, HvacUnits, MAX_DUCTS, duct_of, invalid};
 use crate::{Handle, Result};
 
 /// Distance, in millimetres, within which two ends are one point (as for the network).
@@ -104,6 +104,7 @@ impl crate::Drawing {
     /// Draws broken, at every crossing and overlap still to draw, the duct that is lower: where both altitudes
     /// are known and differ by a step or more, the one with the lower underside passes under. Returns how many.
     pub fn cross_ducts_by_altitude(&mut self, clearance_mm: f64) -> Result<usize> {
+        self.refresh_cover_marks()?;
         let mut drawn = 0;
         for x in self.duct_crossings() {
             if x.resolved {
@@ -124,6 +125,26 @@ impl crate::Drawing {
             }
         }
         Ok(drawn)
+    }
+
+    /// Gives the marks of crossings drawn before marks said whether the duct over runs along this one, and how
+    /// wide it is (they read as unknown), what they would have been drawn with now.
+    fn refresh_cover_marks(&mut self) -> Result<()> {
+        let stale: Vec<Handle> =
+            self.model.iter().filter(|e| duct_of(e).is_some_and(|p| p.covers.iter().any(|c| c.over_width_mm <= 0.0))).map(|e| e.handle).collect();
+        for h in stale {
+            let Some((mut p, a, b)) = self.duct_ends(h) else { continue };
+            let mut changed = false;
+            for c in &mut p.covers {
+                let Some((po, c0, d0)) = (c.over_width_mm <= 0.0).then(|| self.duct_ends(Handle(c.over))).flatten() else { continue };
+                (c.over_width_mm, c.along) = (po.plan_width_mm(), cross_point(a, b, c0, d0).is_none());
+                changed = true;
+            }
+            if changed {
+                self.regenerate_duct(h, &p)?;
+            }
+        }
+        Ok(())
     }
 
     /// Draws duct `under` with its sides broken across duct `over`, with `clearance_mm` more than

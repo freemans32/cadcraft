@@ -1826,3 +1826,26 @@ fn the_dashes_stop_where_a_cone_begins_and_a_run_under_another_keeps_its_bend() 
     let crossing = arcs(&p);
     assert!(with_elbow > crossing, "across another duct a covered bend is left out ({with_elbow} against {crossing})");
 }
+
+#[test]
+fn a_crossing_drawn_before_marks_knew_the_width_and_the_route_is_given_them_at_the_next_sizing() {
+    let mut d = Drawing::new_metric();
+    let under = add_wide(&mut d, (0.0, 0.0), (4000.0, 0.0), 650.0);
+    let over = add_wide(&mut d, (0.0, 0.0), (4000.0, 0.0), 650.0);
+    for (h, mm) in [(over, 2800.0), (under, 2500.0)] {
+        let (mut p, ..) = d.duct_ends(h).unwrap();
+        p.level_mm = Some(mm);
+        d.regenerate_duct(h, &p).unwrap();
+    }
+    assert_eq!(d.cross_ducts_by_altitude(30.0).unwrap(), 1);
+    let marks = |d: &Drawing| duct_of(d.entity(under).unwrap()).unwrap().covers;
+    assert_eq!((marks(&d)[0].along, marks(&d)[0].over_width_mm), (true, 650.0));
+    // The mark as an older version wrote it.
+    let (mut p, ..) = d.duct_ends(under).unwrap();
+    for c in &mut p.covers {
+        (c.along, c.over_width_mm) = (false, 0.0);
+    }
+    d.regenerate_duct(under, &p).unwrap();
+    assert_eq!(d.cross_ducts_by_altitude(30.0).unwrap(), 0, "nothing new to draw");
+    assert_eq!((marks(&d)[0].along, marks(&d)[0].over_width_mm), (true, 650.0), "but the mark is brought up to date");
+}
