@@ -189,17 +189,18 @@ fn zone(p: &Painter, r: Rect) {
     p.rect_filled(z, 0.0, ZONE.gamma_multiply(0.18));
     hatch(p, z);
     p.rect_stroke(z, 0.0, Stroke::new(1.6, ZONE), egui::StrokeKind::Inside);
-    hduct(p, r.left(), z.left(), y, 30.0);
-    hduct(p, z.left(), z.right(), y, 18.0);
-    hduct(p, z.right(), r.right(), y, 30.0);
+    // Seen from above the flat duct is wider than the round one: the same air in less height.
+    hduct(p, r.left(), z.left(), y, 24.0);
+    hduct(p, z.left(), z.right(), y, 42.0);
+    hduct(p, z.right(), r.right(), y, 24.0);
     // The labels sit on a patch of the background, over the hatching.
     let patch = |at: egui::Pos2| p.rect_filled(Rect::from_min_size(at, vec2(66.0, 16.0)), 2.0, Tokens::get().chrome_dark);
     patch(pos2(z.left() + 4.0, r.top() + 4.0));
     text(p, pos2(z.left() + 8.0, r.top() + 12.0), "H 300 mm", ZONE);
-    patch(pos2(z.left() + 4.0, y + 16.0));
-    text(p, pos2(z.left() + 8.0, y + 24.0), "600×200", DUCT);
-    text(p, pos2(r.left() + 6.0, y - 24.0), "Ø400", DUCT);
-    text(p, pos2(r.right() - 44.0, y - 24.0), "Ø400", DUCT);
+    patch(pos2(z.left() + 4.0, y + 26.0));
+    text(p, pos2(z.left() + 8.0, y + 34.0), "600×200", DUCT);
+    text(p, pos2(r.left() + 6.0, y - 20.0), "Ø400", DUCT);
+    text(p, pos2(r.right() - 44.0, y - 20.0), "Ø400", DUCT);
 }
 
 fn connect(p: &Painter, r: Rect) {
