@@ -1613,3 +1613,22 @@ fn a_supply_duct_lying_on_the_extract_duct_at_stacked_collars_is_not_read_as_par
     assert_eq!(got.len(), 2, "{got:?}");
     assert!(got.contains(&(AirDirection::Supply, sup, 0)) && got.contains(&(AirDirection::Extract, ext, 0)), "{got:?}");
 }
+
+#[test]
+fn a_stretch_under_another_duct_inside_an_elbows_trim_does_not_hide_the_run() {
+    // Under the other duct only where the run bends (the last 355 mm, of which the elbow trims 710): the sides stay.
+    let e = DuctElbow { angle_deg: -90.0, radius_mm: 710.0, at_end: true };
+    let mut p = DuctParams { length: 12000.0, elbow: Some(e), trim_end_mm: 710.0, gaps_mm: vec![[11645.0, 12000.0]], ..duct(710.0) };
+    assert_eq!(polylines(&p.generate(false).unwrap()).len(), 2, "both sides drawn");
+    // A stretch that does cut the straight part still cuts it.
+    p.gaps_mm = vec![[5000.0, 6000.0]];
+    assert_eq!(polylines(&p.generate(false).unwrap()).len(), 4, "two stretches, two sides each");
+}
+
+#[test]
+fn a_bend_mostly_under_another_duct_is_not_drawn() {
+    let e = DuctElbow { angle_deg: -90.0, radius_mm: 710.0, at_end: true };
+    let run = |gap: [f64; 2]| DuctParams { length: 12000.0, elbow: Some(e), trim_end_mm: 710.0, gaps_mm: vec![gap], ..duct(710.0) };
+    assert_eq!(arcs(&run([11000.0, 11100.0]).generate(false).unwrap()).len(), 2, "the bend is clear of it");
+    assert!(arcs(&run([11645.0, 12000.0]).generate(false).unwrap()).is_empty(), "half of the bend or more is under it");
+}

@@ -910,8 +910,15 @@ impl DuctParams {
         }
         // The arrow and the label sit on the longest stretch that is drawn.
         let (sx, ex) = solid.iter().copied().max_by(|a, b| (a.1 - a.0).total_cmp(&(b.1 - b.0))).unwrap_or((x0, x1));
+        // The bend is under the other duct when the stretches it passes under cover half of what it takes
+        // of the run (the arcs are drawn whole or not at all).
         if let Some(e) = self.elbow {
-            pieces.extend(self.elbow_pieces(e, r, layer));
+            let total = self.length_m() * 1000.0;
+            let zone = if e.at_end { (total - self.trim_end_mm, total) } else { (0.0, self.trim_start_mm) };
+            let covered: f64 = self.gaps_mm.iter().map(|g| (g[1].min(zone.1) - g[0].max(zone.0)).max(0.0)).sum();
+            if covered < 0.5 * (zone.1 - zone.0) - 1e-6 {
+                pieces.extend(self.elbow_pieces(e, r, layer));
+            }
         }
         // An arrow a quarter of the way along, the way the air runs.
         if let Some(forward) = self.flow_forward {
@@ -986,7 +993,11 @@ impl DuctParams {
         gaps.sort_by(|a, b| a.0.total_cmp(&b.0));
         let (mut out, mut from) = (Vec::new(), x0);
         for (g0, g1) in gaps {
-            if g0 > from && g0 < x1 {
+            // A stretch under another duct beyond the straight part (under an elbow's trim) cuts nothing off it.
+            if g0 >= x1 {
+                break;
+            }
+            if g0 > from {
                 out.push((from, g0));
             }
             from = from.max(g1);
