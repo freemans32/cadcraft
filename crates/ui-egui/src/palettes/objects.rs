@@ -183,7 +183,8 @@ fn wall_section(
     }
     if let [w] = walls {
         let mut length = 0.0;
-        let n = w.path.len();
+        let path = w.centreline();
+        let n = path.len();
         for i in 0..n {
             let next = if i + 1 < n {
                 i + 1
@@ -192,7 +193,7 @@ fn wall_section(
             } else {
                 break;
             };
-            if let (Some(a), Some(b)) = (w.path.get(i), w.path.get(next)) {
+            if let (Some(a), Some(b)) = (path.get(i), path.get(next)) {
                 length += (*b - *a).len();
             }
         }

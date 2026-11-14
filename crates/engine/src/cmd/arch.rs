@@ -17,7 +17,7 @@ use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, St
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("walladd", "Wall", run_walladd)
-            .params("{points, closed?, style?, justification?: left|center|right, height? (mm)} → {handle}")
+            .params("{points, bulges? (one per segment, as in a polyline: 0 straight, the tangent of a quarter of the arc's angle, at most 1 in absolute value, positive turning left), closed?, style?, justification?: left|center|right, height? (mm)} → {handle}")
             .interactive(|s| Ok(Box::new(WallAddM::new(s)))),
         CommandSpec::new("wallstyleedit", "Wall Styles", run_wallstyleedit).params(
             "{} → {styles, current} | {name, description?, components?: [{name, thickness (mm), pattern?, patternScale?, \
@@ -65,6 +65,7 @@ fn params(d: &Drawing, style: WallStyle, points: Vec<Vec2>, closed: bool, justif
         joints: Default::default(),
         start_free: false,
         end_free: false,
+        bulges: Vec::new(),
     }
 }
 
@@ -135,7 +136,18 @@ fn run_walladd(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => style.default_height,
         Some(v) => v.as_f64().filter(|h| h.is_finite() && *h > 0.0).ok_or_else(|| bad("walladd", "`height` must be a positive number (mm)"))?,
     };
-    let wall = params(s.doc()?, style, points, closed, justification, height);
+    let mut wall = params(s.doc()?, style, points, closed, justification, height);
+    // The bulge of each segment (a polyline's: 0 straight, the tangent of a quarter of the arc's angle).
+    if let Some(v) = p.get("bulges").filter(|v| !v.is_null()) {
+        let list = v.as_array().ok_or_else(|| bad("walladd", "`bulges` must be a list of numbers"))?;
+        if raw.len() != wall.path.len() {
+            return Err(bad("walladd", "`bulges` needs points that are all apart"));
+        }
+        wall.bulges = list
+            .iter()
+            .map(|b| b.as_f64().filter(|b| b.is_finite()).ok_or_else(|| bad("walladd", "`bulges` must be a list of numbers")))
+            .collect::<Result<_>>()?;
+    }
     Ok(json!({ "handle": add(s, wall)?.hex() }))
 }
 
@@ -146,9 +158,14 @@ enum Ask {
     Style,
     Justification,
     Height,
+    /// A point on the arc the next wall is, then its end.
+    ArcThrough,
+    ArcEnd,
 }
 
 struct WallAddM {
+    /// The point picked on the arc under way.
+    arc_mid: Option<Vec2>,
     pts: Vec<Vec2>,
     /// The walls added so far, one per segment.
     handles: Vec<Handle>,
@@ -163,7 +180,15 @@ impl WallAddM {
     fn new(s: &Session) -> Self {
         let style = current_style(s).unwrap_or_else(|_| cadcraft_doc::standard_wall_styles().into_iter().next().unwrap_or_else(fallback_style));
         let height = style.default_height;
-        WallAddM { pts: Vec::new(), handles: Vec::new(), style, justification: s.last_used.wall_justification, height, ask: Ask::Point }
+        WallAddM {
+            arc_mid: None,
+            pts: Vec::new(),
+            handles: Vec::new(),
+            style,
+            justification: s.last_used.wall_justification,
+            height,
+            ask: Ask::Point,
+        }
     }
     fn settings(&self, s: &mut Session) {
         s.echo(format!("Current settings: Style = {}, Justification = {}, Height = {}", self.style.name, self.justification.name(), self.height));
@@ -195,6 +220,26 @@ impl WallAddM {
             self.remember(s);
         }
         Ok(true)
+    }
+    /// The arc wall from the last point through the picked one to `end`.
+    fn arc_to(&mut self, s: &mut Session, end: Vec2) -> Result<Step> {
+        self.ask = Ask::Point;
+        let (Some(start), Some(mid)) = (self.pts.last().copied(), self.arc_mid.take()) else { return Ok(Step::Continue) };
+        let Some(bulge) = cadcraft_doc::bulge_through(start, mid, end) else {
+            s.echo("The three points are on a line, or the arc is more than a half circle.");
+            return Ok(Step::Continue);
+        };
+        let Some(mut w) = self.wall(s, vec![start, end], false) else { return Ok(Step::Continue) };
+        w.bulges = vec![bulge];
+        if let Err(e) = w.validate() {
+            s.echo(e.to_string());
+            return Ok(Step::Continue);
+        }
+        self.handles.push(add(s, w)?);
+        self.remember(s);
+        self.pts.push(end);
+        s.last_point = end;
+        Ok(Step::Continue)
     }
     /// Draws the last wall back to the start point and ends the command.
     fn close(&mut self, s: &mut Session) -> Result<Step> {
@@ -232,6 +277,7 @@ impl WallAddM {
             "STyle" => self.ask = Ask::Style,
             "Justification" => self.ask = Ask::Justification,
             "Height" => self.ask = Ask::Height,
+            "Arc" if !self.pts.is_empty() => self.ask = Ask::ArcThrough,
             "Undo" => {
                 if self.pts.len() >= 2
                     && let Some(h) = self.handles.pop()
@@ -306,16 +352,33 @@ impl Interactive for WallAddM {
                 return Prompt::new("Enter justification", super::curves::KW).kw(&["Left", "Center", "Right"]).default(self.justification.name());
             }
             Ask::Height => return Prompt::new("Enter wall height (mm)", Accept::NUMBER).default(format!("{}", self.height)),
+            Ask::ArcThrough => return Prompt::new("Specify a point on the arc", Accept::POINT),
+            Ask::ArcEnd => return Prompt::new("Specify end point of the arc", Accept::POINT).base_opt(self.pts.last().copied()),
             Ask::Point => {}
         }
         let last = self.pts.last().copied();
         match self.pts.len() {
             0 => Prompt::new("Specify start point of wall", Accept::POINT).kw(&["STyle", "Justification", "Height"]),
-            1 | 2 => Prompt::new("Specify next point", Accept::POINT).kw(&["Undo"]).base_opt(last),
-            _ => Prompt::new("Specify next point", Accept::POINT).kw(&["Close", "Undo"]).base_opt(last),
+            1 | 2 => Prompt::new("Specify next point", Accept::POINT).kw(&["Arc", "Undo"]).base_opt(last),
+            _ => Prompt::new("Specify next point", Accept::POINT).kw(&["Arc", "Close", "Undo"]).base_opt(last),
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match (self.ask, &i) {
+            (Ask::ArcThrough, Input::Point(m)) => {
+                self.arc_mid = Some(*m);
+                self.ask = Ask::ArcEnd;
+                return Ok(Step::Continue);
+            }
+            (Ask::ArcEnd, Input::Point(e)) => return self.arc_to(s, *e),
+            (Ask::ArcThrough | Ask::ArcEnd, _) => {
+                // Anything else gives up the arc.
+                self.arc_mid = None;
+                self.ask = Ask::Point;
+                return Ok(Step::Continue);
+            }
+            _ => {}
+        }
         if self.ask != Ask::Point {
             return self.option(s, &i);
         }
@@ -333,12 +396,20 @@ impl Interactive for WallAddM {
         self.pts.last().map(|l| vec![EntityKind::Line(Line { a: l.to3(0.0), b: c.to3(0.0) })]).unwrap_or_default()
     }
     fn preview_objects(&self, s: &Session, c: Vec2) -> Vec<Entity> {
-        if self.ask != Ask::Point || self.pts.is_empty() {
+        if !matches!(self.ask, Ask::Point | Ask::ArcEnd) || self.pts.is_empty() {
             return Vec::new();
         }
         // The walls drawn so far are in the drawing: only the one under way is previewed.
         let Some(last) = self.pts.last().copied().filter(|l| !l.near(c, 1e-9)) else { return Vec::new() };
-        let Some(Ok(pieces)) = self.wall(s, vec![last, c], false).map(|w| w.generate()) else { return Vec::new() };
+        let mut wall = self.wall(s, vec![last, c], false);
+        if self.ask == Ask::ArcEnd {
+            // The arc through the point picked, to the cursor.
+            let Some(bulge) = self.arc_mid.and_then(|m| cadcraft_doc::bulge_through(last, m, c)) else { return Vec::new() };
+            if let Some(w) = wall.as_mut() {
+                w.bulges = vec![bulge];
+            }
+        }
+        let Some(Ok(pieces)) = wall.map(|w| w.generate()) else { return Vec::new() };
         pieces
             .into_iter()
             .map(|p| Entity { handle: Handle(0), common: Common { layer: p.layer.into(), color: p.color, ..Common::default() }, kind: p.kind })

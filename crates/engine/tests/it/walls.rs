@@ -706,3 +706,50 @@ fn a_wall_end_left_free_is_not_joined_and_can_be_joined_again() {
     assert!(s.execute("walledit", &json!({"handle": c.hex(), "freeStart": true})).is_err());
     assert!(s.execute("walledit", &json!({"handle": b.hex(), "freeStart": "yes"})).is_err());
 }
+
+#[test]
+fn walladd_draws_an_arc_wall_from_bulges_and_at_the_command_line() {
+    let mut s = metric();
+    let r = s.execute("walladd", &json!({"points": [[0, 0], [4000, 0]], "bulges": [0.4], "style": BRICK})).unwrap();
+    let a = h(&r);
+    assert_eq!(wall(&s, a).bulges, [0.4]);
+    assert!(s.doc().unwrap().wall_is_intact(a));
+    assert!(s.execute("walladd", &json!({"points": [[0, 0], [4000, 0]], "bulges": ["x"]})).is_err());
+    assert!(s.execute("walladd", &json!({"points": [[0, 0], [4000, 0]], "bulges": [2.0]})).is_err());
+    // At the command line: a point on the arc, then its end, then a straight wall on from there.
+    let before = walls(&s).len();
+    for t in ["walladd", "0,3000", "ar", "1500,4500", "3000,3000", "3000,5000", ""] {
+        s.cmdline(t).unwrap();
+    }
+    assert!(s.running.is_none());
+    let all = walls(&s);
+    // The arc, the straight wall from its end, and the one Enter closes the outline with.
+    assert_eq!(all.len() - before, 3);
+    assert_eq!(all.iter().filter(|(hd, w)| *hd != a && !w.bulges.is_empty()).count(), 1, "one new arc wall");
+    let arc = all.iter().find(|(hd, w)| *hd != a && !w.bulges.is_empty()).expect("the arc wall").1.clone();
+    // From (0, 3000) through (1500, 4500) to (3000, 3000): a half circle turning right (clockwise).
+    assert!((arc.bulges[0] + 1.0).abs() < 1e-6, "got {:?}", arc.bulges);
+    // An arc through three points on a line is refused and nothing is drawn.
+    let n = walls(&s).len();
+    for t in ["walladd", "0,9000", "ar", "1000,9000", "2000,9000", ""] {
+        s.cmdline(t).unwrap();
+    }
+    assert_eq!(walls(&s).len(), n);
+}
+
+#[test]
+fn an_arc_wall_joins_the_straight_wall_that_leaves_it_and_can_be_edited() {
+    let mut s = metric();
+    // A quarter arc from (0, 0) to (3000, 3000) turning left, then a straight wall from its end.
+    let bulge = (std::f64::consts::FRAC_PI_2 / 4.0).tan();
+    let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [3000, 3000]], "bulges": [-bulge], "style": PARTITION})).unwrap());
+    let b = h(&s.execute("walladd", &json!({"points": [[3000, 3000], [3000, 6000]], "style": PARTITION})).unwrap());
+    assert!(joined(&s, a) && joined(&s, b), "the two walls meet at the arc's end");
+    // Editing keeps the arc.
+    s.execute("walledit", &json!({"handle": a.hex(), "height": 3000})).unwrap();
+    assert_eq!(wall(&s, a).bulges, [-bulge]);
+    assert!(s.doc().unwrap().wall_is_intact(a));
+    // Moving the arc away parts the walls again by itself.
+    s.execute("move", &json!({"handles": [a.hex()], "delta": [-20000, 0]})).unwrap();
+    assert!(!joined(&s, a) && !joined(&s, b));
+}

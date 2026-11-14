@@ -30,6 +30,12 @@ pub const WALL_APP: &str = "CADCRAFT_WALL";
 pub const MAX_WALL_COMPONENTS: usize = 16;
 /// Most vertices of one wall's path; a longer run is drawn as several walls.
 pub const MAX_WALL_VERTICES: usize = 64;
+/// Largest bulge of an arc segment (the tangent of a quarter of its angle): a half circle.
+pub const MAX_WALL_BULGE: f64 = 1.0;
+/// An arc segment is drawn as straight pieces at most this many radians apart (3°).
+const ARC_STEP: f64 = 0.052_359_877_559_829_89;
+/// Most points a wall's centre line has once its arcs are drawn as straight pieces.
+const MAX_CENTRELINE_POINTS: usize = 1024;
 /// Thickest component and highest wall, in millimetres (100 m).
 pub const MAX_WALL_SIZE_MM: f64 = 100_000.0;
 /// Longest style or component name, in characters.
@@ -300,6 +306,10 @@ pub struct WallParams {
     pub path: Vec<Vec2>,
     #[serde(default)]
     pub closed: bool,
+    /// The bulge of each segment, as in a polyline: 0 straight, the tangent of a quarter of the
+    /// arc's angle otherwise, positive turning left (counter-clockwise). Empty: all straight.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bulges: Vec<f64>,
     #[serde(default)]
     pub justification: WallJustification,
     /// Millimetres.
@@ -320,6 +330,54 @@ pub struct WallParams {
 
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+/// The radius of the arc from `a` to `b` with `bulge`; `None` for a straight segment.
+pub fn arc_radius(a: Vec2, b: Vec2, bulge: f64) -> Option<f64> {
+    let theta = 4.0 * bulge.atan();
+    let c = a.dist(b);
+    (bulge != 0.0 && bulge.is_finite() && c > 0.0).then(|| c / (2.0 * (theta / 2.0).sin().abs())).filter(|r| r.is_finite())
+}
+
+/// The bulge of the arc from `a` to `b` that passes through `m`: `None` when the three points are
+/// on a line, or the arc is more than a half circle.
+pub fn bulge_through(a: Vec2, m: Vec2, b: Vec2) -> Option<f64> {
+    let chord = b - a;
+    let c = chord.len();
+    let side = chord.cross(m - a);
+    if !(c > 0.0 && side.is_finite()) || side.abs() <= 1e-9 * c * c {
+        return None;
+    }
+    // The circle through the three points: its centre is where the chord's and a–m's bisectors meet.
+    let (u, v) = (m - a, b - a);
+    let d = 2.0 * u.cross(v);
+    let (uu, vv) = (u.dot(u), v.dot(v));
+    let centre = a + Vec2::new((v.y * uu - u.y * vv) / d, (u.x * vv - v.x * uu) / d);
+    let r = centre.dist(a);
+    let theta_minor = 2.0 * (c / (2.0 * r)).clamp(-1.0, 1.0).asin();
+    // `m` on the side of the chord away from the centre: it is on the minor arc.
+    let minor = chord.cross(m - a) * chord.cross(centre - a) < 0.0;
+    let theta = if minor { theta_minor } else { std::f64::consts::TAU - theta_minor };
+    // A point to the right of a→b is on a counter-clockwise arc (positive bulge).
+    let bulge = (theta / 4.0).tan() * if side < 0.0 { 1.0 } else { -1.0 };
+    (bulge.abs() <= MAX_WALL_BULGE + 1e-9).then_some(bulge.clamp(-MAX_WALL_BULGE, MAX_WALL_BULGE))
+}
+
+/// The points between `a` and `b` that draw the arc of `bulge` as straight pieces.
+fn arc_points(a: Vec2, b: Vec2, bulge: f64) -> Vec<Vec2> {
+    let Some(r) = arc_radius(a, b, bulge) else { return Vec::new() };
+    let theta = 4.0 * bulge.atan();
+    let c = a.dist(b);
+    // The centre is to the left of the chord for a counter-clockwise arc, to the right otherwise.
+    let centre = (a + b) / 2.0 + (b - a).perp() / c * ((c / 2.0) / (theta / 2.0).tan());
+    let first = (a - centre).angle();
+    let n = ((theta.abs() / ARC_STEP).ceil() as usize).max(1);
+    (1..n)
+        .map(|k| {
+            let ang = first + theta * k as f64 / n as f64;
+            centre + Vec2::new(ang.cos(), ang.sin()) * r
+        })
+        .collect()
 }
 
 /// One object of a wall's generated geometry: lines go on [`WALL_LAYER`], hatches on
@@ -348,6 +406,7 @@ impl WallParams {
         if self.path.iter().any(|p| !p.is_finite() || p.x.abs() > 1e12 || p.y.abs() > 1e12) {
             return Err(invalid("A wall point is not a finite coordinate."));
         }
+        self.validate_arcs()?;
         self.joints.validate()?;
         // Thickness and segment lengths are checked when the geometry is built, the data size
         // when the extended data is.
@@ -355,9 +414,61 @@ impl WallParams {
         self.to_xdata().map(|_| ())
     }
 
+    /// The wall's centre line: its path with every arc segment drawn as short straight pieces, the
+    /// line the lines, hatches and junctions are worked out along.
+    pub fn centreline(&self) -> Vec<Vec2> {
+        if self.bulges.iter().all(|b| *b == 0.0) {
+            return self.path.clone();
+        }
+        let n = self.path.len();
+        let segs = if self.closed { n } else { n.saturating_sub(1) };
+        let mut out = Vec::with_capacity(n * 4);
+        for (i, &a) in self.path.iter().enumerate() {
+            out.push(a);
+            if i < segs
+                && let Some(&b) = self.path.get((i + 1) % n)
+            {
+                out.extend(arc_points(a, b, self.bulges.get(i).copied().unwrap_or(0.0)));
+            }
+            if out.len() > MAX_CENTRELINE_POINTS * 2 {
+                break;
+            }
+        }
+        out
+    }
+
     /// The total thickness in drawing units.
     pub fn thickness(&self) -> f64 {
         self.units.to_units(self.style.thickness())
+    }
+
+    /// Checks the arcs: a bulge per segment at most, usable, no more than a half circle, and an arc
+    /// whose radius is at least the wall's thickness (a tighter one would fold the wall over itself).
+    fn validate_arcs(&self) -> Result<()> {
+        if self.bulges.is_empty() {
+            return Ok(());
+        }
+        let n = self.path.len();
+        let segs = if self.closed { n } else { n.saturating_sub(1) };
+        if self.bulges.len() > segs {
+            return Err(invalid("A wall has one bulge per segment at most."));
+        }
+        let reach = self.boundaries().iter().fold(0.0_f64, |m, b| m.max(b.abs()));
+        for (i, &bulge) in self.bulges.iter().enumerate() {
+            if !bulge.is_finite() || bulge.abs() > MAX_WALL_BULGE {
+                return Err(invalid("An arc wall turns by half a circle at most."));
+            }
+            if let (Some(&a), Some(&b)) = (self.path.get(i), self.path.get((i + 1) % n))
+                && let Some(r) = arc_radius(a, b, bulge)
+                && r < reach
+            {
+                return Err(invalid("The arc's radius is smaller than the wall's thickness."));
+            }
+        }
+        if self.centreline().len() > MAX_CENTRELINE_POINTS {
+            return Err(invalid("The wall has too many arcs."));
+        }
+        Ok(())
     }
 
     /// The offsets of the component boundaries from the path (left positive), exterior face
@@ -384,7 +495,7 @@ impl WallParams {
     pub fn generate(&self) -> Result<Vec<WallPiece>> {
         let bounds = self.boundaries();
         let reach = bounds.iter().fold(0.0_f64, |m, b| m.max(b.abs()));
-        let joins = joins(&self.path, self.closed, reach)?;
+        let joins = joins(&self.centreline(), self.closed, reach)?;
         // A wall that meets others is drawn component by component, cut where they meet.
         if !self.joints.is_empty() {
             return self.generate_jointed(&joins);

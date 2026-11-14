@@ -419,10 +419,11 @@ impl crate::Drawing {
             let to_mm = |v: f64| v / w.units.to_units(1.0);
             let (Some(left), Some(right)) = (bounds.first().copied().map(to_mm), bounds.last().copied().map(to_mm)) else { continue };
             let wide = bounds.iter().fold(0.0_f64, |m, b| m.max(b.abs())).max(reach);
-            let n = w.path.len();
+            let path = w.centreline();
+            let n = path.len();
             let segs = if w.closed { n } else { n.saturating_sub(1) };
             for k in 0..segs {
-                let (Some(&p0), Some(&p1)) = (w.path.get(k), w.path.get((k + 1) % n)) else { continue };
+                let (Some(&p0), Some(&p1)) = (path.get(k), path.get((k + 1) % n)) else { continue };
                 let (a, b) = (place.to_world(p0), place.to_world(p1));
                 let length = a.dist(b);
                 if length <= 1e-9 {
@@ -465,11 +466,12 @@ impl crate::Drawing {
         let bounds = w.boundaries();
         let to_mm = |v: f64| v / w.units.to_units(1.0);
         let (left, right) = (bounds.first().copied().map(to_mm)?, bounds.last().copied().map(to_mm)?);
-        let n = w.path.len();
+        let path = w.centreline();
+        let n = path.len();
         if segment >= if w.closed { n } else { n.saturating_sub(1) } {
             return None;
         }
-        let (a, b) = (place.to_world(*w.path.get(segment)?), place.to_world(*w.path.get((segment + 1) % n)?));
+        let (a, b) = (place.to_world(*path.get(segment)?), place.to_world(*path.get((segment + 1) % n)?));
         let length = a.dist(b);
         (length > 1e-9).then(|| WallHit {
             wall,

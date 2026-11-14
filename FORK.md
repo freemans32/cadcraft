@@ -63,6 +63,14 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
 
 ### Fait
 
+- **Murs : recalcul automatique, extrémité libre, murs en arc** (14 novembre, demandés par Guillaume). Sur `perso`.
+  - **Recalcul automatique** : après toute commande qui ajoute, modifie, déplace ou efface un mur ou une ouverture, les murs sont raccordés de nouveau (`Drawing::walls_touched_since`, passe `arch::after_command`). Seules les entités dont le stockage a changé sont examinées. `WALLCLEANUP` reste en secours.
+  - **Extrémité libre** : `WallParams.start_free` / `end_free` (mur ouvert) : l'extrémité n'est ni coupée ni prolongée sur les murs rencontrés (le recouvrement reste dessiné une seule fois). `WALLEDIT freeStart|freeEnd`, mots-clés `FreeStart` / `FreeEnd` à la ligne de commande, cases « Raccord au début / à la fin » dans Propriétés.
+  - **Murs en arc** : `WallParams.bulges` (un renflement par segment, comme une polyligne ; au plus 1 = demi-cercle ; rayon au moins égal à l'épaisseur). `WALLADD` : `bulges` en JSON, et mot-clé `Arc` à la ligne de commande (point sur l'arc, puis fin ; un mur par arc). `bulge_through` calcule le renflement par 3 points.
+    - **Choix de conception à connaître** : l'arc est dessiné en **segments droits de 3° au plus** (`WallParams::centreline`), pas en vrais arcs. Les couches, hachures et raccords fonctionnent donc sans changement, et les contours sont des polylignes à nombreux sommets. Un autre logiciel voit des polylignes, pas des arcs.
+    - Raccord arc / mur droit à angle droit vérifié par rendu (`cadcraft-cli`) : les couches s'emboîtent. Un mur droit presque dans le prolongement de l'arc (environ 13°) donne une longue pointe : c'est le comportement déjà existant pour des murs presque alignés, pas propre à l'arc.
+    - **Pas fait** : portes et fenêtres sur un mur en arc (la pose se fait sur une facette trop courte et est refusée), fermeture d'un contour qui finit par un arc, arc par centre et rayon, modifier le renflement après coup (WALLEDIT).
+
 - **Onglet Architecture étendu** (14 novembre, demandé et validé par Guillaume d'après les palettes d'AutoCAD Architecture, observées seulement par leurs noms : aucune icône ni image reprise). Commit `77d14aac` sur `perso`.
   - Onglet en sections repliables : Murs, Portes, Fenêtres, Outils (`crates/ui-egui/src/palettes/building.rs`).
   - 17 styles de murs en plus des 6 (23 au total, `crates/doc/src/wall_library.rs`) : maçonnerie/voile/brique avec enduit et doublage, brique de parement, moellons, pierres de taille, fondations 550 x 300, cloison 100/70, carreaux de plâtre 5/7/10, parpaings 10/15/20. Noms traduits dans `fr.tsv`.

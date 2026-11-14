@@ -508,7 +508,7 @@ impl Placed {
     /// the wall's path. `None` when it is not on the wall: not along it, past the segment's ends,
     /// or farther from the path than the wall is thick.
     pub fn host(&self, centre: Vec2, rotation: f64, width: f64) -> Option<(OpeningCut, f64)> {
-        let path = &self.params.path;
+        let path = &self.params.centreline();
         let reach = self.params.boundaries().iter().fold(0.0_f64, |m, b| m.max(b.abs())).max(1e-9);
         let n = path.len();
         let segs = if self.params.closed { n } else { n.saturating_sub(1) };
@@ -568,7 +568,7 @@ fn segs(w: &Placed) -> Vec<Seg> {
             Some((o0.min(o1), o0.max(o1), c.priority))
         })
         .collect();
-    let p = &w.params.path;
+    let p = &w.params.centreline();
     let n = p.len();
     let count = if w.params.closed { n } else { n.saturating_sub(1) };
     let open = !w.params.closed;
@@ -703,7 +703,7 @@ pub fn work_out_joints(walls: &[Placed]) -> Vec<WallJoints> {
     let mut cuts: Vec<(Cut, Cut)> = Vec::with_capacity(walls.len());
     for (i, w) in walls.iter().enumerate() {
         let others: Vec<Vec<Seg>> = all_segs.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, s)| segs_clone(s)).collect();
-        let p = &w.params.path;
+        let p = &w.params.centreline();
         let reach = w.params.thickness();
         let bounds = w.params.boundaries();
         let local = |c: EndCut| EndCut { point: w.at.to_local(c.point), dir: w.at.dir_to_local(c.dir) };
@@ -753,7 +753,7 @@ pub fn work_out_joints(walls: &[Placed]) -> Vec<WallJoints> {
                 foreign: Vec::new(),
                 openings: Vec::new(),
             };
-            let joins = super::joins(&p.path, p.closed, p.boundaries().iter().fold(0.0_f64, |m, b| m.max(b.abs()))).ok()?;
+            let joins = super::joins(&p.centreline(), p.closed, p.boundaries().iter().fold(0.0_f64, |m, b| m.max(b.abs()))).ok()?;
             p.bands(&joins).ok()
         };
         let plain = |c: &Cut| c.as_ref().map(|c| (c.0, Vec::new()));

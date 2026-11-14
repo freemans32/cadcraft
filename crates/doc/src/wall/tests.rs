@@ -18,6 +18,7 @@ fn wall(style: WallStyle, path: &[(f64, f64)], closed: bool, justification: Wall
         height: 2500.0,
         units: WallUnits::default(),
         joints: Default::default(),
+        bulges: Vec::new(),
         start_free: false,
         end_free: false,
     }
@@ -408,4 +409,70 @@ fn an_edited_or_scaled_wall_is_no_longer_intact() {
     });
     d.blocks.insert(name, std::sync::Arc::new(b));
     assert!(!d.wall_is_intact(h));
+}
+
+#[test]
+fn the_bulge_of_an_arc_through_three_points_is_a_polyline_bulge() {
+    use crate::bulge_through;
+    let (a, b) = (Vec2::new(0.0, 0.0), Vec2::new(2.0, 0.0));
+    // Through (1, 1) or (1, -1) the circle has its centre on the chord: a half circle, bulge 1 in size.
+    let up = bulge_through(a, Vec2::new(1.0, 1.0), b).expect("an arc");
+    let down = bulge_through(a, Vec2::new(1.0, -1.0), b).expect("an arc");
+    assert!((up.abs() - 1.0).abs() < 1e-9, "a half circle: bulge 1, got {up}");
+    // A point to the right of a→b makes a counter-clockwise arc (positive bulge), one to the left a clockwise one.
+    assert!(up < 0.0 && down > 0.0, "the sign says which side the arc bulges to");
+    // A shallow arc: sagitta 0.2 on a chord of 2.
+    let shallow = bulge_through(a, Vec2::new(1.0, -0.2), b).expect("an arc");
+    assert!((shallow - 0.2).abs() < 1e-9, "bulge = sagitta / half chord, got {shallow}");
+    // On a line, or more than a half circle: refused.
+    assert!(bulge_through(a, Vec2::new(1.0, 0.0), b).is_none());
+    assert!(bulge_through(a, Vec2::new(1.0, 3.0), b).is_none());
+}
+
+#[test]
+fn an_arc_wall_is_drawn_along_concentric_circles_and_keeps_its_bulge() {
+    // A quarter turn of radius 3000 from (3000, 0) to (0, 3000), turning left, centred on the origin.
+    let bulge = (std::f64::consts::FRAC_PI_2 / 4.0).tan();
+    let mut w = wall(style("Concrete 200"), &[(3000.0, 0.0), (0.0, 3000.0)], false, WallJustification::Center);
+    w.bulges = vec![bulge];
+    w.validate().expect("a usable arc wall");
+    let pieces = w.generate().expect("geometry");
+    // Concrete 200 centred: its faces are 100 either side of the path, so radii 3100 and 2900.
+    let radii: Vec<(f64, f64)> = lines(&pieces)
+        .into_iter()
+        .filter(|l| l.len() > 2)
+        .map(|l| {
+            let r: Vec<f64> = l.iter().map(|(x, y)| x.hypot(*y)).collect();
+            (r.iter().copied().fold(f64::MAX, f64::min), r.iter().copied().fold(f64::MIN, f64::max))
+        })
+        .collect();
+    assert_eq!(radii.len(), 2, "two faces");
+    for (lo, hi) in &radii {
+        assert!((hi - lo) < 1.0, "each face stays on its circle: {lo}..{hi}");
+    }
+    let mut mids: Vec<f64> = radii.iter().map(|(lo, _)| lo.round()).collect();
+    mids.sort_by(f64::total_cmp);
+    assert_eq!(mids, [2900.0, 3100.0]);
+    // The arc is drawn with many short pieces (3° each), not one chord.
+    assert!(lines(&pieces).iter().any(|l| l.len() >= 30));
+    // Its parameters, including the bulge, survive the extended data.
+    let back = WallParams::from_xdata(&w.to_xdata().unwrap()).expect("read back");
+    assert_eq!(back.bulges, w.bulges);
+    // The same wall without a bulge is the chord.
+    w.bulges.clear();
+    assert!(lines(&w.generate().unwrap()).iter().all(|l| l.len() <= 2));
+}
+
+#[test]
+fn an_arc_tighter_than_the_wall_is_thick_is_refused_and_so_is_a_bulge_past_a_half_circle() {
+    let mut w = wall(style("Concrete 200"), &[(0.0, 0.0), (150.0, 0.0)], false, WallJustification::Left);
+    w.bulges = vec![1.0];
+    assert!(w.validate().is_err(), "a radius of 75 under a wall of 200");
+    let mut w = wall(style("Concrete 200"), &[(0.0, 0.0), (4000.0, 0.0)], false, WallJustification::Left);
+    w.bulges = vec![1.5];
+    assert!(w.validate().is_err(), "more than a half circle");
+    w.bulges = vec![f64::NAN];
+    assert!(w.validate().is_err());
+    w.bulges = vec![0.3, 0.3];
+    assert!(w.validate().is_err(), "one bulge per segment at most");
 }

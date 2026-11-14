@@ -22,6 +22,7 @@ fn with_wall() -> (Drawing, Handle) {
         height: 2500.0,
         units: WallUnits::default(),
         joints: Default::default(),
+        bulges: Vec::new(),
         start_free: false,
         end_free: false,
     };

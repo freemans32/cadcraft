@@ -20,6 +20,7 @@ fn drawing() -> (Drawing, WallParams) {
         height: 2500.0,
         units: WallUnits::of(&d),
         joints: Default::default(),
+        bulges: Vec::new(),
         start_free: false,
         end_free: false,
     };

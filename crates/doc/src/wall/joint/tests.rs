@@ -16,6 +16,7 @@ fn add(d: &mut Drawing, style: &str, path: &[(f64, f64)], justification: WallJus
         height: 2500.0,
         units: WallUnits::default(),
         joints: Default::default(),
+        bulges: Vec::new(),
         start_free: false,
         end_free: false,
     };
