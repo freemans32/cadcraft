@@ -118,6 +118,14 @@ Cette section sert à reprendre le travail dans une nouvelle conversation, avec 
 
 ### Ensuite (chaque étape à présenter et faire valider avant de coder)
 
+**Contrôle du code, 14 novembre (demandé par Guillaume).** Déjà fait, à ne plus compter : gaines rectangulaires, CTA verticale (`StackedDoubleFlow`), colonne comme origine du réseau d'un étage (débit de l'étage plus débit des autres étages **saisi à la main**), section de colonne choisie pour tenir dans la trémie, CTA avec hauteur / modèle / poids, marche au milieu d'un tronçon (`DuctStep`), métré par niveau (un dessin par niveau), retours de menuiserie (`returning`).
+**Décidé : on ne fera pas** les groupes d'eau glacée au-delà de 570 kW ni les VRV au-dessus de 20 CV.
+**Ordre décidé par Guillaume :**
+1. Murs : recalcul automatique après déplacement, murs en arc, désactiver le raccord d'une extrémité.
+2. Ouvertures : cote depuis la face du mur, cotes provisoires, reconnaissance des blocs d'un plan existant, élévations.
+3. Autres réseaux (frigorifique, condensats, eau glacée) : tracé des tuyauteries et liaisons entre unités et groupes. Un seul chantier : les équipements en sont les extrémités.
+Reste aussi, sans ordre : une seule cote imposée avec l'autre calculée ; croisement avec une gaine souple ; métré (poids, isolant, prix, cumul de niveaux) ; altitude d'un raccord de CTA ou d'une bouche ; perte de charge d'une gaine inclinée ; modèle d'équipement propre au dessin ; vue de face ; export IFC ; conversion d'un dessin existant en objets.
+
 1. **PR 2 des murs** : onglet Architecture dans les Jeux d'outils, dialogue Styles de murs, section Mur dans Propriétés. Dans `perso`, elle peut s'appuyer sur la PR #2855 (Jeux d'outils utilisateur).
 2. **PR 3 des murs** : raccords L, T et X entre murs, selon les priorités des composants.
    - **Fait le 10 novembre, validé par Guillaume** : commit `feat/murs` `76fa82f` « walls: join walls where they meet (L, T and X junctions) », fusionné dans `feat/gaines` puis `perso` (sur `perso`, `cargo test --workspace` : 4 545 tests, 0 échec).
