@@ -876,6 +876,14 @@ impl Scan<'_> {
                     .fittings
                     .iter()
                     .copied()
+                    // The reducer from the unit's orifice to the run (its loss counts in the sizing), unless the run is imposed at the orifice's width.
+                    .chain(std::iter::repeat_n(
+                        Fitting::Reducer,
+                        usize::from(
+                            n.parent.is_none()
+                                && n.collar_size.is_some_and(|c| !(d.params.imposed && (c.width_mm() - d.params.plan_width_mm()).abs() < 1.0)),
+                        ),
+                    ))
                     .chain(std::iter::repeat_n(Fitting::Elbow45, 4 * d.params.jogs.len()))
                     .chain(std::iter::repeat_n(Fitting::Elbow45, 2 * usize::from(step_between(n.parent.and_then(altitude), altitude(old)).is_some())))
                     .collect(),

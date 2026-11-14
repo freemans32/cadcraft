@@ -1096,3 +1096,18 @@ fn duct_grips_stretch_an_end_move_the_run_and_drag_the_runs_that_meet_there() {
     // Dragging an end onto the other end is refused.
     assert!(s.grip_edit(hs[0], 0, b2, cadcraft_engine::grips::GripMode::Stretch).is_err());
 }
+
+#[test]
+fn the_sizing_counts_the_loss_of_the_reducer_from_the_units_orifice_to_the_duct() {
+    let pressure = |sizes: Value| {
+        let mut s = metric();
+        let u = s.execute("ahuadd", &json!({"at": [0, 0], "type": "supplyUnit"})).unwrap();
+        s.execute("ahuedit", &json!({"handle": u["handle"], "portSizes": sizes})).unwrap();
+        s.execute("ductadd", &json!({"points": [[1300, 0], [6000, 0]], "air": "supply"})).unwrap();
+        s.execute("airterminaladd", &json!({"at": [6000, 0], "flow": 300, "air": "supply"})).unwrap();
+        let r = s.execute("ductsize", &json!({})).unwrap();
+        r["networks"][0]["requiredPressure"].as_f64().unwrap()
+    };
+    let (none, wide) = (pressure(json!([null, null])), pressure(json!([null, "800x400"])));
+    assert!(wide > none, "the reducer adds its loss: {wide} against {none}");
+}

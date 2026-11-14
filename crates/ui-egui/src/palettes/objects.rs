@@ -776,7 +776,7 @@ fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams], bad: &mut
                 }
             });
             if size.is_some() {
-                prop_row(ui, &format!("{} ({})", crate::i18n::t(name), crate::i18n::t("size")), |ui| {
+                prop_row(ui, &format!("{} ({})", crate::i18n::t(name), crate::i18n::t("size W×H")), |ui| {
                     if let Some(t) = edit_field(ui, ui.scope_id().with(("ahu_port_size", k, &ids)), text).filter(|t| t != VARIES) {
                         action = edit("portSizes", with(if t.trim().is_empty() { Value::Null } else { json!(t.trim()) }));
                     }
