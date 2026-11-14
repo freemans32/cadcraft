@@ -2,7 +2,7 @@
 //! Drafting and Modeling icons (`Tokens::icon`, `icon_accent`, `icon_point`). Openings are their
 //! own plan symbol, scaled down; the rest are plan or elevation sketches on a 24 x 24 grid.
 
-use cadcraft_doc::{AccessoryKind, AhuKind, EntityKind, EquipmentKind, OpeningKind, OpeningParams, OpeningStyle, WallUnits};
+use cadcraft_doc::{AccessoryKind, AhuKind, EntityKind, EquipmentKind, OpeningKind, OpeningParams, OpeningStyle, PipeLeg, PipeService, WallUnits};
 use egui::{Color32, Painter, Pos2, Rect, Stroke, pos2, vec2};
 
 use crate::theme::Tokens;
@@ -418,4 +418,42 @@ pub(super) fn paint_convert(p: &Painter, r: Rect) {
     t.l((16.0, 15.0), (22.0, 15.0), t.base);
     t.l((17.0, 15.0), (17.0, 9.0), t.acc);
     t.l((21.0, 15.0), (21.0, 9.0), t.acc);
+}
+
+/// The colour of a pipe service as its layer is drawn.
+fn pipe_color(layer: &str, fallback: Color32) -> Color32 {
+    match cadcraft_doc::pipe_layer_color(layer) {
+        Some(cadcraft_color::Color::True(rgb)) => Color32::from_rgb(rgb.0, rgb.1, rgb.2),
+        _ => fallback,
+    }
+}
+
+/// A pipe bend in the colours of its service: the two sides, and the band along the axis for the services that have one.
+pub(super) fn paint_pipe(p: &Painter, r: Rect, service: PipeService, leg: PipeLeg) {
+    let t = Th::new(p, r);
+    let layer = cadcraft_doc::pipe_layer_of(service, leg);
+    let side = pipe_color(layer, t.base);
+    t.poly(&[(3.0, 20.0), (3.0, 7.0), (21.0, 7.0)], false, side);
+    t.poly(&[(9.0, 20.0), (9.0, 13.0), (21.0, 13.0)], false, side);
+    match service {
+        PipeService::ChilledWater => t.poly(&[(6.0, 20.0), (6.0, 10.0), (21.0, 10.0)], false, t.base),
+        PipeService::Condensate => t.poly(&[(6.0, 20.0), (6.0, 10.0), (21.0, 10.0)], false, pipe_color("M-PIPE-BAND-YELLOW", t.pt)),
+        _ => {}
+    }
+}
+
+/// A pipe with a pencil: Edit Pipe.
+pub(super) fn paint_edit_pipe(p: &Painter, r: Rect) {
+    let t = Th::new(p, r);
+    t.poly(&[(2.0, 17.0), (2.0, 6.0), (15.0, 6.0)], false, t.acc);
+    t.poly(&[(6.0, 17.0), (6.0, 10.0), (15.0, 10.0)], false, t.acc);
+    t.pencil();
+}
+
+/// A pipe with its size written on it: Size Pipes.
+pub(super) fn paint_size_pipes(p: &Painter, r: Rect) {
+    let t = Th::new(p, r);
+    t.l((2.0, 8.0), (22.0, 8.0), t.acc);
+    t.l((2.0, 16.0), (22.0, 16.0), t.acc);
+    t.p.text(t.at(12.0, 12.0), egui::Align2::CENTER_CENTER, "DN", egui::FontId::proportional(8.0), t.pt);
 }

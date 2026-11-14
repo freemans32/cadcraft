@@ -184,6 +184,28 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open_flag: &mut bool) {
                     cadcraft_doc::AirDirection::Exhaust => "Exhaust air",
                 })
             };
+            let pipes: Vec<Vec<String>> = t
+                .pipes
+                .iter()
+                .map(|q| {
+                    use cadcraft_doc::PipeService::{ChangeOver, ChilledWater, Condensate, HotWater, RefrigerantGas, RefrigerantLiquid};
+                    let service = match q.service {
+                        ChilledWater => "Chilled water",
+                        HotWater => "Hot water",
+                        ChangeOver => "Change-over",
+                        Condensate => "Condensate drain",
+                        RefrigerantLiquid => "Refrigerant liquid line",
+                        RefrigerantGas => "Refrigerant gas line",
+                    };
+                    let leg = if q.service.has_legs() {
+                        crate::i18n::t(if q.leg == cadcraft_doc::PipeLeg::Supply { "Supply" } else { "Return" }).to_string()
+                    } else {
+                        String::new()
+                    };
+                    vec![crate::i18n::t(service).to_string(), leg, q.size.clone(), num(q.insulation_mm), q.count.to_string(), num(q.length_m)]
+                })
+                .collect();
+            table(ui, "pipes", "Pipes", &["Service", "Leg", "Size", "Insulation (mm)", "Count", "Length (m)"], pipes);
             let mut ducts: Vec<Vec<String>> = t
                 .ducts
                 .iter()

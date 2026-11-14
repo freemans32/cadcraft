@@ -4,8 +4,8 @@
 
 use cadcraft_doc::{
     AccessoryKind, AccessoryParams, AhuKind, AhuParams, AirDirection, Drawing, DuctKind, DuctParams, DuctShape, Handle, OpeningKind, OpeningParams,
-    RiserParams, SpaceParams, TerminalKind, TerminalParams, WallJustification, ZoneParams, accessory_of, ahu_of, air_terminal_of, duct_of,
-    opening_of, riser_of, space_of, wall_of, zone_of,
+    PipeParams, PipeService, RiserParams, SpaceParams, TerminalKind, TerminalParams, WallJustification, ZoneParams, accessory_of, ahu_of,
+    air_terminal_of, duct_of, opening_of, pipe_of, riser_of, space_of, wall_of, zone_of,
 };
 use cadcraft_hvac::RoomUse;
 use egui::{Sense, pos2, vec2};
@@ -75,6 +75,10 @@ pub(super) fn section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], len: &dyn 
     if !ducts.is_empty() && ducts.len() == sel.len() {
         return duct_section(ui, sel, &ducts, len, bad);
     }
+    let pipes: Vec<_> = sel.iter().filter_map(|h| d.entity(*h).and_then(|e| pipe_of(e))).collect();
+    if !pipes.is_empty() && pipes.len() == sel.len() {
+        return pipe_section(ui, sel, &pipes, len, bad);
+    }
     None
 }
 
@@ -85,10 +89,121 @@ pub(crate) fn is_parametric(d: &Drawing, h: Handle) -> bool {
             || space_of(e).is_some()
             || air_terminal_of(e).is_some()
             || duct_of(e).is_some()
+            || pipe_of(e).is_some()
             || accessory_of(e).is_some()
             || riser_of(e).is_some()
             || cadcraft_doc::equipment_of(e).is_some()
     })
+}
+
+/// The label of a pipe service in Properties.
+pub(super) fn pipe_service_label(s: PipeService) -> &'static str {
+    match s {
+        PipeService::ChilledWater => "Chilled water",
+        PipeService::HotWater => "Hot water",
+        PipeService::ChangeOver => "Change-over",
+        PipeService::Condensate => "Condensate drain",
+        PipeService::RefrigerantLiquid => "Refrigerant liquid line",
+        PipeService::RefrigerantGas => "Refrigerant gas line",
+    }
+}
+
+/// The Properties group of pipes: their service, size, insulation, altitude and load, and what sizing found.
+fn pipe_section(ui: &mut egui::Ui, sel: &[Handle], ps: &[PipeParams], len: &dyn Fn(f64) -> String, bad: &mut Option<String>) -> Action {
+    let ids = handles(sel);
+    let mut action: Action = None;
+    let edit = |key: &str, value: Value| Some(("pipeedit", json!({ "handles": ids, key: value })));
+    group(ui, "Pipe");
+    let service = shared(&ps.iter().map(|p| p.service).collect::<Vec<_>>());
+    prop_row(ui, "Service", |ui| {
+        let items = [
+            ("chilledWater", "Chilled water"),
+            ("hotWater", "Hot water"),
+            ("changeOver", "Change-over"),
+            ("condensate", "Condensate drain"),
+            ("refrigerantLiquid", "Refrigerant liquid line"),
+            ("refrigerantGas", "Refrigerant gas line"),
+        ];
+        if let Some(k) = choice(ui, service.map_or(VARIES, pipe_service_label), &items) {
+            action = edit("service", json!(k));
+        }
+    });
+    if ps.iter().all(|p| p.service.has_legs()) {
+        let leg = shared(&ps.iter().map(|p| p.leg).collect::<Vec<_>>());
+        prop_row(ui, "Leg", |ui| {
+            let shown = leg.map_or(VARIES, |l| if l == cadcraft_doc::PipeLeg::Supply { "Supply" } else { "Return" });
+            if let Some(k) = choice(ui, shown, &[("supply", "Supply"), ("return", "Return")]) {
+                action = edit("leg", json!(k));
+            }
+        });
+    }
+    let imposed = shared(&ps.iter().map(|p| p.imposed).collect::<Vec<_>>());
+    prop_row(ui, "Size set by", |ui| {
+        let shown = imposed.map_or(VARIES, |i| if i { "User" } else { "Sizing" });
+        if let Some(c) = choice(ui, shown, &[("auto", "Sizing"), ("keep", "User")]) {
+            if c == "auto" {
+                action = edit("dn", json!("auto"));
+            } else if let [p] = ps {
+                action = edit("dn", json!(p.dn_mm));
+            }
+        }
+    });
+    let refrigerant = ps.iter().all(|p| p.service.is_refrigerant());
+    let dn = shared(&ps.iter().map(|p| format!("{}", p.dn_mm)).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, if refrigerant { "Outer diameter (mm)" } else { "Nominal diameter (mm)" }, |ui| {
+        if let Some(mm) = number(edit_field(ui, ui.scope_id().with(("pipe_dn", &ids)), dn).filter(|t| t != VARIES), bad) {
+            action = edit("dn", json!(mm));
+        }
+    });
+    let insulation = shared(&ps.iter().map(|p| format!("{}", p.insulation_mm)).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Insulation (mm)", |ui| {
+        if let Some(mm) = number(edit_field(ui, ui.scope_id().with(("pipe_insulation", &ids)), insulation).filter(|t| t != VARIES), bad) {
+            action = edit("insulation", json!(mm));
+        }
+    });
+    let altitude = shared(&ps.iter().map(|p| p.level_mm.map(|b| format!("{}", b / 1000.0)).unwrap_or_default()).collect::<Vec<_>>())
+        .unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Altitude of the underside (m)", |ui| {
+        if let Some(t) = edit_field(ui, ui.scope_id().with(("pipe_altitude", &ids)), altitude).filter(|t| t != VARIES) {
+            if t.trim().is_empty() {
+                action = edit("altitude", Value::Null);
+            } else if let Some(m) = number(Some(t), bad) {
+                action = edit("altitude", json!(m));
+            }
+        }
+    });
+    let drain = ps.iter().all(|p| p.service == PipeService::Condensate);
+    let load = shared(&ps.iter().map(|p| p.load_kw.map(|l| format!("{l}")).unwrap_or_default()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, if drain { "Load at the free end (l/h)" } else { "Load at the free end (kW)" }, |ui| {
+        if let Some(t) = edit_field(ui, ui.scope_id().with(("pipe_load", &ids)), load).filter(|t| t != VARIES) {
+            if t.trim().is_empty() {
+                action = edit("load", Value::Null);
+            } else if let Some(v) = number(Some(t), bad) {
+                action = edit("load", json!(v));
+            }
+        }
+    });
+    let source = shared(&ps.iter().map(|p| p.source).collect::<Vec<_>>());
+    prop_row(ui, "Starts at the source", |ui| {
+        let mut on = source == Some(true);
+        if ui.checkbox(&mut on, "").changed() {
+            action = edit("source", json!(on));
+        }
+    });
+    if let [p] = ps {
+        prop_row(ui, "Length", |ui| read_only(ui, &len(p.length)));
+        if let Some(f) = p.flow_m3h {
+            let text = if p.service == PipeService::Condensate { format!("{:.1} l/h", f * 1000.0) } else { format!("{f:.2} m³/h") };
+            prop_row(ui, "Flow", |ui| read_only(ui, &text));
+        }
+        if let Some(v) = p.velocity {
+            prop_row(ui, "Velocity", |ui| read_only(ui, &format!("{v:.2} m/s")));
+        }
+        if let Some(l) = p.loss_pa_m {
+            prop_row(ui, "Pressure loss", |ui| read_only(ui, &format!("{l:.0} Pa/m")));
+        }
+    }
+    action
 }
 
 fn handles(sel: &[Handle]) -> Vec<String> {
@@ -1182,6 +1297,22 @@ mod hvac_tests {
         let p = cadcraft_doc::duct_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
         assert_eq!(p.diameter_mm, 315.0);
         assert!(p.imposed, "a typed diameter is the user's: sizing leaves it");
+        assert!(super::is_parametric(hn.state().session.doc().unwrap(), h), "a double-click opens Properties");
+    }
+
+    #[test]
+    fn a_selected_pipe_shows_its_size_and_a_typed_one_is_imposed() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        *app.session.doc_mut().unwrap() = cadcraft_doc::Drawing::new_metric();
+        let r = app.run("pipeadd", json!({ "points": [[0, 0], [3000, 0]], "service": "hotWater" })).unwrap();
+        let h = cadcraft_doc::Handle::parse_hex(r["handles"][0].as_str().unwrap()).unwrap();
+        app.session.set_selection(vec![h]);
+        let mut hn = palette(app);
+        assert!(hn.query_by_label("Hot water").is_some(), "the service is shown");
+        type_into(&mut hn, "40", "65");
+        let p = cadcraft_doc::pipe_of(hn.state().session.doc().unwrap().entity(h).unwrap()).unwrap();
+        assert_eq!(p.dn_mm, 65.0);
+        assert!(p.imposed, "a typed size is the user's: sizing leaves it");
         assert!(super::is_parametric(hn.state().session.doc().unwrap(), h), "a double-click opens Properties");
     }
 

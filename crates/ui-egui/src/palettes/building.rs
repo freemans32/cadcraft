@@ -3,7 +3,7 @@
 //! rather than from a fixed list of tools.
 
 use cadcraft_color::Color;
-use cadcraft_doc::{AccessoryKind, AhuKind, AirDirection, ComponentFunction, OpeningKind, OpeningStyle, TerminalKind};
+use cadcraft_doc::{AccessoryKind, AhuKind, AirDirection, ComponentFunction, OpeningKind, OpeningStyle, PipeLeg, PipeService, TerminalKind};
 use egui::{Rect, Sense, Stroke, pos2, vec2};
 
 use super::{hvachelp, thumbs};
@@ -182,6 +182,9 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
     let mut chosen_accessory: Option<AccessoryKind> = None;
     let equipment = app.session.last_used.equipment.kind;
     let mut chosen_equipment: Option<cadcraft_doc::EquipmentKind> = None;
+    let pipe_now = (app.session.last_used.pipe.service, app.session.last_used.pipe.leg);
+    let mut chosen_pipe: Option<(PipeService, PipeLeg)> = None;
+    let mut size_pipes = false;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         header(ui, "Spaces");
@@ -274,6 +277,28 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         }
         ui.add_space(6.0);
         separator(ui);
+        header(ui, "Piping");
+        for &(label, service, leg) in PIPES {
+            let selected = pipe_now.0 == service && (!service.has_legs() || pipe_now.1 == leg);
+            if row_button(ui, crate::i18n::t(label), selected, |p, r| thumbs::paint_pipe(p, r, service, leg)) {
+                chosen_pipe = Some((service, leg));
+            }
+        }
+        if row_button(ui, crate::i18n::t("Edit Pipe"), false, thumbs::paint_edit_pipe) {
+            start = Some("pipeedit");
+        }
+        if row_tip(
+            ui,
+            crate::i18n::t("Size Pipes"),
+            crate::i18n::t("Mark the run that starts at the source of each network, type the load (kW; l/h for a drain) at the free ends, then size: the flow comes from the load, the size from the flow."),
+            None,
+            false,
+            thumbs::paint_size_pipes,
+        ) {
+            size_pipes = true;
+        }
+        ui.add_space(6.0);
+        separator(ui);
         header(ui, "Quantities");
         if row_tip(ui, crate::i18n::t("HVAC Quantities"), crate::i18n::t("Counts the ducts, fittings, terminals, units, risers and equipment of this drawing (one drawing per level), and saves a spreadsheet."), Some("HVAC Quantities"), false, thumbs::paint_quantities) {
             start = Some("hvactakeoff");
@@ -305,6 +330,12 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         app.session.last_used.ahu.size = None;
         app.cmd.buffer.clear();
         app.start("ahuadd");
+    } else if let Some((service, leg)) = chosen_pipe {
+        // The service clicked becomes PIPEADD's, at its own size, then it starts with it.
+        let last = &mut app.session.last_used.pipe;
+        (last.service, last.leg, last.dn_mm) = (service, leg, None);
+        app.cmd.buffer.clear();
+        app.start("pipeadd");
     } else if let Some(kind) = chosen_equipment {
         // The kind clicked becomes EQUIPMENTADD's, at its first model, then it starts with it.
         app.session.last_used.equipment = cadcraft_engine::cmd::EquipmentLastUsed { kind, model: String::new() };
@@ -323,6 +354,24 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
                 app.session.echo(crate::tf!("Terminals connected: {n}", n = n));
                 for k in r["skipped"].as_array().into_iter().flatten() {
                     app.session.echo(format!("{}: {}", k["terminal"].as_str().unwrap_or(""), k["reason"].as_str().unwrap_or("")));
+                }
+            }
+            Err(e) => app.session.echo(e.to_string()),
+        }
+    } else if size_pipes {
+        // PIPESIZE asks nothing: it runs at once and says what it did.
+        match app.run("pipesize", serde_json::json!({})) {
+            Ok(r) => {
+                for net in r["networks"].as_array().into_iter().flatten() {
+                    let load = net["totalLoad"].as_f64().unwrap_or(0.0);
+                    let n = net["runs"].as_array().map_or(0, Vec::len);
+                    app.session.echo(crate::tf!("Pipes sized: {n} run(s), {load}", n = n, load = format!("{load:.1}")));
+                    for w in net["warnings"].as_array().into_iter().flatten().filter_map(|w| w.as_str()) {
+                        app.session.echo(w.to_string());
+                    }
+                }
+                for w in r["warnings"].as_array().into_iter().flatten().filter_map(|w| w.as_str()) {
+                    app.session.echo(w.to_string());
                 }
             }
             Err(e) => app.session.echo(e.to_string()),
@@ -484,6 +533,19 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
         }
     }
 }
+
+/// The pipes of the Piping group: the label, the service and the leg.
+const PIPES: &[(&str, PipeService, PipeLeg)] = &[
+    ("Chilled water supply", PipeService::ChilledWater, PipeLeg::Supply),
+    ("Chilled water return", PipeService::ChilledWater, PipeLeg::Return),
+    ("Hot water supply", PipeService::HotWater, PipeLeg::Supply),
+    ("Hot water return", PipeService::HotWater, PipeLeg::Return),
+    ("Change-over supply", PipeService::ChangeOver, PipeLeg::Supply),
+    ("Change-over return", PipeService::ChangeOver, PipeLeg::Return),
+    ("Condensate drain", PipeService::Condensate, PipeLeg::Supply),
+    ("Refrigerant liquid line", PipeService::RefrigerantLiquid, PipeLeg::Supply),
+    ("Refrigerant gas line", PipeService::RefrigerantGas, PipeLeg::Supply),
+];
 
 /// The label of an equipment kind in the Tool Sets and in Properties.
 pub(super) fn equipment_kind_label(k: cadcraft_doc::EquipmentKind) -> &'static str {

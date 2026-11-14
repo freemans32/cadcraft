@@ -15,6 +15,7 @@ mod air;
 mod fittings;
 mod friction;
 mod network;
+mod pipe;
 mod rates;
 mod sizes;
 
@@ -22,6 +23,10 @@ pub use air::Air;
 pub use fittings::{Fitting, FittingCoefficients};
 pub use friction::{friction_factor, pressure_gradient, reynolds, velocity};
 pub use network::{DesignCriteria, Governing, Network, NetworkReport, Section, Segment, SegmentKind, SegmentResult, Terminal, size_network};
+pub use pipe::{
+    DRAIN_PIPES, PipeCriteria, PipeGoverning, PipeSizing, STEEL_PIPES, STEEL_ROUGHNESS_MM, WaterTemperature, check_water_pipe, max_velocity_ms,
+    size_condensate_drain, size_water_pipe, steel_inner_diameter_mm, water_flow_m3h,
+};
 pub use rates::{RoomUse, fresh_air_rate};
 pub use sizes::{ROUND_DIAMETERS_MM, equivalent_diameter_mm, rect_area_m2, round_area_m2};
 
