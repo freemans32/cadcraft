@@ -29,7 +29,8 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("walledit", "Edit Wall", run_walledit)
             .params(
                 "{handle | handles, style?, justification?: left|center|right, height? (mm), layers? ({layer name: thickness in mm}, or [{name | index, thickness}]: these walls only), \
-                 applyToStyle? (true: the style and every wall that uses it take the thicknesses too)} → {regenerated}",
+                 applyToStyle? (true: the style and every wall that uses it take the thicknesses too), \
+                 freeStart? | freeEnd? (true: that end of an open wall is left as drawn, not joined to the walls it meets)} → {regenerated}",
             )
             .interactive(|s| Ok(Box::new(WallEditM::new(s)))),
     ]
@@ -54,7 +55,17 @@ fn style_named(d: &Drawing, name: &str) -> Result<WallStyle> {
 
 /// The parameters of a wall along `points` (drawing coordinates).
 fn params(d: &Drawing, style: WallStyle, points: Vec<Vec2>, closed: bool, justification: WallJustification, height: f64) -> WallParams {
-    WallParams { style, path: points, closed, justification, height, units: WallUnits::of(d), joints: Default::default() }
+    WallParams {
+        style,
+        path: points,
+        closed,
+        justification,
+        height,
+        units: WallUnits::of(d),
+        joints: Default::default(),
+        start_free: false,
+        end_free: false,
+    }
 }
 
 /// Adds wall `p` (drawing coordinates) to the current space; a standard style it uses is then
@@ -73,17 +84,18 @@ fn add(s: &mut Session, p: WallParams) -> Result<Handle> {
     Ok(h)
 }
 
-/// The post-command pass for openings: a drawing that has openings, or had them before the command,
-/// gets its walls joined again, so an opening moved, copied or erased cuts its wall (or stops cutting
-/// it) without WALLCLEANUP. Cheap when the command changed nothing or there are no openings.
+/// The post-command pass for walls and openings: when a command added, changed (moved, rotated,
+/// stretched, copied) or erased a wall or an opening, the walls are joined again, so a wall moved
+/// against another meets it, and an opening moved, copied or erased cuts its wall (or stops cutting
+/// it), without WALLCLEANUP. Cheap when the command changed nothing or touched no wall.
 pub(crate) fn after_command(s: &mut Session, before: Option<&std::sync::Arc<Drawing>>) {
     let space = s.space();
     let Ok(st) = s.state_mut() else { return };
     if before.is_none_or(|b| std::sync::Arc::ptr_eq(b, &st.doc)) {
         return;
     }
-    let has_openings = |d: &Drawing| d.space(&space).is_some_and(|sp| sp.iter().any(|e| cadcraft_doc::opening_of(e).is_some()));
-    if before.is_some_and(|b| has_openings(b)) || has_openings(&st.doc) {
+    let Some(b) = before else { return };
+    if st.doc.walls_touched_since(b, &space) {
         join_walls(std::sync::Arc::make_mut(&mut st.doc), &space);
     }
 }
@@ -497,6 +509,9 @@ struct WallChange {
     /// the style the walls have (the drawing's, and every wall that uses it).
     layers: Vec<(LayerRef, f64)>,
     apply_to_style: bool,
+    /// Whether the start (the end) of these walls is left as drawn, not joined to the walls it meets.
+    start_free: Option<bool>,
+    end_free: Option<bool>,
 }
 
 /// A layer of a wall style: by name (every layer of that name) or by its place from the exterior face.
@@ -569,6 +584,13 @@ fn edit_walls(s: &mut Session, handles: &[Handle], c: &WallChange) -> Result<usi
         }
         if !c.layers.is_empty() {
             set_thicknesses(&mut w.style, &c.layers)?;
+        }
+        if c.start_free.is_some() || c.end_free.is_some() {
+            if w.closed {
+                return Err(other("A closed wall has no ends to leave free."));
+            }
+            w.start_free = c.start_free.unwrap_or(w.start_free);
+            w.end_free = c.end_free.unwrap_or(w.end_free);
         }
         // Junctions are worked out again after the change.
         w.joints = Default::default();
@@ -690,7 +712,12 @@ fn run_walledit(s: &mut Session, p: &Value) -> Result<Value> {
     if apply_to_style && layers.is_empty() {
         return Err(bad(CMD, "`applyToStyle` needs `layers`"));
     }
-    let n = edit_walls(s, &handles, &WallChange { style, justification, height, layers, apply_to_style })?;
+    let flag = |key: &str| match p.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v.as_bool().map(Some).ok_or_else(|| bad(CMD, format!("`{key}` must be true or false"))),
+    };
+    let (start_free, end_free) = (flag("freeStart")?, flag("freeEnd")?);
+    let n = edit_walls(s, &handles, &WallChange { style, justification, height, layers, apply_to_style, start_free, end_free })?;
     Ok(json!({ "regenerated": n }))
 }
 
@@ -732,7 +759,7 @@ impl Interactive for WallEditM {
     fn prompt(&self, _s: &Session) -> Prompt {
         match self.ask {
             EditAsk::Select => Prompt::new("Select walls", Accept::SELECT),
-            EditAsk::Option => Prompt::new("Enter an option", super::curves::KW).kw(&["Style", "Justification", "Height"]),
+            EditAsk::Option => Prompt::new("Enter an option", super::curves::KW).kw(&["Style", "Justification", "Height", "FreeStart", "FreeEnd"]),
             EditAsk::Style => Prompt::new("Enter wall style name", Accept::TEXT),
             EditAsk::Justification => Prompt::new("Enter justification", super::curves::KW).kw(&["Left", "Center", "Right"]),
             EditAsk::Height => Prompt::new("Enter wall height", Accept::NUMBER),
@@ -761,6 +788,18 @@ impl Interactive for WallEditM {
                     "Style" => EditAsk::Style,
                     "Justification" => EditAsk::Justification,
                     "Height" => EditAsk::Height,
+                    // Toggles the join at that end, from the first wall's present state.
+                    "FreeStart" | "FreeEnd" => {
+                        let first = self.walls.first().and_then(|h| s.doc().ok()?.entity(*h).and_then(|e| wall_of(e)));
+                        let start = k == "FreeStart";
+                        let now = first.is_some_and(|w| if start { w.start_free } else { w.end_free });
+                        let c = if start {
+                            WallChange { start_free: Some(!now), ..WallChange::default() }
+                        } else {
+                            WallChange { end_free: Some(!now), ..WallChange::default() }
+                        };
+                        return self.apply(s, c);
+                    }
                     _ => EditAsk::Option,
                 };
                 Ok(Step::Continue)

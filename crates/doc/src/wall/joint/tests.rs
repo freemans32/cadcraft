@@ -16,6 +16,8 @@ fn add(d: &mut Drawing, style: &str, path: &[(f64, f64)], justification: WallJus
         height: 2500.0,
         units: WallUnits::default(),
         joints: Default::default(),
+        start_free: false,
+        end_free: false,
     };
     d.add_wall(&Space::Model, Common::default(), p).unwrap()
 }

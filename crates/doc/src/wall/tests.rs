@@ -18,6 +18,8 @@ fn wall(style: WallStyle, path: &[(f64, f64)], closed: bool, justification: Wall
         height: 2500.0,
         units: WallUnits::default(),
         joints: Default::default(),
+        start_free: false,
+        end_free: false,
     }
 }
 

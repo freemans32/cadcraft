@@ -734,8 +734,8 @@ pub fn work_out_joints(walls: &[Placed]) -> Vec<WallJoints> {
         if w.params.closed {
             cuts.push((None, None));
         } else {
-            let start = cut_at(p.first().copied(), p.get(1).copied(), 1.0);
-            let end = cut_at(p.last().copied(), p.len().checked_sub(2).and_then(|k| p.get(k)).copied(), -1.0);
+            let start = if w.params.start_free { None } else { cut_at(p.first().copied(), p.get(1).copied(), 1.0) };
+            let end = if w.params.end_free { None } else { cut_at(p.last().copied(), p.len().checked_sub(2).and_then(|k| p.get(k)).copied(), -1.0) };
             cuts.push((start, end));
         }
     }

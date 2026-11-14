@@ -142,6 +142,19 @@ fn wall_section(
             action = Some(("walledit", json!({ "handles": ids, "height": h })));
         }
     });
+    // Whether each end of an open wall is joined to the walls it meets, or left as drawn.
+    if walls.iter().all(|w| !w.closed) {
+        for (label, key, joined) in
+            [("Join at start", "freeStart", walls.iter().all(|w| !w.start_free)), ("Join at end", "freeEnd", walls.iter().all(|w| !w.end_free))]
+        {
+            prop_row(ui, label, |ui| {
+                let mut on = joined;
+                if ui.checkbox(&mut on, "").changed() {
+                    action = Some(("walledit", json!({ "handles": ids, key: !on })));
+                }
+            });
+        }
+    }
     let thickness = shared(&walls.iter().map(|w| format!("{:.0} mm", w.style.thickness())).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
     prop_row(ui, "Thickness", |ui| read_only(ui, &thickness));
     // The layers, each with its own thickness: a change is for these walls only, the button gives

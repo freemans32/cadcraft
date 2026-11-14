@@ -310,6 +310,16 @@ pub struct WallParams {
     /// What the wall keeps about the walls it meets (none: drawn on its own).
     #[serde(default, skip_serializing_if = "WallJoints::is_empty")]
     pub joints: WallJoints,
+    /// Whether the start (or the end) of an open wall is left as drawn: not cut to the walls it
+    /// meets, not extended to them. The walls' overlap is still drawn once.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub start_free: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub end_free: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// One object of a wall's generated geometry: lines go on [`WALL_LAYER`], hatches on
@@ -548,6 +558,16 @@ impl crate::Drawing {
         })?;
         self.drop_unreferenced_block(&old);
         Ok(())
+    }
+
+    /// Whether a wall or an opening of `space` was added, changed or removed since `before`
+    /// (an older state of this drawing): only entities whose storage differs are looked at.
+    pub fn walls_touched_since(&self, before: &crate::Drawing, space: &crate::Space) -> bool {
+        let (Some(now), Some(then)) = (self.space(space), before.space(space)) else { return false };
+        let relevant =
+            |e: &std::sync::Arc<crate::Entity>| matches!(e.kind, EntityKind::Insert(_)) && (wall_of(e).is_some() || opening_of(e).is_some());
+        now.iter().any(|e| then.get(e.handle).is_none_or(|old| !std::sync::Arc::ptr_eq(old, e)) && relevant(e))
+            || then.iter().any(|e| now.get(e.handle).is_none() && relevant(e))
     }
 
     /// Works out where the intact walls of `space` meet (L, T and X junctions) and redraws

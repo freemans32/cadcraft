@@ -20,6 +20,8 @@ fn drawing() -> (Drawing, WallParams) {
         height: 2500.0,
         units: WallUnits::of(&d),
         joints: Default::default(),
+        start_free: false,
+        end_free: false,
     };
     d.add_wall(&Space::Model, Common::default(), p.clone()).expect("add wall");
     (d, p)

@@ -398,15 +398,16 @@ fn wallcleanup_joins_walls_moved_together_and_parts_walls_moved_apart() {
     let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [4000, 0]], "style": BRICK})).unwrap());
     let b = h(&s.execute("walladd", &json!({"points": [[0, 2000], [0, 5000]], "style": PARTITION})).unwrap());
     assert!(!joined(&s, b));
-    // The partition is moved down onto the wall: WALLCLEANUP joins them.
+    // The partition is moved down onto the wall: they are joined at once, WALLCLEANUP has nothing left to do.
     s.execute("move", &json!({"handles": [b.hex()], "delta": [2000, -2000]})).unwrap();
-    assert_eq!(s.execute("wallcleanup", &json!({})).unwrap()["regenerated"], 2);
-    assert!(joined(&s, a) && joined(&s, b));
+    assert!(joined(&s, a) && joined(&s, b), "a wall moved against another joins it without WALLCLEANUP");
     assert_eq!(s.execute("wallcleanup", &json!({})).unwrap()["regenerated"], 0);
-    // Moved away again, both are drawn on their own.
+    // Moved away again, both are drawn on their own, again with no command to ask for it.
     s.execute("move", &json!({"handles": [b.hex()], "delta": [0, 10000]})).unwrap();
-    s.execute("wallcleanup", &json!({})).unwrap();
-    assert!(!joined(&s, a) && !joined(&s, b));
+    assert!(!joined(&s, a) && !joined(&s, b), "a wall moved away parts from the one it met");
+    // A command that touches no wall leaves them as they are.
+    s.execute("line", &json!({"points": [[0, 0], [10, 10]]})).unwrap();
+    assert_eq!(s.execute("wallcleanup", &json!({})).unwrap()["regenerated"], 0);
 }
 
 #[test]
@@ -680,4 +681,28 @@ fn openingadd_takes_a_style_and_openingedit_changes_it() {
     s.execute("openingedit", &json!({"handle": h, "style": "fixed"})).unwrap();
     assert!(openings(&s).iter().any(|x| x.1.style == cadcraft_doc::OpeningStyle::Fixed));
     assert!(s.execute("openingadd", &json!({"at": [3000, 0], "style": "nope"})).is_err());
+}
+
+#[test]
+fn a_wall_end_left_free_is_not_joined_and_can_be_joined_again() {
+    let mut s = metric();
+    let a = h(&s.execute("walladd", &json!({"points": [[0, 0], [4000, 0]], "style": BRICK})).unwrap());
+    let b = h(&s.execute("walladd", &json!({"points": [[2000, 3000], [2000, 0]], "style": PARTITION})).unwrap());
+    assert!(joined(&s, b), "the partition stops on the wall it meets");
+    // Its end that meets the wall is left as drawn.
+    s.execute("walledit", &json!({"handle": b.hex(), "freeEnd": true})).unwrap();
+    let w = wall(&s, b);
+    assert!(w.end_free && !w.start_free);
+    assert!(w.joints.end.is_none(), "no cut at the free end");
+    // It survives a move and the walls being joined again.
+    s.execute("wallcleanup", &json!({})).unwrap();
+    assert!(wall(&s, b).end_free && wall(&s, b).joints.end.is_none());
+    // Joined again.
+    s.execute("walledit", &json!({"handle": b.hex(), "freeEnd": false})).unwrap();
+    assert!(!wall(&s, b).end_free && wall(&s, b).joints.end.is_some());
+    assert!(joined(&s, a));
+    // A closed wall has no ends.
+    let c = h(&s.execute("walladd", &json!({"points": [[0, 8000], [3000, 8000], [3000, 10000]], "closed": true, "style": BRICK})).unwrap());
+    assert!(s.execute("walledit", &json!({"handle": c.hex(), "freeStart": true})).is_err());
+    assert!(s.execute("walledit", &json!({"handle": b.hex(), "freeStart": "yes"})).is_err());
 }

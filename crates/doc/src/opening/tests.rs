@@ -22,6 +22,8 @@ fn with_wall() -> (Drawing, Handle) {
         height: 2500.0,
         units: WallUnits::default(),
         joints: Default::default(),
+        start_free: false,
+        end_free: false,
     };
     let h = d.add_wall(&Space::Model, Common::default(), p).unwrap();
     (d, h)
