@@ -15,6 +15,7 @@ mod hvachelp;
 #[cfg(test)]
 mod layer_menu_tests;
 mod objects;
+mod thumbs;
 pub(crate) use objects::is_parametric;
 pub mod patterns;
 /// The QuickCalc palette.

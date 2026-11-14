@@ -6,7 +6,7 @@ use cadcraft_color::Color;
 use cadcraft_doc::{AccessoryKind, AhuKind, AirDirection, ComponentFunction, OpeningKind, OpeningStyle, TerminalKind};
 use egui::{Rect, Sense, Stroke, pos2, vec2};
 
-use super::hvachelp;
+use super::{hvachelp, thumbs};
 use crate::CadApp;
 use crate::theme::Tokens;
 
@@ -104,7 +104,7 @@ pub(super) fn body(app: &mut CadApp, ui: &mut egui::Ui, tab: &str) {
 /// A small picture of air terminal `kind` in `r`, as it is drawn in plan.
 fn paint_terminal(p: &egui::Painter, r: Rect, kind: TerminalKind) {
     let t = Tokens::get();
-    let s = Stroke::new(1.2, t.text);
+    let s = Stroke::new(1.2, t.icon_accent);
     let c = r.center();
     let h = r.height() / 2.0;
     match kind {
@@ -151,10 +151,10 @@ fn paint_terminal(p: &egui::Painter, r: Rect, kind: TerminalKind) {
 /// A space outline with lines for its label.
 fn paint_space(p: &egui::Painter, r: Rect) {
     let t = Tokens::get();
-    let s = Stroke::new(1.2, t.text);
+    let s = Stroke::new(1.2, t.icon_accent);
     p.rect_stroke(r, 0.0, s, egui::StrokeKind::Inside);
-    p.line_segment([pos2(r.left() + 6.0, r.center().y - 2.0), pos2(r.right() - 6.0, r.center().y - 2.0)], Stroke::new(1.0, t.text_dim));
-    p.line_segment([pos2(r.left() + 9.0, r.center().y + 3.0), pos2(r.right() - 9.0, r.center().y + 3.0)], Stroke::new(1.0, t.text_dim));
+    p.line_segment([pos2(r.left() + 6.0, r.center().y - 2.0), pos2(r.right() - 6.0, r.center().y - 2.0)], Stroke::new(1.0, t.icon));
+    p.line_segment([pos2(r.left() + 9.0, r.center().y + 3.0), pos2(r.right() - 9.0, r.center().y + 3.0)], Stroke::new(1.0, t.icon));
 }
 
 /// The label of a direction named in a sizing report.
@@ -188,7 +188,7 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         if row_button(ui, crate::i18n::t("Space"), false, paint_space) {
             start = Some("spaceadd");
         }
-        if row_button(ui, crate::i18n::t("Edit Space"), false, |_, _| {}) {
+        if row_button(ui, crate::i18n::t("Edit Space"), false, thumbs::paint_edit_space) {
             start = Some("spaceedit");
         }
         ui.add_space(6.0);
@@ -212,10 +212,10 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
                 outdoor = Some(air);
             }
         }
-        if row_button(ui, crate::i18n::t("Distribute in a Space"), false, |_, _| {}) {
+        if row_button(ui, crate::i18n::t("Distribute in a Space"), false, thumbs::paint_distribute) {
             distribute = true;
         }
-        if row_button(ui, crate::i18n::t("Edit Air Terminal"), false, |_, _| {}) {
+        if row_button(ui, crate::i18n::t("Edit Air Terminal"), false, thumbs::paint_edit_terminal) {
             start = Some("airterminaledit");
         }
         ui.add_space(6.0);
@@ -228,27 +228,27 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
             (AhuKind::VmcBox, "Ventilation box"),
             (AhuKind::StackedDoubleFlow, "Double-flow unit, vertical"),
         ] {
-            if row_button(ui, crate::i18n::t(label), kind == unit, |_, _| {}) {
+            if row_button(ui, crate::i18n::t(label), kind == unit, |p, r| thumbs::paint_ahu(p, r, kind)) {
                 chosen_unit = Some(kind);
             }
         }
         // In the order they are drawn: the riser, the ducts, the height zones, then terminals are connected, ducts sized and crossings settled.
-        if row_tip(ui, crate::i18n::t("Riser"), crate::i18n::t("Draw the outline of the shaft where the air goes up or down. Type the flow that comes from the other floors on it; sizing gives it its section."), Some("Riser"), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Riser"), crate::i18n::t("Draw the outline of the shaft where the air goes up or down. Type the flow that comes from the other floors on it; sizing gives it its section."), Some("Riser"), false, thumbs::paint_riser) {
             start = Some("riseradd");
         }
-        if row_tip(ui, crate::i18n::t("Duct"), crate::i18n::t("Click the points of a run (one duct per segment), seen from above. Leave the direction on auto: sizing finds supply or extract from the terminals the run reaches."), Some("Duct"), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Duct"), crate::i18n::t("Click the points of a run (one duct per segment), seen from above. Leave the direction on auto: sizing finds supply or extract from the terminals the run reaches."), Some("Duct"), false, thumbs::paint_duct) {
             start = Some("ductadd");
         }
-        if row_tip(ui, crate::i18n::t("Height Zone"), crate::i18n::t("Draw an outline where ducts have less height (a beam, a low ceiling), seen from above, then type the height available in mm. Ducts crossing it are cut at its edges and sized flat inside. An altitude is optional."), Some("Height Zone"), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Height Zone"), crate::i18n::t("Draw an outline where ducts have less height (a beam, a low ceiling), seen from above, then type the height available in mm. Ducts crossing it are cut at its edges and sized flat inside. An altitude is optional."), Some("Height Zone"), false, thumbs::paint_zone) {
             start = Some("zoneadd");
         }
-        if row_tip(ui, crate::i18n::t("Connect Terminals"), crate::i18n::t("Draws a flexible duct from each terminal that no duct reaches to the nearest duct (3 m at most)."), Some("Connect Terminals"), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Connect Terminals"), crate::i18n::t("Draws a flexible duct from each terminal that no duct reaches to the nearest duct (3 m at most)."), Some("Connect Terminals"), false, thumbs::paint_connect) {
             connect = true;
         }
-        if row_tip(ui, crate::i18n::t("Size Ducts"), crate::i18n::t("Sizes every network from its terminals (flows, section, velocity) and writes the result on the ducts. Run it again after any change."), Some("Size Ducts"), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Size Ducts"), crate::i18n::t("Sizes every network from its terminals (flows, section, velocity) and writes the result on the ducts. Run it again after any change."), Some("Size Ducts"), false, thumbs::paint_size) {
             size = true;
         }
-        if row_tip(ui, crate::i18n::t("Duct Crossing"), crate::i18n::t("Click two ducts that cross: one passes under or over the other, drawn broken or with four 45° elbows."), Some("Duct Crossing"), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("Duct Crossing"), crate::i18n::t("Click two ducts that cross: one passes under or over the other, drawn broken or with four 45° elbows."), Some("Duct Crossing"), false, thumbs::paint_crossing) {
             start = Some("ductcross");
         }
         ui.add_space(6.0);
@@ -260,7 +260,7 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
             (AccessoryKind::Silencer, "Silencer"),
             (AccessoryKind::FlexConnector, "Flexible connector"),
         ] {
-            if row_button(ui, crate::i18n::t(label), kind == accessory, |_, _| {}) {
+            if row_button(ui, crate::i18n::t(label), kind == accessory, |p, r| thumbs::paint_accessory(p, r, kind)) {
                 chosen_accessory = Some(kind);
             }
         }
@@ -268,14 +268,14 @@ fn hvac(app: &mut CadApp, ui: &mut egui::Ui) {
         separator(ui);
         header(ui, "Equipment");
         for kind in cadcraft_doc::EquipmentKind::ALL {
-            if row_button(ui, crate::i18n::t(equipment_kind_label(kind)), kind == equipment, |_, _| {}) {
+            if row_button(ui, crate::i18n::t(equipment_kind_label(kind)), kind == equipment, |p, r| thumbs::paint_equipment(p, r, kind)) {
                 chosen_equipment = Some(kind);
             }
         }
         ui.add_space(6.0);
         separator(ui);
         header(ui, "Quantities");
-        if row_tip(ui, crate::i18n::t("HVAC Quantities"), crate::i18n::t("Counts the ducts, fittings, terminals, units, risers and equipment of this drawing (one drawing per level), and saves a spreadsheet."), Some("HVAC Quantities"), false, |_, _| {}) {
+        if row_tip(ui, crate::i18n::t("HVAC Quantities"), crate::i18n::t("Counts the ducts, fittings, terminals, units, risers and equipment of this drawing (one drawing per level), and saves a spreadsheet."), Some("HVAC Quantities"), false, thumbs::paint_quantities) {
             start = Some("hvactakeoff");
         }
     });
@@ -435,20 +435,20 @@ fn architecture(app: &mut CadApp, ui: &mut egui::Ui) {
             section(ui, title, true, &mut |ui| {
                 for &(label, kind, style, size) in list {
                     let selected = last.kind == kind && last.style == style && last.size.unwrap_or_else(|| kind.default_size_mm()) == size;
-                    if row_button(ui, crate::i18n::t(label), selected, |_, _| {}) {
+                    if row_button(ui, crate::i18n::t(label), selected, |p, r| thumbs::paint_opening(p, r, kind, style, size)) {
                         chosen = Some((label, kind, style, size));
                     }
                 }
             });
         }
         section(ui, "Tools", true, &mut |ui| {
-            if row_button(ui, crate::i18n::t("Edit Wall"), false, |_, _| {}) {
+            if row_button(ui, crate::i18n::t("Edit Wall"), false, thumbs::paint_edit_wall) {
                 start = Some("walledit");
             }
-            if row_button(ui, crate::i18n::t("Wall Styles"), false, |_, _| {}) {
+            if row_button(ui, crate::i18n::t("Wall Styles"), false, thumbs::paint_wall_styles) {
                 start = Some("wallstyleedit");
             }
-            if row_button(ui, crate::i18n::t("Wall Junctions"), false, |_, _| {}) {
+            if row_button(ui, crate::i18n::t("Wall Junctions"), false, thumbs::paint_junctions) {
                 cleanup = true;
             }
         });
