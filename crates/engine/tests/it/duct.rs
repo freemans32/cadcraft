@@ -1068,3 +1068,31 @@ fn a_height_given_to_a_run_makes_the_step_between_runs_at_other_levels_and_the_l
     assert_eq!(p(&s, &b).level_mm, None);
     assert!(s.execute("ductedit", &json!({"handle": a["handles"][0], "altitude": "high"})).is_err());
 }
+
+#[test]
+fn duct_grips_stretch_an_end_move_the_run_and_drag_the_runs_that_meet_there() {
+    let mut s = metric();
+    let r = s.execute("ductadd", &json!({"points": [[0, 0], [4000, 0], [4000, 3000]], "diameter": 315})).unwrap();
+    let hs: Vec<Handle> = r["handles"].as_array().unwrap().iter().map(hd).collect();
+    let ends = |s: &Session, h: Handle| s.doc().unwrap().duct_ends(h).map(|(p, a, b)| (p.length, a, b)).unwrap();
+    let grips = s.grips_of(hs[0]).unwrap_or_default();
+    assert_eq!(grips.len(), 1, "grips_of still reads the shape; the duct grips come from the drawing");
+    let d = s.doc().unwrap();
+    assert_eq!(d.entity_grips(d.entity(hs[0]).unwrap()).len(), 3);
+    // Select both runs, drag the shared corner: both follow.
+    s.set_selection(hs.clone());
+    s.grip_edit(hs[0], 2, cadcraft_geom::Vec2::new(5000.0, 500.0), cadcraft_engine::grips::GripMode::Stretch).unwrap();
+    let (l0, _, b0) = ends(&s, hs[0]);
+    let (_, a1, _) = ends(&s, hs[1]);
+    assert!(b0.dist(cadcraft_geom::Vec2::new(5000.0, 500.0)) < 1e-6);
+    assert!(a1.dist(cadcraft_geom::Vec2::new(5000.0, 500.0)) < 1e-6);
+    assert!((l0 - 5000.0f64.hypot(500.0)).abs() < 1e-6);
+    // The middle grip moves the whole run.
+    s.set_selection(hs[..1].to_vec());
+    let (_, a, b) = ends(&s, hs[0]);
+    s.grip_edit(hs[0], 1, a.mid(b) + cadcraft_geom::Vec2::new(0.0, 100.0), cadcraft_engine::grips::GripMode::Stretch).unwrap();
+    let (_, a2, b2) = ends(&s, hs[0]);
+    assert!((a2.y - a.y - 100.0).abs() < 1e-6 && (b2.y - b.y - 100.0).abs() < 1e-6);
+    // Dragging an end onto the other end is refused.
+    assert!(s.grip_edit(hs[0], 0, b2, cadcraft_engine::grips::GripMode::Stretch).is_err());
+}

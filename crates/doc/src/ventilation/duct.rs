@@ -1117,6 +1117,65 @@ impl crate::Drawing {
         Some((p, a, b))
     }
 
+    /// The grips of an object: those of a duct run are its two ends and its middle (0 and 2 stretch
+    /// an end, 1 moves the run); any other object has its own shape's grips.
+    pub fn entity_grips(&self, e: &crate::Entity) -> Vec<Vec2> {
+        if let EntityKind::Insert(i) = &e.kind
+            && let Some(p) = duct_of(e)
+        {
+            let a = Vec2::new(i.insert.x, i.insert.y);
+            let b = a + Vec2::from_angle(i.rotation) * (p.length * i.scale.x);
+            return vec![a, a.mid(b), b];
+        }
+        e.kind.grips()
+    }
+
+    /// Drags grip `index` of duct `h` (see [`Self::entity_grips`]) to `to`, redrawing the run.
+    /// `Ok(false)` when `h` is not a duct, the grip does not exist or the run would be degenerate.
+    /// Gaps, jogs and steps measured from the start follow an end that moves; those that no
+    /// longer fit the run are dropped.
+    pub fn stretch_duct_grip(&mut self, h: crate::Handle, index: usize, to: Vec2) -> Result<bool> {
+        let Some((mut p, a, b)) = self.duct_ends(h) else { return Ok(false) };
+        if !to.is_finite() || index > 2 {
+            return Ok(false);
+        }
+        let Some(EntityKind::Insert(i)) = self.entity(h).map(|e| e.kind.clone()) else { return Ok(false) };
+        let d = to - a.mid(b);
+        let (na, nb) = match index {
+            0 => (to, b),
+            1 => (a + d, b + d),
+            _ => (a, to),
+        };
+        let units = p.units.mm_per_unit;
+        let len = na.dist(nb);
+        if i.scale.x <= 0.0 || len * i.scale.x * units < 1.0 {
+            return Ok(false);
+        }
+        let old_mm = p.length * i.scale.x * units;
+        let new_mm = len * i.scale.x * units;
+        if index != 1 {
+            let dl = if index == 0 { new_mm - old_mm } else { 0.0 };
+            p.gaps_mm = p.gaps_mm.iter().map(|g| [g[0] + dl, g[1] + dl]).filter(|g| g[0] >= 0.0 && g[1] <= new_mm).collect();
+            p.jogs = p
+                .jogs
+                .iter()
+                .map(|j| DuctJog { centre_mm: j.centre_mm + dl, ..*j })
+                .filter(|j| j.elbows_mm()[0] >= 0.0 && j.elbows_mm()[3] <= new_mm)
+                .collect();
+            p.steps = p.steps.iter().map(|s| DuctStep { at_mm: s.at_mm + dl, ..*s }).filter(|s| s.at_mm >= 0.0 && s.at_mm <= new_mm).collect();
+        }
+        p.length = len;
+        let rotation = (nb - na).angle();
+        self.modify_entity(h, |e| {
+            if let EntityKind::Insert(ins) = &mut e.kind {
+                ins.insert = v3(na);
+                ins.rotation = rotation;
+            }
+        })?;
+        self.regenerate_duct(h, &p)?;
+        Ok(true)
+    }
+
     /// Cuts the duct under `at` in two, when `at` is inside it and not at an end, so a branch can
     /// start there: the first part keeps `h`, the second is new. `None` when `at` is not on the
     /// duct's interior (see [`interior_cut`]).

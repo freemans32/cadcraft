@@ -13,6 +13,7 @@ fn riser() -> RiserParams {
         flow_m3h: None,
         size: None,
         size_set: false,
+        height_mm: None,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     }

@@ -140,3 +140,16 @@ fn hvactakeoff_counts_the_level_by_section_fitting_terminal_space_and_writes_a_s
     std::fs::remove_file(&path).ok();
     assert!(text.contains("supply;rigid;Ø200;2.5;2;5.5;"), "{text}");
 }
+
+#[test]
+fn a_riser_height_is_counted_in_the_takeoff() {
+    let mut s = metric();
+    s.execute("riseradd", &json!({"at": [0, 0], "width": 600, "depth": 400, "height": 2800})).unwrap();
+    let h = s.execute("riseradd", &json!({"at": [2000, 0], "width": 600, "depth": 400})).unwrap();
+    let t = s.execute("hvactakeoff", &json!({"level": "R+1"})).unwrap();
+    assert_eq!(t["totals"]["riserLengthM"], 2.8);
+    s.execute("riseredit", &json!({"handle": h["handle"], "height": 3000})).unwrap();
+    let t = s.execute("hvactakeoff", &json!({"level": "R+1"})).unwrap();
+    assert_eq!(t["totals"]["riserLengthM"], 5.8);
+    assert!(s.execute("riseredit", &json!({"handle": h["handle"], "height": -1})).is_err());
+}

@@ -27,6 +27,9 @@ pub const FLEX_ROUGHNESS_MM: f64 = 3.0;
 
 /// One air handling unit's ducts of one air direction as a network ready to size. A double-flux
 /// unit has two: its supply ducts with the supply terminals, its extract ducts with the extract ones.
+/// A duct leaving a junction at more than this many degrees from the way the air comes lies on the one it leaves.
+const STACKED_BACK_DEG: f64 = 170.0;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct DuctNetwork {
     pub ahu: Handle,
@@ -569,7 +572,8 @@ impl Scan<'_> {
         let mut by_air: [Vec<Node>; 4] = Default::default();
         // The (collar, direction) pairs ducts on a collar have taken: stacked collars share a point.
         let mut claimed: Vec<(usize, usize)> = Vec::new();
-        for i in 0..self.ducts.len() {
+        // Two passes: a duct freed by a later tree is read as a root of its own.
+        for i in (0..self.ducts.len()).chain(0..self.ducts.len()) {
             let Some(d) = self.ducts.get(i).filter(|_| !self.taken.get(i).copied().unwrap_or(true)) else { continue };
             let (from, to) = if inside(d.a, d.params.plan_width_mm()) {
                 (d.a, d.b)
@@ -600,15 +604,41 @@ impl Scan<'_> {
             } else {
                 roles.iter().copied().chain((0..airs.len()).filter(|k| !roles.contains(k))).collect()
             };
+            // The first direction whose tree reaches a terminal without taking in stubs that lead
+            // nowhere; else the one whose tree explains the most runs (two ducts one over the other
+            // at stacked collars: the supply one read as the extract's branch is the wrong reading).
+            let start = (self.taken.clone(), self.touched.clone(), self.touched_risers.clone());
             let mut chosen = None;
+            let mut best: Option<(usize, usize)> = None;
             for &k in &candidates {
                 let before = (self.taken.clone(), self.touched.clone(), self.touched_risers.clone());
                 let tree = self.tree(i, from, to, airs[k]);
                 if tree.first().is_some_and(|n| n.terminals_below > 0) {
-                    chosen = Some((k, tree));
-                    break;
+                    let live = tree.iter().filter(|n| n.terminals_below > 0).count();
+                    if live == tree.len() {
+                        chosen = Some((k, tree));
+                        break;
+                    }
+                    if best.is_none_or(|(_, l)| live > l) {
+                        best = Some((k, live));
+                    }
                 }
                 (self.taken, self.touched, self.touched_risers) = before;
+            }
+            if chosen.is_none()
+                && let Some((k, _)) = best
+            {
+                (self.taken, self.touched, self.touched_risers) = start;
+                chosen = Some((k, self.tree(i, from, to, airs[k])));
+            }
+            // The stubs of a tree that does reach a terminal are free again for the other ducts of the
+            // unit (they stay listed here as leading nowhere unless another tree takes them).
+            if let Some((_, tree)) = &chosen {
+                for n in tree.iter().filter(|n| n.parent.is_some() && n.terminals_below == 0) {
+                    if let Some(t) = self.taken.get_mut(n.duct) {
+                        *t = false;
+                    }
+                }
             }
             // A tree that reaches no terminal is read once more, to name what leads nowhere.
             let (k, tree) = chosen.unwrap_or_else(|| {
@@ -644,6 +674,11 @@ impl Scan<'_> {
         self.flow_open_ends(&mut by_air);
         let mut nets: Vec<DuctNetwork> =
             airs.iter().zip(&by_air).filter(|(_, nodes)| !nodes.is_empty()).map(|(air, nodes)| self.build(ahu, *air, nodes)).collect();
+        // A stub one tree left out that another tree sizes is not left out.
+        let kept: Vec<Handle> = nets.iter().flat_map(|n| n.ducts.iter().copied()).collect();
+        for n in &mut nets {
+            n.dangling.retain(|h| !kept.contains(h));
+        }
         // A unit with no duct leaving it still gets its (empty) supply network, to say so; a riser none.
         if nets.is_empty() && is_unit {
             nets.push(self.build(ahu, AirDirection::Supply, &[]));
@@ -734,6 +769,15 @@ impl Scan<'_> {
             // The straightest child goes through the tee, the others turn into it.
             let heading = (to - from).normalized();
             let turn = |f: Vec2, t: Vec2| heading.dot((t - f).normalized()).clamp(-1.0, 1.0).acos().to_degrees();
+            // A duct that leaves the junction straight back along the one the air came by lies on it
+            // (two ducts one over the other at a unit's stacked collars): it does not continue it.
+            let stacked: Vec<usize> = children.iter().filter(|c| turn(c.1, c.2) > STACKED_BACK_DEG).map(|c| c.0).collect();
+            for i in &stacked {
+                if let Some(t) = self.taken.get_mut(*i) {
+                    *t = false;
+                }
+            }
+            children.retain(|c| !stacked.contains(&c.0));
             children.sort_by(|x, y| turn(x.1, x.2).total_cmp(&turn(y.1, y.2)));
             let many = children.len() > 1;
             for (k, (i, f, t)) in children.into_iter().enumerate() {

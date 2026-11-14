@@ -16,11 +16,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["Draw", "HVAC", "Riser"])
             .params(
                 "{points | handle (closed polyline) | at + width + depth (mm), name?, air? (supply|extract|fresh|exhaust), direction? (up|down), \\
-                 incomingFlow? (m³/h from the other floors), flow? (m³/h), size? (diameter, \"400x250\" or \"auto\"), labelHeight? (mm)} → {handle, name}",
+                 incomingFlow? (m³/h from the other floors), flow? (m³/h), size? (diameter, \"400x250\" or \"auto\"), height? (mm, floor to floor), labelHeight? (mm)} → {handle, name}",
             )
             .interactive(|s| Ok(Box::new(RiserAddM::new(s)))),
         CommandSpec::new("riseredit", "Edit Riser", run_edit).params(
-            "{handle | handles, name?, air?, direction?, width? + depth? (the shaft, mm), incomingFlow? (or null), flow? (or null), size? (or \"auto\")} → {changed}",
+            "{handle | handles, name?, air?, direction?, width? + depth? (the shaft, mm), incomingFlow? (or null), flow? (or null), size? (or \"auto\"), height? (mm, or null)} → {changed}",
         ),
     ]
 }
@@ -139,6 +139,7 @@ fn run_add(s: &mut Session, p: &Value) -> Result<Value> {
                 flow_m3h: None,
                 size: None,
                 size_set: false,
+                height_mm: None,
                 label_height_mm: 100.0,
                 units,
             };
@@ -158,6 +159,7 @@ fn run_add(s: &mut Session, p: &Value) -> Result<Value> {
         flow_m3h: number(CMD, p, "flow")?,
         size: size_param(CMD, p)?.flatten(),
         size_set: size_param(CMD, p)?.flatten().is_some(),
+        height_mm: number(CMD, p, "height")?,
         label_height_mm: number(CMD, p, "labelHeight")?.unwrap_or(100.0),
         units,
     };
@@ -174,6 +176,7 @@ fn run_edit(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let (air, up, size) = (air_param(CMD, p)?, direction_param(CMD, p)?, size_param(CMD, p)?);
     let (incoming, flow) = (clearable(CMD, p, "incomingFlow")?, clearable(CMD, p, "flow")?);
+    let height = clearable(CMD, p, "height")?;
     let shaft = (number(CMD, p, "width")?, number(CMD, p, "depth")?);
     let d = s.doc()?;
     let mut next = Vec::with_capacity(hs.len());
@@ -189,6 +192,9 @@ fn run_edit(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let Some(v) = flow {
             r.flow_m3h = v;
+        }
+        if let Some(v) = height {
+            r.height_mm = v;
         }
         if let Some(v) = size {
             (r.size, r.size_set) = (v, v.is_some());
@@ -244,6 +250,7 @@ impl RiserAddM {
             flow_m3h: None,
             size: None,
             size_set: false,
+            height_mm: None,
             label_height_mm: 100.0,
             units: HvacUnits::of(s.doc()?),
         })

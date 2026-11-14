@@ -1205,6 +1205,7 @@ fn riser_at(d: &mut Drawing, at: (f64, f64), air: AirDirection, incoming: Option
         flow_m3h: None,
         size: None,
         size_set: false,
+        height_mm: None,
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     };
@@ -1568,4 +1569,47 @@ fn the_takeoff_counts_fittings_accessories_risers_and_units_of_the_level() {
     let mut odd = q.clone();
     odd.level = "a;\"b\"".into();
     assert!(odd.to_csv(true).starts_with("Level;\"a;\"\"b\"\"\"\n"));
+}
+
+#[test]
+fn a_supply_duct_lying_on_the_extract_duct_at_stacked_collars_is_not_read_as_part_of_it() {
+    // The roof: a compact unit, an extract run (wide) and a supply run (narrow) both leave its collar,
+    // one over the other, as far as M; there the extract goes straight on to its riser, the supply turns to its own.
+    let compact = AhuParams { kind: AhuKind::StackedDoubleFlow, width_mm: 1600.0, depth_mm: 1510.0, ..ahu() };
+    let mut d = Drawing::new_metric();
+    d.add_ahu(&Space::Model, Common::default(), &compact, Vec2::ZERO, 0.0).unwrap();
+    let run = |d: &mut Drawing, air: AirDirection, w: f64, a: (f64, f64), b: (f64, f64)| {
+        let p = DuctParams { air, ..duct(w) };
+        d.add_duct(&Space::Model, Common::default(), p, Vec2::new(a.0, a.1), Vec2::new(b.0, b.1)).unwrap()
+    };
+    let (e1, s1) = (
+        run(&mut d, AirDirection::Extract, 650.0, (800.0, 0.0), (3000.0, 0.0)),
+        run(&mut d, AirDirection::Supply, 200.0, (800.0, 0.0), (3000.0, 0.0)),
+    );
+    let e2 = run(&mut d, AirDirection::Extract, 650.0, (3000.0, 0.0), (7000.0, 0.0));
+    let s2 = run(&mut d, AirDirection::Supply, 200.0, (3000.0, 0.0), (3000.0, -4000.0));
+    riser_at(&mut d, (6900.0, -300.0), AirDirection::Extract, Some(7000.0));
+    riser_at(&mut d, (2900.0, -4100.0), AirDirection::Supply, Some(7000.0));
+    let nets = d.duct_networks().unwrap();
+    let mut got: Vec<_> = nets
+        .iter()
+        .map(|n| {
+            (
+                n.air,
+                {
+                    let mut v = n.ducts.clone();
+                    v.sort();
+                    v
+                },
+                n.dangling.len(),
+            )
+        })
+        .collect();
+    got.sort_by_key(|g| g.0 as u8);
+    let mut sup = vec![s1, s2];
+    let mut ext = vec![e1, e2];
+    sup.sort();
+    ext.sort();
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert!(got.contains(&(AirDirection::Supply, sup, 0)) && got.contains(&(AirDirection::Extract, ext, 0)), "{got:?}");
 }

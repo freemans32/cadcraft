@@ -92,6 +92,9 @@ pub struct RiserParams {
     /// Whether the size was typed: sizing leaves it as it is.
     #[serde(default)]
     pub size_set: bool,
+    /// The vertical run of this level's riser, mm (floor to floor): counted in the takeoff.
+    #[serde(default)]
+    pub height_mm: Option<f64>,
     #[serde(default = "default_label_mm")]
     pub label_height_mm: f64,
     #[serde(default)]
@@ -109,6 +112,9 @@ impl RiserParams {
         let (w, d) = self.shaft_mm();
         if !(w > 0.0 && d > 0.0) {
             return Err(invalid("A riser's shaft outline has no area."));
+        }
+        if self.height_mm.is_some_and(|h| !(h.is_finite() && h > 0.0 && h <= 100_000.0)) {
+            return Err(invalid("A riser's height is between 0 and 100 m."));
         }
         for f in [self.incoming_flow_m3h, self.flow_m3h].into_iter().flatten() {
             if !(f.is_finite() && f > 0.0 && f <= MAX_RISER_FLOW_M3H) {

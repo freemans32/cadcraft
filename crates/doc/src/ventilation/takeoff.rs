@@ -74,6 +74,8 @@ pub struct RiserQuantity {
     pub size: String,
     pub flow_m3h: Option<f64>,
     pub incoming_m3h: Option<f64>,
+    /// The vertical run, m, when the riser has a height.
+    pub length_m: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -99,6 +101,8 @@ pub struct Totals {
     pub duct_area_m2: f64,
     pub terminals: usize,
     pub equipment: usize,
+    /// Vertical length of the risers, m.
+    pub riser_length_m: f64,
 }
 
 /// The quantities of one level.
@@ -222,6 +226,7 @@ impl crate::Drawing {
                     size: r.size.map_or(String::new(), |s| s.label()),
                     flow_m3h: r.flow_m3h,
                     incoming_m3h: r.incoming_flow_m3h,
+                    length_m: r.height_mm.map(|h| h / 1000.0),
                 });
             } else if let Some(q) = equipment_of(e) {
                 let name = if q.model.is_empty() { q.name.clone() } else { q.model.clone() };
@@ -269,6 +274,7 @@ impl crate::Drawing {
             duct_area_m2: (t.ducts.iter().map(|d| d.area_m2).sum::<f64>() * 100.0).round() / 100.0,
             terminals: t.terminals.iter().map(|q| q.count).sum(),
             equipment: t.equipment.iter().map(|c| c.count).sum(),
+            riser_length_m: (t.risers.iter().filter_map(|r| r.length_m).sum::<f64>() * 100.0).round() / 100.0,
         };
         Ok(t)
     }
@@ -358,9 +364,28 @@ impl Takeoff {
         }
         row(&[]);
         row(&["Risers".into()]);
-        row(&["Name".into(), "Air".into(), "Way".into(), "Size".into(), "Flow (m3/h)".into(), "From other floors (m3/h)".into()]);
+        row(&[
+            "Name".into(),
+            "Air".into(),
+            "Way".into(),
+            "Size".into(),
+            "Flow (m3/h)".into(),
+            "From other floors (m3/h)".into(),
+            "Height (m)".into(),
+        ]);
         for r in &self.risers {
-            row(&[r.name.clone(), air(r.air), (if r.up { "up" } else { "down" }).into(), r.size.clone(), opt(r.flow_m3h), opt(r.incoming_m3h)]);
+            row(&[
+                r.name.clone(),
+                air(r.air),
+                (if r.up { "up" } else { "down" }).into(),
+                r.size.clone(),
+                opt(r.flow_m3h),
+                opt(r.incoming_m3h),
+                opt(r.length_m),
+            ]);
+        }
+        if self.totals.riser_length_m > 0.0 {
+            row(&["Total height".into(), String::new(), String::new(), String::new(), String::new(), String::new(), num(self.totals.riser_length_m)]);
         }
         row(&[]);
         row(&["Spaces".into()]);

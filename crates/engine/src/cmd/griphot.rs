@@ -126,7 +126,7 @@ impl GripEdit {
                 continue;
             }
             let Some(e) = d.entity(h).filter(|e| d.is_visible(e)) else { continue };
-            let gs = e.kind.grips();
+            let gs = d.entity_grips(e);
             // The nearest grip of this object within the tolerance.
             let best = gs
                 .iter()

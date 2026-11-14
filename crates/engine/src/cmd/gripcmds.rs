@@ -45,6 +45,35 @@ fn stretch(s: &mut Session, cmd: &str, p: &Value) -> Result<Value> {
     if curves::is_locked(s, h) {
         return Err(EngineError::Other("The object is on a locked layer.".into()));
     }
+    // A duct run: its ends and middle are grips; the runs that meet at an end follow it.
+    if s.doc()?.entity(h).is_some_and(|e| cadcraft_doc::duct_of(e).is_some()) {
+        let d = s.doc()?;
+        let from = d.entity(h).and_then(|e| d.entity_grips(e).get(i).copied()).ok_or_else(|| bad(cmd, "no such grip"))?;
+        let tol = 1e-9 * (1.0 + from.len());
+        let mut moves = vec![(h, i)];
+        if i != 1 {
+            for o in targets(s, p)? {
+                let Some(e) = d.entity(o).filter(|e| o != h && cadcraft_doc::duct_of(e).is_some()) else { continue };
+                let gs = d.entity_grips(e);
+                if let Some(j) = [0, 2].into_iter().find(|j| gs.get(*j).is_some_and(|g| g.near(from, tol)))
+                    && !curves::is_locked(s, o)
+                {
+                    moves.push((o, j));
+                }
+            }
+        }
+        let d = s.doc_mut()?;
+        let mut done = Vec::new();
+        for (o, j) in moves {
+            if d.stretch_duct_grip(o, j, to)? {
+                done.push(o.hex());
+            }
+        }
+        if done.is_empty() {
+            return Err(bad(cmd, "no such grip, or the result would be degenerate"));
+        }
+        return Ok(json!({ "handle": h.hex(), "handles": done }));
+    }
     let e = curves::entity(s, h)?;
     let k = stretch_grip(&e.kind, i, to).ok_or_else(|| bad(cmd, "no such grip, or the result would be degenerate"))?;
     let mut edits = vec![(h, k)];
@@ -87,7 +116,8 @@ fn base_point(s: &Session, cmd: &str, p: &Value, hs: &[Handle]) -> Result<Vec2> 
         .or_else(|| hs.first().copied())
         .ok_or_else(|| bad(cmd, "`base` or `baseHandle` + `index` is required"))?;
     let i = index_param(cmd, p)?;
-    let g = curves::entity(s, h)?.kind.grips();
+    let e = curves::entity(s, h)?;
+    let g = s.doc()?.entity_grips(&e);
     g.get(i).copied().ok_or_else(|| bad(cmd, "no such grip"))
 }
 

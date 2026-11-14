@@ -170,6 +170,7 @@ fn a_riser_survives_dxf_and_dwg_and_its_application_is_registered() {
         flow_m3h: Some(900.0),
         size: Some(RiserSize::Rectangular { width_mm: 400.0, height_mm: 250.0 }),
         size_set: true,
+        height_mm: Some(2800.0),
         label_height_mm: 100.0,
         units: HvacUnits::default(),
     };

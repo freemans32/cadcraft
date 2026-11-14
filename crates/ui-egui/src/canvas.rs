@@ -1332,7 +1332,7 @@ fn paint_canvas(frame: CanvasPaint<'_>) {
             if let Some(e) = st.doc.entity(*h)
                 && st.doc.is_visible(e)
             {
-                let grips = e.kind.grips();
+                let grips = st.doc.entity_grips(e);
                 let count = grips.len();
                 for (gi, g) in grips.into_iter().enumerate() {
                     let sp = xf.to_screen(g);
