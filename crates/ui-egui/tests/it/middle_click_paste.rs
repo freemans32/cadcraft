@@ -42,12 +42,13 @@ fn a_paste_in_the_frame_of_a_middle_click_does_not_cancel_the_command_being_draw
     let mut h = line_with_a_first_point();
     let at = pos2(800.0, 500.0);
     let button = |pressed| Event::PointerButton { pos: at, button: PointerButton::Middle, pressed, modifiers: Modifiers::NONE };
-    // The primary selection arrives as a Paste with the button going down, and again as it goes up.
+    // The primary selection arrives as a Paste with the button going down, and again as it goes up (the harness gives each event a frame of its
+    // own, as a browser may).
     for pressed in [true, false] {
         h.event(Event::PointerMoved(at));
         h.event(button(pressed));
         h.event(Event::Paste("some text highlighted elsewhere".into()));
-        h.run_steps(2);
+        h.run_steps(3);
         still_drawing(&h);
     }
 }

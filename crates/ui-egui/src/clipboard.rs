@@ -19,6 +19,14 @@ fn text_id() -> egui::Id {
     egui::Id::unique("cc_clipboard_text")
 }
 
+/// egui memory: the time of the last frame with a middle button press, hold or release.
+fn middle_id() -> egui::Id {
+    egui::Id::unique("cc_middle_click_time")
+}
+
+/// A Paste this soon (s) after a middle click is that click's, not a Ctrl+V: the browser reports the paste a frame or two after the button.
+const MIDDLE_PASTE_S: f64 = 0.5;
+
 /// Line endings normalised (pasted text arrives with `\n`), so our own text is recognised.
 fn hash(text: &str) -> u64 {
     let mut h = DefaultHasher::new();
@@ -42,13 +50,17 @@ pub fn mirror(app: &CadApp, ctx: &egui::Context) {
 /// The commands the Cut/Copy/Paste events of this frame ask for. Pasted DXF text that isn't our
 /// own last copy (another CADCraft's) becomes the clipboard first.
 pub fn shortcut_commands(app: &mut CadApp, ctx: &egui::Context) -> Vec<&'static str> {
-    let (events, shift, middle) = ctx.input(|i| {
+    let (events, shift, middle, now) = ctx.input(|i| {
         let ev: Vec<egui::Event> =
             i.events.iter().filter(|e| matches!(e, egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_))).cloned().collect();
-        // A middle click that is pressed, held or let go in this frame (see the Paste branch below).
+        // A middle click that is pressed, held or let go in this frame (see the Paste branch below, which also ignores the frames just after it).
         let middle = i.pointer.button_down(egui::PointerButton::Middle) || i.pointer.button_released(egui::PointerButton::Middle);
-        (ev, i.modifiers.shift, middle)
+        (ev, i.modifiers.shift, middle, i.time)
     });
+    if middle {
+        ctx.data_mut(|d| d.insert_temp(middle_id(), now));
+    }
+    let after_middle = ctx.data(|d| d.get_temp::<f64>(middle_id())).is_some_and(|t| now - t < MIDDLE_PASTE_S);
     let mut out = Vec::new();
     for e in events {
         match e {
@@ -59,7 +71,7 @@ pub fn shortcut_commands(app: &mut CadApp, ctx: &egui::Context) -> Vec<&'static 
                 // highlighted anywhere) into the page, and the browser reports it as a Paste. `pasteclip` would
                 // cancel the command being drawn and then refuse, the clipboard being empty. Ctrl+V is never a
                 // middle click, so a real paste is not affected.
-                if text.is_empty() || middle {
+                if text.is_empty() || after_middle {
                     continue;
                 }
                 let h = hash(&text);
