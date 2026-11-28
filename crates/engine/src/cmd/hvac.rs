@@ -191,6 +191,7 @@ fn run_spaceadd(s: &mut Session, p: &Value) -> Result<Value> {
         void_height_mm: positive_param(CMD, p, "voidHeight")?,
         outline,
         label_height_mm: positive_param(CMD, p, "labelHeight")?.unwrap_or(200.0),
+        label_at: None,
         units: HvacUnits::of(d),
     };
     let (h, area, flow) = add_space(s, space)?;
@@ -233,6 +234,7 @@ impl SpaceAddM {
             void_height_mm: None,
             outline,
             label_height_mm: 200.0,
+            label_at: None,
             units: HvacUnits::of(s.doc()?),
         })
     }

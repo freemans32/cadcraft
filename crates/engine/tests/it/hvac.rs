@@ -252,3 +252,30 @@ fn a_count_written_with_a_decimal_point_is_a_whole_number() {
         assert!(s.execute("spaceedit", &json!({"handle": r["handle"], "occupants": bad})).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn the_label_of_a_space_moves_by_its_grip_alone_and_stays_where_it_was_put() {
+    let mut s = metric();
+    let r = s.execute("spaceadd", &json!({"points": [[0, 0], [6000, 0], [6000, 4000], [0, 4000]], "name": "Bureau", "flow": 100})).unwrap();
+    let (room, hd) = (r["handle"].clone(), h(&r));
+    let grips = |s: &Session| s.grips_of(hd).unwrap();
+    let outline = |s: &Session| s.doc().unwrap().space_outline(hd).unwrap().1;
+    assert_eq!(grips(&s).len(), 2, "the space's point and the middle of its label");
+    assert!(grips(&s)[1].dist(cadcraft_geom::Vec2::new(3000.0, 2000.0)) < 1e-6, "the label in the middle at first");
+    // Its grip dragged: the label moves, the outline does not.
+    let before = outline(&s);
+    s.execute("grip.stretch", &json!({"handle": room, "index": 1, "to": [1000, 3000]})).unwrap();
+    assert!(grips(&s)[1].dist(cadcraft_geom::Vec2::new(1000.0, 3000.0)) < 1e-6);
+    assert_eq!(outline(&s), before);
+    // The grip in MOVE mode (Enter after picking it): the label alone moves.
+    s.start_grip_edit(&[(hd, 1)]).unwrap();
+    s.cmdline("").unwrap();
+    s.cmdline("1500,2500").unwrap();
+    assert!(grips(&s)[1].dist(cadcraft_geom::Vec2::new(1500.0, 2500.0)) < 1e-6, "{:?}", grips(&s));
+    assert_eq!(outline(&s), before);
+    // The space changed: the label stays where it was put; the space moved: the label goes with it.
+    s.execute("spaceedit", &json!({"handles": [room], "flow": 150})).unwrap();
+    assert!(grips(&s)[1].dist(cadcraft_geom::Vec2::new(1500.0, 2500.0)) < 1e-6);
+    s.execute("move", &json!({"handles": [room], "delta": [100, 0]})).unwrap();
+    assert!(grips(&s)[1].dist(cadcraft_geom::Vec2::new(1600.0, 2500.0)) < 1e-6);
+}

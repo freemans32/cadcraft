@@ -52,6 +52,9 @@ pub struct SpaceParams {
     pub void_height_mm: Option<f64>,
     #[serde(default = "default_label_mm")]
     pub label_height_mm: f64,
+    /// Where the label is centred, in the block's coordinates, when it was moved by its grip; `None`: at [`SpaceParams::label_point`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_at: Option<Vec2>,
     #[serde(default)]
     pub units: HvacUnits,
 }
@@ -132,7 +135,7 @@ impl SpaceParams {
             plinegen: false,
         };
         let h = self.units.to_units(self.label_height_mm);
-        let at = self.label_point();
+        let at = self.label_at.unwrap_or_else(|| self.label_point());
         let step = Vec2::new(0.0, 1.6 * h);
         let lines = [self.name.clone(), format!("{:.1} m²", self.area_m2()), format!("{flow:.0} m³/h")];
         let mut pieces = vec![HvacPiece { layer: SPACE_LAYER, kind: EntityKind::LwPolyline(outline) }];
@@ -206,5 +209,46 @@ impl crate::Drawing {
             })
             .collect();
         Some((p, world))
+    }
+
+    /// The grips of space `h`: its insertion point (0), which moves the space, and the middle of its label (1), which moves the label alone.
+    pub fn space_grips(&self, e: &crate::Entity) -> Option<Vec<Vec2>> {
+        let EntityKind::Insert(i) = &e.kind else { return None };
+        let p = space_of(e)?;
+        let at = p.label_at.unwrap_or_else(|| p.label_point());
+        Some(vec![i.insert.xy(), super::slab::block_to_world(i, at)])
+    }
+
+    /// Drags grip `index` of space `h` (see [`Self::space_grips`]) to `to`: 0 moves the space, 1 its label (kept where it is put when the space is
+    /// redrawn). `Ok(false)` when `h` is not a space or the grip does not exist.
+    pub fn stretch_space_grip(&mut self, h: crate::Handle, index: usize, to: Vec2) -> Result<bool> {
+        let Some(e) = self.entity(h) else { return Ok(false) };
+        let (Some(mut p), EntityKind::Insert(i)) = (space_of(e), &e.kind) else { return Ok(false) };
+        if !to.is_finite() {
+            return Ok(false);
+        }
+        match index {
+            0 => {
+                let d = to - i.insert.xy();
+                self.modify_entity(h, |e| {
+                    if let EntityKind::Insert(i) = &mut e.kind {
+                        i.insert = v3(i.insert.xy() + d);
+                    }
+                })?;
+            }
+            1 => {
+                // The point in the block's coordinates: the reference's turn and scale taken back.
+                let (s, c) = i.rotation.sin_cos();
+                let d = to - i.insert.xy();
+                let local = Vec2::new((d.x * c + d.y * s) / i.scale.x, (-d.x * s + d.y * c) / i.scale.y);
+                if !local.is_finite() {
+                    return Ok(false);
+                }
+                p.label_at = Some(local);
+                self.regenerate_space(h, &p)?;
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
     }
 }

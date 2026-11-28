@@ -80,6 +80,11 @@ fn shown(s: &Session, h: Handle) -> bool {
 }
 
 impl GripEdit {
+    /// Whether the one hot grip is the label grip of a space (its grip 1).
+    fn moves_a_space_label(&self, s: &Session) -> bool {
+        matches!(self.hot.as_slice(), [(h, 1)] if s.doc().is_ok_and(|d| d.entity(*h).is_some_and(|e| cadcraft_doc::space_of(e).is_some())))
+    }
+
     /// Whether a hot grip is an end of a duct, a pipe or a cable (its grip 0 or 2).
     fn stretches_a_duct_end(&self, s: &Session) -> bool {
         s.doc().is_ok_and(|d| {
@@ -240,6 +245,8 @@ impl GripEdit {
         let before = s.state()?.doc.clone();
         let changed = match (self.mode, m) {
             (GripMode::Stretch, _) => !stretch_grips(s, &self.hot, &self.targets, to - self.base, self.copy, !self.alone)?.is_empty(),
+            // The label grip of a space in MOVE mode moves the label alone, as STRETCH does.
+            (GripMode::Move, Some(_)) if self.moves_a_space_label(s) => !stretch_grips(s, &self.hot, &[], to - self.base, false, false)?.is_empty(),
             (_, Some(m)) => !transform_entities(s, &self.targets, &m, self.copy)?.is_empty(),
             (_, None) => return Err(other("Invalid point.")),
         };

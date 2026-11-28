@@ -1066,8 +1066,13 @@ fn pipe_section(
             action = edit("source", json!(on));
         }
     });
+    // The length the run has beyond its drawing (rises, drops), counted in its losses and its take-off.
+    elec_number(ui, ("pipeedit", "Extra length (m)", "extra", false), &ids, ps.iter().map(|p| Some(p.extra_m)).collect(), bad, &mut action);
     if let [p] = ps {
         prop_row(ui, "Length", |ui| read_only(ui, &len(p.length)));
+        if p.extra_m > 0.0 {
+            prop_row(ui, "Length counted (m)", |ui| read_only(ui, &format!("{:.2}", p.length_m())));
+        }
         if let Some(f) = p.flow_m3h {
             let text = if p.service == PipeService::Condensate { format!("{:.1} l/h", f * 1000.0) } else { format!("{f:.2} m³/h") };
             prop_row(ui, "Flow", |ui| read_only(ui, &text));

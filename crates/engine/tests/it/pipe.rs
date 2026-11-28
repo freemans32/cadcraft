@@ -327,3 +327,18 @@ fn pipes_laid_by_the_command_get_their_elbow_and_follow_a_change_of_diameter_wit
     s.execute("pipeedit", &json!({"handle": hs[1].hex(), "dn": 50})).unwrap();
     assert!(p(&s, hs[0]).reducer.is_none() && elbows(&s) == 1);
 }
+
+#[test]
+fn a_pipe_or_a_refrigerant_link_counts_the_extra_length_it_is_given() {
+    let mut s = metric();
+    for (service, dn) in [("chilledWater", json!(50)), ("refrigerantPair", json!("3/8"))] {
+        let r = s.execute("pipeadd", &json!({"points": [[0, 0], [4000, 0]], "service": service, "dn": dn})).unwrap();
+        let hp = hd(&r["handles"][0]);
+        let drawn = pipe(&s, hp).length_m();
+        s.execute("pipeedit", &json!({"handles": [hp.hex()], "extra": 2.5})).unwrap();
+        assert!((pipe(&s, hp).length_m() - drawn - 2.5).abs() < 1e-9, "{service}: the rise is counted");
+        assert!(s.execute("pipeedit", &json!({"handles": [hp.hex()], "extra": -1})).is_err(), "{service}");
+        assert!(s.execute("pipeedit", &json!({"handles": [hp.hex()], "extra": 5000})).is_err(), "{service}");
+        assert!((pipe(&s, hp).length_m() - drawn - 2.5).abs() < 1e-9, "{service}: a refused value leaves it");
+    }
+}

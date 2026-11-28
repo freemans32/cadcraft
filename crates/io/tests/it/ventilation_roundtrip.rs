@@ -30,6 +30,7 @@ fn drawing() -> (Drawing, SpaceParams, TerminalParams) {
         void_height_mm: Some(350.0),
         outline: vec![Vec2::new(0.0, 0.0), Vec2::new(8000.0, 0.0), Vec2::new(8000.0, 5000.0), Vec2::new(0.0, 5000.0)],
         label_height_mm: 200.0,
+        label_at: None,
         units: HvacUnits::of(&d),
     };
     d.add_space(&Space::Model, Common::default(), space.clone()).expect("add space");

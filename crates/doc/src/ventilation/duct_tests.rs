@@ -611,6 +611,7 @@ fn a_zone_wins_over_a_space_where_the_duct_runs_in_it() {
         void_height_mm: Some(350.0),
         outline: vec![Vec2::new(0.0, 0.0), Vec2::new(10500.0, 0.0), Vec2::new(10500.0, 3500.0), Vec2::new(0.0, 3500.0)],
         label_height_mm: 100.0,
+        label_at: None,
         units: HvacUnits::default(),
     };
     d.add_space(&Space::Model, Common::default(), SpaceParams { void_height_mm: Some(350.0), ..room }).unwrap();

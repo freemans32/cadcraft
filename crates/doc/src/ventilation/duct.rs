@@ -1892,6 +1892,9 @@ impl crate::Drawing {
         if let Some((_, a, b)) = self.cable_ends(e.handle) {
             return vec![a, a.mid(b), b];
         }
+        if let Some(g) = self.space_grips(e) {
+            return g;
+        }
         if let Some(g) = self.wall_grips(e) {
             return g;
         }

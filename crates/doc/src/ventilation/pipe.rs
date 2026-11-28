@@ -386,6 +386,9 @@ pub struct PipeParams {
     /// The label is not drawn (the run keeps its size, flow and sums).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hide_label: bool,
+    /// The run's own length is longer than its drawing by this much (rises, drops, loops), metres: counted in its losses, its take-off and its network.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub extra_m: f64,
     /// The colours the run is drawn in (its band along the axis depends on it).
     #[serde(default, skip_serializing_if = "ColourConvention::is_plan")]
     pub colours: ColourConvention,
@@ -420,6 +423,7 @@ impl PipeParams {
             trim_end_mm: 0.0,
             label_height_mm: default_label_mm(),
             hide_label: false,
+            extra_m: 0.0,
             colours: ColourConvention::Plan,
             units,
         }
@@ -463,6 +467,9 @@ impl PipeParams {
             return Err(invalid("What an elbow takes of a pipe is 0 to its length."));
         }
         self.units.validate()?;
+        if !(self.extra_m.is_finite() && (0.0..=1000.0).contains(&self.extra_m)) {
+            return Err(invalid("The extra length of a pipe is 0 to 1000 m."));
+        }
         check_label_height(self.label_height_mm)
     }
 
@@ -559,9 +566,9 @@ impl PipeParams {
         network_layer(layer_of(self.service, self.leg), &self.network)
     }
 
-    /// Length in metres.
+    /// Length in metres: its drawing and the extra it has.
     pub fn length_m(&self) -> f64 {
-        self.length * self.units.mm_per_unit / 1000.0
+        self.length * self.units.mm_per_unit / 1000.0 + self.extra_m
     }
 
     /// The short code of the service written on the run.
@@ -890,4 +897,8 @@ impl crate::Drawing {
 fn trim_number(v: f64) -> String {
     let t = format!("{v:.2}");
     t.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+fn is_zero(v: &f64) -> bool {
+    *v == 0.0
 }
