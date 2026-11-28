@@ -303,6 +303,10 @@ pub struct AhuParams {
     pub extract_flow_m3h: Option<f64>,
     #[serde(default)]
     pub extract_pressure_pa: Option<f64>,
+    /// Hoods of this model drawn on the collars of fresh air and exhaust air (a unit outdoors, on a roof): they go with the unit and count in the
+    /// take-off; none when the collars are ducted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hood: Option<super::HoodModel>,
     /// And for the fresh air (air neuf) coming in and the exhaust air (rejet) going out.
     #[serde(default)]
     pub fresh_flow_m3h: Option<f64>,
@@ -344,6 +348,41 @@ impl AhuParams {
             (None, None) => None,
             (a, b) => Some(a.unwrap_or(0.0) + b.unwrap_or(0.0)),
         }
+    }
+
+    /// The hoods the unit has on its collars of fresh and exhaust air ([`AhuParams::hood`]): where each starts, the way it points out and the hood.
+    pub fn hoods(&self) -> Vec<(Vec2, Vec2, super::AccessoryParams)> {
+        let Some(model) = self.hood else { return Vec::new() };
+        let roles = self.roles();
+        self.port_tips()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, (tip, normal))| {
+                let air = roles.get(i).copied().filter(|a| matches!(a, AirDirection::Fresh | AirDirection::Exhaust))?;
+                let size = self.port_sizes.get(i).copied().flatten();
+                let height_mm = match size {
+                    Some(super::RiserSize::Rectangular { height_mm, .. }) => Some(height_mm),
+                    _ => None,
+                };
+                let kind = super::AccessoryKind::Hood;
+                let hood = super::AccessoryParams {
+                    kind,
+                    length_mm: kind.default_length_mm(),
+                    diameter_mm: size.map_or(400.0, |z| z.width_mm()),
+                    zeta: None,
+                    pressure_drop_pa: None,
+                    label_height_mm: self.label_height_mm,
+                    bottom_mm: None,
+                    units: self.units,
+                    air: Some(air),
+                    height_mm,
+                    fixed: true,
+                    overhang_mm: None,
+                    hood_model: model,
+                };
+                Some((tip, normal, hood))
+            })
+            .collect()
     }
 
     /// The direction of the air at each connection: the ones set, else the kind's.
@@ -548,6 +587,16 @@ impl AhuParams {
         pieces.push(HvacPiece { layer: by_block(AHU_LAYER), kind: label(code_at, h, self.kind.code().into()) });
         pieces.push(HvacPiece { layer: by_block(AHU_LAYER), kind: label(Vec2::new(0.0, -half.y - 1.2 * h), h, text) });
         pieces.extend(self.port_marks(h));
+        // The hoods on the collars of fresh and exhaust air, as a hood is drawn, turned to point out of each.
+        for (tip, normal, hood) in self.hoods() {
+            for mut piece in hood.generate()?.into_iter().filter(|x| !matches!(x.kind, EntityKind::Text(_))) {
+                // In the colour of its air (the layer of the ducts of that air), not the unit's.
+                piece.layer = hood.layer();
+                piece.kind.transform(&cadcraft_geom::Mat3::rotate(normal.angle()));
+                piece.kind.transform(&cadcraft_geom::Mat3::translate(tip));
+                pieces.push(piece);
+            }
+        }
         // The spec block to the right, beyond the collars' arrows, its lines under one another.
         let x = half.x + 0.9 * half.x.min(half.y) + 3.0 * h;
         for (i, line) in self.spec_lines().into_iter().enumerate() {

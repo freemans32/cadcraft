@@ -2016,6 +2016,20 @@ fn ahu_section(ui: &mut egui::Ui, sel: &[Handle], units: &[AhuParams], bad: &mut
     let mut action: Action = None;
     let edit = |key: &str, value: Value| Some(("ahuedit", json!({ "handles": ids, key: value })));
     group(ui, "Air Handling Unit");
+    // Hoods drawn on the collars of fresh and exhaust air (a unit outdoors), of the model chosen.
+    let hood = shared(&units.iter().map(|u| u.hood).collect::<Vec<_>>());
+    prop_row(ui, "Hoods on fresh and exhaust air", |ui| {
+        let shown = match hood {
+            None => VARIES,
+            Some(None) => "None",
+            Some(Some(m)) => m.label(),
+        };
+        let items =
+            [("none", "None"), ("standard", "Hood"), ("birdMesh", "Hood with bird mesh"), ("gooseneck", "Gooseneck"), ("roofCap", "Roof cap")];
+        if let Some(k) = choice(ui, shown, &items) {
+            action = edit("hoods", json!(k));
+        }
+    });
     // The altitude of each connection, in metres, in the order of the collars, separated by commas ("2.7, 2.7, 3, "): an empty one has none.
     prop_row(ui, "Connection altitudes (m, one per collar)", |ui| {
         let text = shared(
@@ -2495,6 +2509,15 @@ fn accessory_section(ui: &mut egui::Ui, sel: &[Handle], accs: &[AccessoryParams]
     let mut action: Action = None;
     group(ui, "Duct Accessory");
     let kind = shared(&accs.iter().map(|a| a.kind).collect::<Vec<_>>());
+    if kind == Some(AccessoryKind::Hood) {
+        let model = shared(&accs.iter().map(|a| a.hood_model).collect::<Vec<_>>());
+        prop_row(ui, "Hood model", |ui| {
+            let items = [("standard", "Hood"), ("birdMesh", "Hood with bird mesh"), ("gooseneck", "Gooseneck"), ("roofCap", "Roof cap")];
+            if let Some(k) = choice(ui, model.map_or(VARIES, |m| m.label()), &items) {
+                action = Some(("ductaccessoryedit", json!({ "handles": ids, "model": k })));
+            }
+        });
+    }
     prop_row(ui, "Type", |ui| {
         let label = |k: AccessoryKind| match k {
             AccessoryKind::Damper => "Damper",

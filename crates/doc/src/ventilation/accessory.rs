@@ -26,6 +26,63 @@ fn default_label_mm() -> f64 {
     100.0
 }
 
+/// The model of a hood, as a plan shows it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HoodModel {
+    /// A casing with its roof and a mesh on its face (capot pare-pluie).
+    #[default]
+    Standard,
+    /// The same with a fine mesh against birds (grillage anti-volatiles).
+    BirdMesh,
+    /// A gooseneck: the duct turned back down (col de cygne).
+    Gooseneck,
+    /// A cap on a duct going up through a roof (chapeau de toiture).
+    RoofCap,
+}
+
+impl HoodModel {
+    pub const ALL: [HoodModel; 4] = [HoodModel::Standard, HoodModel::BirdMesh, HoodModel::Gooseneck, HoodModel::RoofCap];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            HoodModel::Standard => "standard",
+            HoodModel::BirdMesh => "birdMesh",
+            HoodModel::Gooseneck => "gooseneck",
+            HoodModel::RoofCap => "roofCap",
+        }
+    }
+
+    /// What the take-off and the Properties call it.
+    pub fn label(self) -> &'static str {
+        match self {
+            HoodModel::Standard => "Hood",
+            HoodModel::BirdMesh => "Hood with bird mesh",
+            HoodModel::Gooseneck => "Gooseneck",
+            HoodModel::RoofCap => "Roof cap",
+        }
+    }
+
+    /// The code written on the plan.
+    pub fn code(self) -> &'static str {
+        match self {
+            HoodModel::Standard => "CAP",
+            HoodModel::BirdMesh => "CAP-GAV",
+            HoodModel::Gooseneck => "CDC",
+            HoodModel::RoofCap => "CHT",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<HoodModel> {
+        let t = text.trim().to_ascii_lowercase().replace([' ', '-', '_'], "");
+        HoodModel::ALL.into_iter().find(|m| m.name().to_ascii_lowercase() == t || m.code().to_ascii_lowercase().replace('-', "") == t)
+    }
+
+    fn is_standard(&self) -> bool {
+        *self == HoodModel::Standard
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AccessoryKind {
@@ -147,6 +204,9 @@ pub struct AccessoryParams {
     /// How far a hood's casing sticks out on each side of its opening, mm; none (0) draws it as wide as the opening.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overhang_mm: Option<f64>,
+    /// A hood's model.
+    #[serde(default, skip_serializing_if = "HoodModel::is_standard")]
+    pub hood_model: HoodModel,
 }
 
 impl AccessoryParams {
@@ -238,8 +298,11 @@ impl AccessoryParams {
         let corners = vec![Vec2::new(-half.x, -half.y), Vec2::new(half.x, -half.y), Vec2::new(half.x, half.y), Vec2::new(-half.x, half.y)];
         let mut v = Vec::new();
         match self.kind {
+            AccessoryKind::Hood if self.hood_model != HoodModel::Standard && self.hood_model != HoodModel::BirdMesh => {
+                v.extend(self.hood_shape(half).into_iter().map(|(pts, closed)| poly(pts, closed)));
+            }
             AccessoryKind::Hood => {
-                // From the origin (the end of the duct) outwards: the casing, then the mesh band at the far end as crossed diagonals.
+                // From the origin (the end of the duct) outwards: the casing, then the mesh band at the far end as crossed diagonals (finer against birds).
                 let len = 2.0 * half.x;
                 let casing = vec![Vec2::new(0.0, -half.y), Vec2::new(len, -half.y), Vec2::new(len, half.y), Vec2::new(0.0, half.y)];
                 v.push(poly(casing, true));
@@ -248,7 +311,7 @@ impl AccessoryParams {
                 // The roof's slope, seen from above: a line from each rear corner to the mesh.
                 v.push(line(Vec2::new(0.0, -half.y), Vec2::new(edge, -0.6 * half.y)));
                 v.push(line(Vec2::new(0.0, half.y), Vec2::new(edge, 0.6 * half.y)));
-                let cells = 4;
+                let cells = if self.hood_model == HoodModel::BirdMesh { 8 } else { 4 };
                 for k in 0..cells {
                     let y0 = -half.y + 2.0 * half.y * f64::from(k) / f64::from(cells);
                     let y1 = y0 + 2.0 * half.y / f64::from(cells);
@@ -296,7 +359,7 @@ impl AccessoryParams {
             // A hood's size and length, then its air: "CAP 400×250 L600 R".
             _ if self.kind == AccessoryKind::Hood => {
                 let air = self.air.map_or(String::new(), |a| format!(" {}", a.tag()));
-                format!("{} {} L{:.0}{air}", self.kind.code(), self.size_text(), self.length_mm)
+                format!("{} {} L{:.0}{air}", self.hood_model.code(), self.size_text(), self.length_mm)
             }
             _ => format!("{} Ø{:.0}", self.kind.code(), self.diameter_mm),
         };
@@ -304,8 +367,11 @@ impl AccessoryParams {
             Some(t) => format!("{text} {t}"),
             None => text,
         };
-        let label_x = if self.kind == AccessoryKind::Hood { half.x } else { 0.0 };
-        v.push(HvacPiece { layer, kind: label(Vec2::new(label_x, -half.y - 1.2 * h), h, text) });
+        // Under the accessory; a roof cap is centred on its duct and wider than it.
+        let roof_cap = self.kind == AccessoryKind::Hood && self.hood_model == HoodModel::RoofCap;
+        let label_x = if self.kind == AccessoryKind::Hood && !roof_cap { half.x } else { 0.0 };
+        let below = if roof_cap { 1.6 * half.y } else { half.y };
+        v.push(HvacPiece { layer, kind: label(Vec2::new(label_x, -below - 1.2 * h), h, text) });
         Ok(v)
     }
 
@@ -320,6 +386,32 @@ impl AccessoryParams {
 }
 
 impl AccessoryParams {
+    /// The outline of a gooseneck or a roof cap, from its origin (the end of the duct) outwards, as polylines (points, closed).
+    fn hood_shape(&self, half: Vec2) -> Vec<(Vec<Vec2>, bool)> {
+        let (len, w) = (2.0 * half.x, half.y);
+        let arc = |cx: f64, r: f64, from: f64, to: f64| -> Vec<Vec2> {
+            (0..=16).map(|k| from + (to - from) * f64::from(k) / 16.0).map(|a| Vec2::new(cx + r * a.cos(), r * a.sin())).collect()
+        };
+        match self.hood_model {
+            // The duct goes on, then turns back on itself: its two sides and the half circle of the bend, seen from above.
+            HoodModel::Gooseneck => {
+                let straight = (len - w).max(0.0);
+                let mut outer = vec![Vec2::new(0.0, -w), Vec2::new(straight, -w)];
+                outer.extend(arc(straight, w, -std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2));
+                outer.push(Vec2::new(0.0, w));
+                let inner = vec![Vec2::new(straight, -w), Vec2::new(straight, w)];
+                vec![(outer, false), (inner, false)]
+            }
+            // The cap, wider than the duct, seen from above: its rim and the duct under it.
+            HoodModel::RoofCap => {
+                let rim = arc(0.0, 1.6 * w, 0.0, std::f64::consts::TAU);
+                let duct = arc(0.0, w, 0.0, std::f64::consts::TAU);
+                vec![(rim, true), (duct, true)]
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// The accessory as it will look at `at`, turned `rotation`; empty when it can't be drawn.
     pub fn preview(&self, at: Vec2, rotation: f64) -> Vec<crate::Entity> {
         self.generate().map(|p| super::preview_entities(p, at, rotation)).unwrap_or_default()

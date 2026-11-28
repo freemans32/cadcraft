@@ -109,6 +109,7 @@ fn an_indoor_unit_reached_from_no_outdoor_unit_is_told_and_a_coil_counts_as_a_un
         pressure_pa: None,
         extract_flow_m3h: None,
         extract_pressure_pa: None,
+        hood: None,
         fresh_flow_m3h: None,
         fresh_pressure_pa: None,
         exhaust_flow_m3h: None,

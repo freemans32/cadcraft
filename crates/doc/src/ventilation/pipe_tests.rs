@@ -269,6 +269,7 @@ fn the_coils_of_an_air_handling_unit_are_the_loads_of_the_water_pipes_that_end_a
         pressure_pa: None,
         extract_flow_m3h: None,
         extract_pressure_pa: None,
+        hood: None,
         fresh_flow_m3h: None,
         fresh_pressure_pa: None,
         exhaust_flow_m3h: None,

@@ -16,11 +16,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["Draw", "HVAC", "Duct Accessory"])
             .params(
                 "{at (on a duct), type?: damper|fireDamper|silencer|flexConnector|hood (a hood takes the unit collar or the duct end nearest `at`, else stays where it is put), length? (mm), zeta?, pressureDrop? (Pa, wins over zeta), \
-                 labelHeight? (mm)} → {handle, duct, type}",
+                 labelHeight? (mm), model? (a hood's: standard|birdMesh|gooseneck|roofCap)} → {handle, duct, type}",
             )
             .interactive(|s| Ok(Box::new(AccessoryAddM::new(s)))),
         CommandSpec::new("ductaccessoryedit", "Edit Duct Accessory", run_edit)
-            .params("{handle | handles, type?, length? (mm), width? (mm), height? (mm, 0 or null: round), overhang? (mm, a hood's casing beyond its opening; 0 or null: none), air? (supply|extract|fresh|exhaust, or null; for a hood: its colour and the takeoff), follow? (bool: a hood follows the size and air of the duct or collar it covers until one of those is set by hand), zeta? (number, or null for the default), pressureDrop? (Pa, or null)} → {changed}"),
+            .params("{handle | handles, type?, length? (mm), width? (mm), height? (mm, 0 or null: round), overhang? (mm, a hood's casing beyond its opening; 0 or null: none), air? (supply|extract|fresh|exhaust, or null; for a hood: its colour and the takeoff), follow? (bool: a hood follows the size and air of the duct or collar it covers until one of those is set by hand), zeta? (number, or null for the default), pressureDrop? (Pa, or null), model? (a hood's: standard|birdMesh|gooseneck|roofCap)} → {changed}"),
     ]
 }
 
@@ -91,6 +91,7 @@ fn on_duct(
         height_mm: height,
         fixed: false,
         overhang_mm: None,
+        hood_model: Default::default(),
     };
     p.validate().map_err(doc_err)?;
     Ok((p, duct, foot, angle))
@@ -105,12 +106,32 @@ fn place(s: &mut Session, kind: AccessoryKind, at: Vec2, loss: (Option<f64>, Opt
     Ok((h, duct))
 }
 
+/// A hood's model, when one is given.
+fn model_param(cmd: &str, p: &Value) -> Result<Option<cadcraft_doc::HoodModel>> {
+    match p.get("model") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_str()
+            .and_then(cadcraft_doc::HoodModel::parse)
+            .map(Some)
+            .ok_or_else(|| bad(cmd, "`model` must be standard, birdMesh, gooseneck or roofCap")),
+    }
+}
+
 fn run_add(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "ductaccessoryadd";
     let at = super::point_req(CMD, p, "at")?;
     let kind = kind_param(CMD, p)?.unwrap_or_default();
     let label = number(CMD, p, "labelHeight")?.unwrap_or(100.0);
+    let model = model_param(CMD, p)?;
     let (h, duct) = place(s, kind, at, (number(CMD, p, "length")?, number(CMD, p, "zeta")?, number(CMD, p, "pressureDrop")?, label))?;
+    if let Some(m) = model.filter(|_| kind == AccessoryKind::Hood) {
+        let d = s.doc_mut()?;
+        if let Some(mut a) = d.entity(h).and_then(|e| cadcraft_doc::accessory_of(e)) {
+            a.hood_model = m;
+            d.regenerate_accessory(h, &a).map_err(doc_err)?;
+        }
+    }
     Ok(json!({ "handle": h.hex(), "duct": duct.map(|d| d.hex()), "type": kind.name() }))
 }
 
@@ -126,6 +147,7 @@ fn run_edit(s: &mut Session, p: &Value) -> Result<Value> {
     let width = number(CMD, p, "width")?;
     let height = number(CMD, p, "height")?;
     let overhang = number(CMD, p, "overhang")?;
+    let model = model_param(CMD, p)?;
     let air = match p.get("air") {
         None => None,
         Some(Value::Null) => Some(None),
@@ -153,6 +175,9 @@ fn run_edit(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if p.get("overhang").is_some() {
             a.overhang_mm = overhang.filter(|o| *o > 0.0);
+        }
+        if let Some(m) = model {
+            a.hood_model = m;
         }
         // Set by hand, a hood stops following its opening; `follow: true` makes it follow again (at the next sizing or duct change).
         if width.is_some() || p.get("height").is_some() || air.is_some() {

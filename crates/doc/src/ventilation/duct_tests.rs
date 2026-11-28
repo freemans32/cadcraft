@@ -15,6 +15,7 @@ fn ahu() -> AhuParams {
         pressure_pa: None,
         extract_flow_m3h: None,
         extract_pressure_pa: None,
+        hood: None,
         fresh_flow_m3h: None,
         fresh_pressure_pa: None,
         exhaust_flow_m3h: None,

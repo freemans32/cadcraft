@@ -27,6 +27,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("ahuedit", "Edit Air Handling Unit", run_ahuedit)
             .params(
                 "{handle | handles, name?, type?: doubleFlow|supplyUnit|extractUnit|vmcBox|stackedDoubleFlow, width? (mm), depth? (mm), height? (mm or null), model?, weight? (kg or null), altitude? (m: the underside of the unit, or null), coils? ({chilledWater?, hotWater?, changeOver?, directExpansion?, electric?, electricPhases? (single|three; three by default)}: the power of each coil, kW, or null for none; an electric coil is a load of the unit's circuit; the water pipes that end at the unit take their load from it), portSizes? (one per collar: a diameter, 800x400 or null: the duct that starts on it takes that section), portLevels? (one per collar: an altitude in metres or null, [] for none: the duct that starts on it is at that altitude, and a step joins it to the run after it where they differ), \
+                 hoods? (standard|birdMesh|gooseneck|roofCap, or none: hoods of that model drawn on the collars of fresh and exhaust air, counted in the take-off), \
                  ports? (the direction of the air at each collar, supply|extract|fresh|exhaust, one per collar: four for a double-flux unit or a box, two for a single-flux unit; [] restores the kind's), \
                  flow? | extractFlow? | freshFlow? | exhaustFlow? (m³/h typed for that direction: sizing keeps it and sizes the run that leaves the unit for it; null or auto gives it back)} → {changed}",
             ),
@@ -252,6 +253,7 @@ fn run_ahuadd(s: &mut Session, p: &Value) -> Result<Value> {
         pressure_pa: None,
         extract_flow_m3h: None,
         extract_pressure_pa: None,
+        hood: None,
         fresh_flow_m3h: None,
         fresh_pressure_pa: None,
         exhaust_flow_m3h: None,
@@ -356,6 +358,16 @@ fn run_ahuedit(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(CMD, "`portLevels` is a list of altitudes in metres, one per collar")),
     };
     let kind = ahu_kind_param(CMD, p)?;
+    // The hoods on the collars of fresh and exhaust air: a model, or none (null).
+    let hoods: Option<Option<cadcraft_doc::HoodModel>> = match p.get("hoods") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(Value::String(t)) if t.trim().eq_ignore_ascii_case("none") => Some(None),
+        Some(Value::String(t)) => {
+            Some(Some(cadcraft_doc::HoodModel::parse(t).ok_or_else(|| bad(CMD, "`hoods` must be standard, birdMesh, gooseneck, roofCap or none"))?))
+        }
+        Some(_) => return Err(bad(CMD, "`hoods` must be a hood model or none")),
+    };
     let d = s.doc()?;
     let mut next = Vec::with_capacity(hs.len());
     for h in &hs {
@@ -410,6 +422,9 @@ fn run_ahuedit(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let Some(levels) = &port_levels {
             a.port_levels_mm = levels.clone();
+        }
+        if let Some(m) = hoods {
+            a.hood = m;
         }
         a.validate().map_err(doc_err)?;
         next.push((*h, a));
@@ -483,6 +498,7 @@ impl AhuAddM {
                     pressure_pa: None,
                     extract_flow_m3h: None,
                     extract_pressure_pa: None,
+                    hood: None,
                     fresh_flow_m3h: None,
                     fresh_pressure_pa: None,
                     exhaust_flow_m3h: None,
@@ -574,6 +590,7 @@ impl Interactive for AhuAddM {
             pressure_pa: None,
             extract_flow_m3h: None,
             extract_pressure_pa: None,
+            hood: None,
             fresh_flow_m3h: None,
             fresh_pressure_pa: None,
             exhaust_flow_m3h: None,

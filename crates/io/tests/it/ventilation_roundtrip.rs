@@ -79,6 +79,7 @@ fn ducted() -> Drawing {
         pressure_pa: Some(120.0),
         extract_flow_m3h: Some(450.0),
         extract_pressure_pa: Some(90.0),
+        hood: None,
         fresh_flow_m3h: None,
         fresh_pressure_pa: None,
         exhaust_flow_m3h: None,
@@ -158,6 +159,7 @@ fn ducted() -> Drawing {
         height_mm: None,
         fixed: false,
         overhang_mm: None,
+        hood_model: Default::default(),
     };
     d.add_accessory(&Space::Model, Common::default(), &silencer, Vec2::new(3000.0, 0.0), 0.0).expect("add accessory");
     let model = standard_air_terminal_models().into_iter().next().expect("a model");

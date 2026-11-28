@@ -18,6 +18,7 @@ fn accessory(kind: AccessoryKind) -> AccessoryParams {
         height_mm: None,
         fixed: false,
         overhang_mm: None,
+        hood_model: Default::default(),
     }
 }
 
@@ -84,6 +85,7 @@ fn unit() -> AhuParams {
         pressure_pa: None,
         extract_flow_m3h: None,
         extract_pressure_pa: None,
+        hood: None,
         fresh_flow_m3h: None,
         fresh_pressure_pa: None,
         exhaust_flow_m3h: None,

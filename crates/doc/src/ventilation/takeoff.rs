@@ -384,7 +384,7 @@ impl crate::Drawing {
                 } else {
                     format!("Ø{:.0}", a.diameter_mm)
                 };
-                add_count(&mut t.accessories, a.kind.name(), &size, None);
+                add_count(&mut t.accessories, &hood_name(&a), &size, None);
             } else if let Some(x) = air_terminal_of(e) {
                 match t.terminals.iter_mut().find(|q| q.model == x.model.name && q.air == x.air && same_flow(q.flow_m3h, x.flow_m3h)) {
                     Some(q) => q.count += 1,
@@ -392,6 +392,11 @@ impl crate::Drawing {
                 }
                 terminals.push((Vec2::new(i.insert.x, i.insert.y), x.air, x.flow_m3h, x.model.name.clone()));
             } else if let Some(u) = ahu_of(e) {
+                // The hoods drawn on its collars are accessories like the others.
+                for (_, _, a) in u.hoods() {
+                    let size = format!("{} L{:.0}{}", a.size_text(), a.length_mm, a.air.map_or(String::new(), |x| format!(" {}", x.tag())));
+                    add_count(&mut t.accessories, &hood_name(&a), &size, None);
+                }
                 t.units.push(UnitQuantity {
                     name: u.name.clone(),
                     kind: u.kind.code().into(),
@@ -726,6 +731,9 @@ fn tr(lang: &str, key: &str) -> String {
         "silencer" => "Silencieux",
         "flexConnector" => "Manchette souple",
         "hood" => "Sortie couverte",
+        "Hood with bird mesh" => "Capot avec grillage anti-volatiles",
+        "Gooseneck" => "Col de cygne",
+        "Roof cap" => "Chapeau de toiture",
         "supply" => "Soufflage",
         "extract" => "Reprise",
         "fresh" => "Air neuf",
@@ -1228,6 +1236,15 @@ impl Takeoff {
             ]);
         }
         out
+    }
+}
+
+/// The name an accessory is counted under: its kind's, or for a hood of another model than the standard one, the model's.
+fn hood_name(a: &super::AccessoryParams) -> String {
+    if a.kind == super::AccessoryKind::Hood && a.hood_model != super::HoodModel::Standard {
+        a.hood_model.label().to_string()
+    } else {
+        a.kind.name().to_string()
     }
 }
 

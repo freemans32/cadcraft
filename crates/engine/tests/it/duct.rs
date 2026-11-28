@@ -2015,3 +2015,36 @@ fn the_label_of_any_object_moves_by_its_grip_and_stays_where_it_was_put_when_the
         assert!(grip(&s, h).1.dist(before + cadcraft_geom::Vec2::new(1000.0, 0.0)) < 1e-6, "{edit}: the label goes with the object");
     }
 }
+
+#[test]
+fn a_hood_takes_a_model_and_a_unit_can_have_hoods_on_its_fresh_and_exhaust_collars() {
+    let mut s = metric();
+    // A hood of each model, free: each drawn its own way, counted under its model.
+    let mut shapes = Vec::new();
+    for (k, model) in ["standard", "birdMesh", "gooseneck", "roofCap"].iter().enumerate() {
+        let h = s.execute("ductaccessoryadd", &json!({"at": [k as f64 * 3000.0, 10000], "type": "hood", "model": model})).unwrap()["handle"].clone();
+        let d = s.doc().unwrap();
+        let EntityKind::Insert(i) = &d.entity(hd(&h)).unwrap().kind else { panic!() };
+        let kinds: Vec<String> = d.block(&i.block).unwrap().entities.iter().map(|e| format!("{:?}", std::mem::discriminant(&e.kind))).collect();
+        shapes.push(kinds);
+    }
+    for k in 1..4 {
+        assert_ne!(shapes[k], shapes[0], "model {k} is drawn otherwise than the standard hood");
+    }
+    // A double-flux unit with hoods: its block has more pieces, and the take-off counts two hoods.
+    let unit = s.execute("ahuadd", &json!({"at": [0, 0]})).unwrap()["handle"].clone();
+    let pieces = |s: &Session| {
+        let d = s.doc().unwrap();
+        let EntityKind::Insert(i) = &d.entity(hd(&unit)).unwrap().kind else { panic!() };
+        d.block(&i.block).unwrap().entities.len()
+    };
+    let bare = pieces(&s);
+    s.execute("ahuedit", &json!({"handles": [unit], "hoods": "gooseneck"})).unwrap();
+    assert!(pieces(&s) > bare, "the hoods are drawn on the unit");
+    let t = s.execute("hvactakeoff", &json!({})).unwrap();
+    let geese: u64 = t["accessories"].as_array().unwrap().iter().filter(|c| c["name"] == "Gooseneck").map(|c| c["count"].as_u64().unwrap()).sum();
+    assert_eq!(geese, 3, "the free one and the unit's two (fresh and exhaust air)");
+    s.execute("ahuedit", &json!({"handles": [unit], "hoods": "none"})).unwrap();
+    assert_eq!(pieces(&s), bare);
+    assert!(s.execute("ahuedit", &json!({"handles": [unit], "hoods": "chimney"})).is_err());
+}
