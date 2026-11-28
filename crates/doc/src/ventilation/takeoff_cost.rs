@@ -172,6 +172,20 @@ impl Takeoff {
                     None => b.pipes.push(p.clone()),
                 }
             }
+            for q in &l.subnetworks {
+                match b.subnetworks.iter_mut().find(|x| super::same_network(&x.network, &q.network) && x.name.eq_ignore_ascii_case(&q.name)) {
+                    Some(x) => {
+                        x.count += q.count;
+                        x.length_m = round2(x.length_m + q.length_m);
+                        for s in &q.sizes {
+                            if !x.sizes.contains(s) {
+                                x.sizes.push(s.clone());
+                            }
+                        }
+                    }
+                    None => b.subnetworks.push(q.clone()),
+                }
+            }
             for (dst, src) in
                 [(&mut b.fittings, &l.fittings), (&mut b.accessories, &l.accessories), (&mut b.parts, &l.parts), (&mut b.equipment, &l.equipment)]
             {

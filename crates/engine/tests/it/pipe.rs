@@ -342,3 +342,39 @@ fn a_pipe_or_a_refrigerant_link_counts_the_extra_length_it_is_given() {
         assert!((pipe(&s, hp).length_m() - drawn - 2.5).abs() < 1e-9, "{service}: a refused value leaves it");
     }
 }
+
+#[test]
+fn a_named_sub_network_is_listed_with_its_length_and_can_take_a_colour_of_its_own() {
+    let mut s = metric();
+    let r =
+        s.execute("pipeadd", &json!({"points": [[0, 0], [4000, 0], [4000, 3000]], "service": "refrigerantPair", "dn": "1/4", "gas": "3/8"})).unwrap();
+    let runs: Vec<Handle> = r["handles"].as_array().unwrap().iter().map(hd).collect();
+    let other = hd(&s
+        .execute("pipeadd", &json!({"points": [[0, 5000], [2000, 5000]], "service": "refrigerantPair", "dn": "1/4", "gas": "3/8"}))
+        .unwrap()["handles"][0]);
+    s.execute("pipeedit", &json!({"handles": [runs[0].hex(), other.hex()], "network": "VRV"})).unwrap();
+    // The first run named, then given a colour; the second named after takes the colour; the third is not part of it.
+    s.execute("pipeedit", &json!({"handles": [runs[0].hex()], "subnetwork": "UI salon", "extra": 1.5})).unwrap();
+    s.execute("pipeedit", &json!({"handles": [runs[0].hex()], "subnetworkColour": "#FF8000"})).unwrap();
+    s.execute("pipeedit", &json!({"handles": [runs[1].hex()], "subnetwork": "UI salon"})).unwrap();
+    assert_eq!(pipe(&s, runs[1]).subnetwork_colour.as_deref(), Some("#ff8000"), "a run named into it takes its colour");
+    assert_eq!(pipe(&s, other).subnetwork_colour, None);
+    // Drawn in it: its pieces on their layers are of that colour.
+    let d = s.doc().unwrap();
+    let cadcraft_doc::EntityKind::Insert(i) = &d.entity(runs[1]).unwrap().kind else { panic!() };
+    let orange = cadcraft_color::Color::True(cadcraft_color::Rgb(0xff, 0x80, 0x00));
+    assert!(d.block(&i.block).unwrap().entities.iter().any(|e| e.common.color == orange), "drawn in the sub-network's colour");
+    // The take-off lists it with its two runs, its length (the extra counted) and its size.
+    let t = s.execute("hvactakeoff", &json!({})).unwrap();
+    let subs = t["subnetworks"].as_array().unwrap();
+    assert_eq!(subs.len(), 1, "{subs:?}");
+    assert_eq!((subs[0]["name"].as_str(), subs[0]["count"].as_u64()), (Some("UI salon"), Some(2)));
+    assert!((subs[0]["lengthM"].as_f64().unwrap() - 8.5).abs() < 0.011, "{subs:?}");
+    // Back to the network's colour, and a run taken out of it.
+    s.execute("pipeedit", &json!({"handles": [runs[0].hex()], "subnetworkColour": null})).unwrap();
+    assert_eq!(pipe(&s, runs[1]).subnetwork_colour, None);
+    s.execute("pipeedit", &json!({"handles": [runs[1].hex()], "subnetwork": ""})).unwrap();
+    assert!(pipe(&s, runs[1]).subnetwork.is_empty());
+    assert!(s.execute("pipeedit", &json!({"handles": [other.hex()], "subnetworkColour": "#123456"})).is_err(), "no sub-network to colour");
+    assert!(s.execute("pipeedit", &json!({"handles": [other.hex()], "subnetworkColour": "orange"})).is_err());
+}

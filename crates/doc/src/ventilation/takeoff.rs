@@ -89,6 +89,19 @@ pub struct PipeQuantity {
     pub insulation_m3: f64,
 }
 
+/// A sub-network of pipes the user named (a refrigerant link, a branch): its runs' sizes and their length, counted again apart from the network's sizes.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubnetworkQuantity {
+    /// The network it is part of, or empty.
+    pub network: String,
+    pub name: String,
+    /// The sizes of its runs, "DN50" or the tubes of a link, in the order met.
+    pub sizes: Vec<String>,
+    pub count: usize,
+    pub length_m: f64,
+}
+
 /// Something counted: a fitting, an accessory, equipment.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -259,6 +272,9 @@ pub struct Takeoff {
     #[serde(default)]
     pub duct_insulation: Vec<DuctInsulationQuantity>,
     pub pipes: Vec<PipeQuantity>,
+    /// The sub-networks of pipes, each with its length (its runs are also in `pipes`).
+    #[serde(default)]
+    pub subnetworks: Vec<SubnetworkQuantity>,
     pub fittings: Vec<CountQuantity>,
     pub accessories: Vec<CountQuantity>,
     /// The parts of the pipework (valves, pumps, vessels, refrigerant branches and boxes), by model and size.
@@ -456,6 +472,7 @@ impl crate::Drawing {
         t.units.sort_by(|a, b| a.name.cmp(&b.name));
         t.risers.sort_by(|a, b| a.name.cmp(&b.name));
         t.pipes = self.pipe_quantities();
+        t.subnetworks = self.subnetwork_quantities();
         // Totals, and lengths to the centimetre.
         for d in &mut t.ducts {
             d.length_m = (d.length_m * 100.0).round() / 100.0;
@@ -713,6 +730,26 @@ fn tr(lang: &str, key: &str) -> String {
 }
 
 impl Takeoff {
+    /// The sheet of the sub-networks of pipes, when there are some.
+    fn subnetwork_sheet(&self, wb: &mut Workbook, lang: &str) -> Result<()> {
+        use SheetCell as C;
+        if self.subnetworks.is_empty() {
+            return Ok(());
+        }
+        let t = |k: &str| tr(lang, k);
+        let mut rows = vec![["Network", "Sub-network", "Sizes", "Count", "Length (m)"].iter().map(|c| C::head(t(c))).collect::<Vec<_>>()];
+        for q in &self.subnetworks {
+            rows.push(vec![
+                C::text(q.network.clone()),
+                C::text(q.name.clone()),
+                C::text(q.sizes.join(" + ")),
+                C::Num(q.count as f64),
+                C::Num((q.length_m * 100.0).round() / 100.0),
+            ]);
+        }
+        wb.sheet(&t("Sub-networks"), rows)
+    }
+
     /// The quantities as an Excel workbook (.xlsx): a summary, one sheet each for the ducts, the
     /// fittings and accessories, the terminals, the units and equipment, the spaces (summary and
     /// detail) and, when `note` is given, the calculation note. Labels in `lang` ("fr", else English).
@@ -817,6 +854,7 @@ impl Takeoff {
             num(self.totals.pipe_insulation_m2),
         ]);
         wb.sheet(&t("Pipes"), rows)?;
+        self.subnetwork_sheet(&mut wb, lang)?;
         // Fittings and accessories.
         let mut rows = Vec::new();
         for (title, list) in [("Fittings", &self.fittings), ("Accessories", &self.accessories), ("Pipework parts", &self.parts)] {
@@ -1082,6 +1120,14 @@ impl Takeoff {
             self.totals.pipe_count.to_string(),
             num(self.totals.pipe_length_m),
         ]);
+        if !self.subnetworks.is_empty() {
+            row(&[]);
+            row(&["Sub-networks".into()]);
+            row(&["Network".into(), "Sub-network".into(), "Sizes".into(), "Count".into(), "Length (m)".into()]);
+            for q in &self.subnetworks {
+                row(&[q.network.clone(), q.name.clone(), q.sizes.join(" + "), q.count.to_string(), num(q.length_m)]);
+            }
+        }
         for (title, list) in
             [("Fittings", &self.fittings), ("Accessories", &self.accessories), ("Pipework parts", &self.parts), ("Equipment", &self.equipment)]
         {
@@ -1178,6 +1224,37 @@ impl Takeoff {
 }
 
 impl crate::Drawing {
+    /// The named sub-networks of the pipes of model space, by network and name, lengths to the centimetre.
+    fn subnetwork_quantities(&self) -> Vec<SubnetworkQuantity> {
+        let mut out: Vec<SubnetworkQuantity> = Vec::new();
+        for e in self.model.iter() {
+            let Some((p, ..)) = self.pipe_ends(e.handle) else { continue };
+            let name = p.subnetwork.trim();
+            if name.is_empty() {
+                continue;
+            }
+            let q = match out.iter().position(|q| super::same_network(&q.network, &p.network) && q.name.eq_ignore_ascii_case(name)) {
+                Some(i) => &mut out[i],
+                None => {
+                    out.push(SubnetworkQuantity { network: p.network.trim().to_string(), name: name.to_string(), ..Default::default() });
+                    let last = out.len() - 1;
+                    &mut out[last]
+                }
+            };
+            q.count += 1;
+            q.length_m += p.length_m();
+            let size = p.size_text();
+            if !q.sizes.contains(&size) {
+                q.sizes.push(size);
+            }
+        }
+        for q in &mut out {
+            q.length_m = (q.length_m * 100.0).round() / 100.0;
+        }
+        out.sort_by(|a, b| a.network.cmp(&b.network).then(a.name.cmp(&b.name)));
+        out
+    }
+
     /// The pipes of model space, by network, service and leg, size and insulation, lengths to the centimetre. The lines of the pipe risers
     /// count with them, a length of the riser's height each.
     fn pipe_quantities(&self) -> Vec<PipeQuantity> {

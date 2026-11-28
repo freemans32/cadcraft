@@ -370,6 +370,12 @@ pub struct PipeParams {
     /// The name of the network the run belongs to (see [`super::pipe_networks`]): its layers, colour and line type, and its text.
     #[serde(default)]
     pub network: String,
+    /// The part of the network the run belongs to, named by the user ("Link UE1 - UI salon"): listed with its length in the take-off.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub subnetwork: String,
+    /// The colour of the sub-network ("#rrggbb"), when it has its own; else the run takes its network's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subnetwork_colour: Option<String>,
     /// The elbow where the run joins the pipe before it, drawn as soon as the pipes are laid: arcs across the run, the two pipes giving up what it takes.
     #[serde(default)]
     pub elbow: Option<super::DuctElbow>,
@@ -424,6 +430,8 @@ impl PipeParams {
             label_height_mm: default_label_mm(),
             hide_label: false,
             extra_m: 0.0,
+            subnetwork: String::new(),
+            subnetwork_colour: None,
             colours: ColourConvention::Plan,
             units,
         }
@@ -467,6 +475,12 @@ impl PipeParams {
             return Err(invalid("What an elbow takes of a pipe is 0 to its length."));
         }
         self.units.validate()?;
+        if self.subnetwork.chars().count() > 80 {
+            return Err(invalid("The name of a sub-network is at most 80 characters."));
+        }
+        if self.subnetwork_colour.as_deref().is_some_and(|c| super::parse_hex_colour(c).is_none()) {
+            return Err(invalid("The colour of a sub-network is written #rrggbb."));
+        }
         if !(self.extra_m.is_finite() && (0.0..=1000.0).contains(&self.extra_m)) {
             return Err(invalid("The extra length of a pipe is 0 to 1000 m."));
         }
@@ -622,7 +636,12 @@ impl PipeParams {
     pub fn generate(&self, flip_label: bool) -> Result<Vec<HvacPiece>> {
         self.validate()?;
         let r = self.units.to_units(self.plan_width_mm()) / 2.0;
-        let layer = self.layer();
+        // A sub-network with its own colour: the run's pieces (and its tubes) take it, on their layers.
+        let coloured = |l: &'static str| match self.subnetwork_colour.as_deref() {
+            Some(c) => intern(format!("{l}|ByLayer|{c}")).unwrap_or(l),
+            None => l,
+        };
+        let layer = coloured(self.layer());
         let line = |layer: &'static str, a: Vec2, b: Vec2| HvacPiece { layer, kind: EntityKind::Line(Line { a: v3(a), b: v3(b) }) };
         let tubes = self.tubes();
         let (x0, x1) = self.straight_range();
@@ -651,6 +670,7 @@ impl PipeParams {
             let (trim0, trim1) = (self.units.to_units(self.trim_start_mm), self.units.to_units(self.trim_end_mm));
             let k = cone.map_or(1.0, |(r0, ..)| if r > 0.0 { r0 / r } else { 1.0 });
             for (tube_layer, width) in &tubes {
+                let tube_layer = coloured(tube_layer);
                 let w = self.units.to_units(*width);
                 for edge in [y, y + w] {
                     v.push(line(tube_layer, Vec2::new(x0, edge), Vec2::new(x1, edge)));
@@ -668,7 +688,7 @@ impl PipeParams {
         };
         if let Some(colour) = band_colour(self.service, self.colours) {
             // The line along the axis is on the pipe's layer, drawn in the colour of the identification band.
-            let band = intern(format!("{layer}|ByLayer|{colour}")).unwrap_or(layer);
+            let band = intern(format!("{}|ByLayer|{colour}", self.layer())).unwrap_or(layer);
             pieces.push(line(band, Vec2::new(x0, 0.0), Vec2::new(x1, 0.0)));
         }
         if let Some(forward) = self.flow_forward {

@@ -317,6 +317,14 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open_flag: &mut bool) {
                 })
                 .collect();
             table(ui, "pipes", "Pipes", &["Network", "Service", "Leg", "Size", "Insulation (mm)", "Count", "Length (m)", "Insulation (m²)"], pipes);
+            if !t.subnetworks.is_empty() {
+                let subs: Vec<Vec<String>> = t
+                    .subnetworks
+                    .iter()
+                    .map(|q| vec![q.network.clone(), q.name.clone(), q.sizes.join(" + "), q.count.to_string(), num(q.length_m)])
+                    .collect();
+                table(ui, "subnetworks", "Sub-networks", &["Network", "Sub-network", "Sizes", "Count", "Length (m)"], subs);
+            }
             let mut ducts: Vec<Vec<String>> = t
                 .ducts
                 .iter()

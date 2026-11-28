@@ -2,7 +2,7 @@
 //! condensate drain, refrigerant liquid or gas) one segment at a time, PIPEEDIT changes runs already
 //! drawn. The network the runs make is read from the drawing when it is sized, never stored.
 
-use cadcraft_doc::{Drawing, EntityKind, Handle, HvacUnits, PipeLeg, PipeParams, PipeService};
+use cadcraft_doc::{Drawing, EntityKind, Handle, HvacUnits, PipeLeg, PipeParams, PipeService, same_network};
 use cadcraft_geom::Vec2;
 use serde_json::{Value, json};
 
@@ -41,7 +41,7 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         CommandSpec::new("pipeedit", "Edit Pipe", run_pipeedit).params(
             "{handle | handles, service?, leg?, dn? (mm, inches for a refrigerant tube, or auto: sizing chooses the size), gas? (mm or inches: the gas tube of a link), hpGas? (the high/low-pressure gas tube of a heat-recovery link), insulation? (mm), altitude? (m or null), load? (kW, l/h for a condensate drain, or null), \
-             source? (true or false), network? (a name: it is the name of the whole network of each pipe), slope? (% of a drain, or null), label? (false: the label is not drawn), extra? (m: the run is longer than drawn by this, rises and drops, 0 to 1000)} → {changed}",
+             source? (true or false), network? (a name: it is the name of the whole network of each pipe), slope? (% of a drain, or null), label? (false: the label is not drawn), extra? (m: the run is longer than drawn by this, rises and drops, 0 to 1000), subnetwork? (a name for the runs given, \"\" to take them out: listed with its length in the take-off), subnetworkColour? (#rrggbb for every run of the sub-network, or null: the network's colour)} → {changed}",
         ),
     ]
 }
@@ -241,6 +241,18 @@ fn run_pipeedit(s: &mut Session, p: &Value) -> Result<Value> {
     let hs = super::arch::handles_param(CMD, p)?;
     let label = super::elec::label_param(CMD, p)?;
     let extra = number(CMD, p, "extra", 0.0)?;
+    // The sub-network the runs are named into ("" takes them out of one), and its colour ("#rrggbb"; null: the network's).
+    let subnetwork = match p.get("subnetwork") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(t)) => Some(t.trim().to_string()),
+        Some(_) => return Err(bad(CMD, "`subnetwork` must be text")),
+    };
+    let sub_colour: Option<Option<String>> = match p.get("subnetworkColour") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(Value::String(t)) if cadcraft_doc::parse_hex_colour(t.trim()).is_some() => Some(Some(t.trim().to_ascii_lowercase())),
+        Some(_) => return Err(bad(CMD, "`subnetworkColour` must be a colour written #rrggbb, or null")),
+    };
     if hs.is_empty() || hs.len() > MAX_EDITED {
         return Err(bad(CMD, format!("select 1 to {MAX_EDITED} pipes")));
     }
@@ -316,8 +328,39 @@ fn run_pipeedit(s: &mut Session, p: &Value) -> Result<Value> {
             pp.hide_label = !show;
         }
         pp.extra_m = extra.unwrap_or(pp.extra_m);
+        if let Some(n) = &subnetwork {
+            // A run named into a sub-network that has a colour takes it.
+            pp.subnetwork_colour = if n.is_empty() { None } else { subnetwork_colour(d, &pp.network, n).or(pp.subnetwork_colour.take()) };
+            pp.subnetwork.clone_from(n);
+        }
         pp.validate().map_err(doc_err)?;
         next.push((*h, pp));
+    }
+    // A colour given to a sub-network goes to all of its runs, selected or not.
+    if let Some(c) = &sub_colour {
+        let named: Vec<(String, String)> =
+            next.iter().filter(|(_, pp)| !pp.subnetwork.is_empty()).map(|(_, pp)| (pp.network.clone(), pp.subnetwork.clone())).collect();
+        if named.is_empty() {
+            return Err(bad(CMD, "name a sub-network before giving it a colour"));
+        }
+        for (_, pp) in &mut next {
+            if !pp.subnetwork.is_empty() {
+                pp.subnetwork_colour.clone_from(c);
+            }
+        }
+        let d = s.doc()?;
+        let others: Vec<(Handle, PipeParams)> = d
+            .model
+            .iter()
+            .filter(|e| !hs.contains(&e.handle))
+            .filter_map(|e| d.pipe_ends(e.handle).map(|(pp, ..)| (e.handle, pp)))
+            .filter(|(_, pp)| named.iter().any(|(n, sn)| same_network(n, &pp.network) && sn.eq_ignore_ascii_case(&pp.subnetwork)))
+            .map(|(h, mut pp)| {
+                pp.subnetwork_colour.clone_from(c);
+                (h, pp)
+            })
+            .collect();
+        next.extend(others);
     }
     let d = s.doc_mut()?;
     for (h, pp) in &next {
@@ -329,6 +372,15 @@ fn run_pipeedit(s: &mut Session, p: &Value) -> Result<Value> {
     }
     super::network::propagate(s);
     Ok(json!({ "changed": next.len() }))
+}
+
+/// The colour the runs of sub-network `name` of `network` already have, when one has its own.
+fn subnetwork_colour(d: &Drawing, network: &str, name: &str) -> Option<String> {
+    d.model
+        .iter()
+        .filter_map(|e| d.pipe_ends(e.handle).map(|(pp, ..)| pp))
+        .find(|pp| same_network(network, &pp.network) && pp.subnetwork.eq_ignore_ascii_case(name) && pp.subnetwork_colour.is_some())
+        .and_then(|pp| pp.subnetwork_colour)
 }
 
 fn run_pipesize(s: &mut Session, p: &Value) -> Result<Value> {

@@ -1059,6 +1059,42 @@ fn pipe_section(
         }
     });
     network_rows(ui, &ids, ps.iter().map(|p| p.network.clone()).collect(), styles, &mut action);
+    // The sub-network the selected runs are named into (a link, a branch), listed with its length in the take-off; empty takes them out.
+    let sub = shared(&ps.iter().map(|p| p.subnetwork.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Sub-network", |ui| {
+        if let Some(n) = edit_field(ui, ui.scope_id().with(("pipe_subnetwork", &ids)), sub.clone()).filter(|n| n != VARIES && n.trim() != sub.trim())
+        {
+            action = edit("subnetwork", json!(n.trim()));
+        }
+    });
+    // Its colour, chosen as a layer's: none, the network's.
+    if !sub.is_empty() && sub != VARIES {
+        let own = shared(&ps.iter().map(|p| p.subnetwork_colour.clone()).collect::<Vec<_>>()).flatten();
+        prop_row(ui, "Sub-network colour", |ui| {
+            let id = ui.scope_id().with(("pipe_subnetwork_colour", &ids));
+            let width = (ui.available_width() - 30.0).max(60.0);
+            let rgb = own.as_deref().and_then(cadcraft_doc::parse_hex_colour).map(|(r, g, b)| cadcraft_color::Rgb(r, g, b));
+            let picked = match rgb {
+                Some(rgb) => crate::layers::color_button(ui, id, cadcraft_color::Color::True(rgb), false, width),
+                None => crate::layers::color_button_resolved(
+                    ui,
+                    id,
+                    cadcraft_color::Color::ByLayer,
+                    cadcraft_color::Rgb(255, 255, 255),
+                    "Network colour",
+                    false,
+                    width,
+                ),
+            };
+            if let Some(c) = picked {
+                let cadcraft_color::Rgb(r, g, b) = c.resolve(cadcraft_color::Color::WHITE, cadcraft_color::Color::WHITE);
+                action = edit("subnetworkColour", json!(format!("#{r:02x}{g:02x}{b:02x}")));
+            }
+            if own.is_some() && ui.small_button("×").on_hover_text(crate::i18n::t("Back to the network colour")).clicked() {
+                action = edit("subnetworkColour", Value::Null);
+            }
+        });
+    }
     let source = shared(&ps.iter().map(|p| p.source).collect::<Vec<_>>());
     prop_row(ui, "Starts at the source", |ui| {
         let mut on = source == Some(true);

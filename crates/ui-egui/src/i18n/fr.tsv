@@ -3917,3 +3917,8 @@ echo	{layers} layer(s) and {pipes} pipe(s) redrawn.	{layers} calque(s) et {pipes
 	Alone	Seul
 	The runs joined to the end stay where they are	Les gaines, tuyaux ou câbles raccordés au bout restent en place
 	Length counted (m)	Longueur comptée (m)
+	Sub-network	Sous-réseau
+	Sub-networks	Sous-réseaux
+	Sub-network colour	Couleur du sous-réseau
+	Back to the network colour	Revenir à la couleur du réseau
+	Sizes	Tailles
