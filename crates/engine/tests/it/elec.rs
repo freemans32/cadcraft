@@ -117,7 +117,7 @@ fn the_cable_and_the_device_are_drawn_from_the_command_line_and_their_grips_work
     }
     let cable = s.doc().unwrap().model.iter().find(|e| cable_of(e).is_some()).unwrap().handle;
     s.set_selection(vec![cable]);
-    assert_eq!(s.grips_of(cable).unwrap().len(), 3);
+    assert_eq!(s.grips_of(cable).unwrap().len(), 4, "its ends, its middle and its label");
     s.start_grip_edit(&[(cable, 2)]).unwrap();
     s.cmdline("5000,0").unwrap();
     let (_, a, b) = s.doc().unwrap().cable_ends(cable).unwrap();

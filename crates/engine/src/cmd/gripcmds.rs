@@ -237,6 +237,8 @@ enum RunKind {
     TitleBlock,
     /// A space (room): its grip 1 moves its label alone.
     Space,
+    /// Another object drawn by CadCraft with a label: its grip 0 moves it, its label grip the label alone.
+    Labelled,
 }
 
 fn run_kind(e: &Entity) -> Option<RunKind> {
@@ -252,12 +254,18 @@ fn run_kind(e: &Entity) -> Option<RunKind> {
         Some(RunKind::TitleBlock)
     } else if cadcraft_doc::space_of(e).is_some() {
         Some(RunKind::Space)
+    } else if cadcraft_doc::ventilation_labelled(e) {
+        Some(RunKind::Labelled)
     } else {
         None
     }
 }
 
 fn stretch_run_grip(d: &mut cadcraft_doc::Drawing, kind: RunKind, h: Handle, index: usize, to: Vec2) -> Result<bool> {
+    // The label grip of an object moves its label alone.
+    if d.entity(h).and_then(|e| d.label_grip_index(e)) == Some(index) {
+        return Ok(d.move_label(h, to)?);
+    }
     Ok(match kind {
         RunKind::Duct => d.stretch_duct_grip(h, index, to)?,
         RunKind::Pipe => d.stretch_pipe_grip(h, index, to)?,
@@ -265,6 +273,7 @@ fn stretch_run_grip(d: &mut cadcraft_doc::Drawing, kind: RunKind, h: Handle, ind
         RunKind::Wall => d.stretch_wall_grip(h, index, to)?,
         RunKind::TitleBlock => d.stretch_titleblock_grip(h, index, to)?,
         RunKind::Space => d.stretch_space_grip(h, index, to)?,
+        RunKind::Labelled => index == 0 && d.move_insert_to(h, to)?,
     })
 }
 
@@ -272,7 +281,7 @@ fn stretch_run_grip(d: &mut cadcraft_doc::Drawing, kind: RunKind, h: Handle, ind
 fn follower_grips(kind: RunKind, grips: &[Vec2]) -> Vec<usize> {
     match kind {
         RunKind::Wall => (0..grips.len().div_ceil(2)).collect(),
-        RunKind::TitleBlock | RunKind::Space => Vec::new(),
+        RunKind::TitleBlock | RunKind::Space | RunKind::Labelled => Vec::new(),
         _ => vec![0, 2],
     }
 }
@@ -295,7 +304,8 @@ fn stretch_runs(s: &mut Session, hot: &[(Handle, usize)], others: &[Handle], del
             }
             let points = match kind {
                 RunKind::Wall => d.wall_grip_points(h, i),
-                RunKind::TitleBlock | RunKind::Space => Vec::new(),
+                RunKind::TitleBlock | RunKind::Space | RunKind::Labelled => Vec::new(),
+                _ if d.label_grip_index(e) == Some(i) => Vec::new(),
                 RunKind::Duct if i >= 3 => Vec::new(),
                 _ if i == 1 => Vec::new(),
                 _ => vec![from],

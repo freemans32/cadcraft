@@ -2537,12 +2537,12 @@ fn the_grip_at_the_end_of_a_reducers_cone_sets_its_length() {
     let mut d = Drawing::new_metric();
     let h = add_duct(&mut d, (0.0, 0.0), (2000.0, 0.0));
     let mut p = duct_of(d.entity(h).unwrap()).unwrap();
-    assert_eq!(d.entity_grips(d.entity(h).unwrap()).len(), 3, "no cone, no grip for it");
+    assert_eq!(d.entity_grips(d.entity(h).unwrap()).len(), 4, "no cone, no grip for it (the run's three, then its label's)");
     p.reducer = Some(DuctReducer { from_mm: 400.0, at_end: false, across_mm: 0.0 });
     d.regenerate_duct(h, &p).unwrap();
     let grips = |d: &Drawing| d.entity_grips(d.entity(h).unwrap());
     let before = grips(&d);
-    assert_eq!(before.len(), 8, "the run's three, the cone's length and its four corners");
+    assert_eq!(before.len(), 9, "the run's three, the cone's length and its four corners, then the label's");
     assert!(d.stretch_duct_grip(h, 3, Vec2::new(900.0, 50.0)).unwrap());
     let after = grips(&d);
     assert!(

@@ -42,7 +42,9 @@ impl Drawing {
             .flat_map(|s| s.iter())
             .filter_map(|e| match (&e.kind, super::duct_of(e)) {
                 // A run whose label is left off takes no room and is not moved.
-                (EntityKind::Insert(i), Some(p)) if !p.hide_label => Some((e.handle, p, Vec2::new(i.insert.x, i.insert.y), i.rotation, i.scale.x)),
+                (EntityKind::Insert(i), Some(p)) if !p.hide_label && !crate::Drawing::label_was_moved(e) => {
+                    Some((e.handle, p, Vec2::new(i.insert.x, i.insert.y), i.rotation, i.scale.x))
+                }
                 _ => None,
             })
             .take(MAX_DUCTS + 1)

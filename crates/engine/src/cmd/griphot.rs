@@ -80,9 +80,10 @@ fn shown(s: &Session, h: Handle) -> bool {
 }
 
 impl GripEdit {
-    /// Whether the one hot grip is the label grip of a space (its grip 1).
+    /// Whether the one hot grip is the grip of a label: a space's (its grip 1), or any other object's label grip.
     fn moves_a_space_label(&self, s: &Session) -> bool {
-        matches!(self.hot.as_slice(), [(h, 1)] if s.doc().is_ok_and(|d| d.entity(*h).is_some_and(|e| cadcraft_doc::space_of(e).is_some())))
+        let [(h, i)] = self.hot.as_slice() else { return false };
+        s.doc().is_ok_and(|d| d.entity(*h).is_some_and(|e| (*i == 1 && cadcraft_doc::space_of(e).is_some()) || d.label_grip_index(e) == Some(*i)))
     }
 
     /// Whether a hot grip is an end of a duct, a pipe or a cable (its grip 0 or 2).

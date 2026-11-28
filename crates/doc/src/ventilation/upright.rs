@@ -54,6 +54,7 @@ impl Drawing {
             b.entities.push(e);
         }
         self.blocks.insert(name.clone(), std::sync::Arc::new(b));
+        let name_kept = name.clone();
         if self
             .modify_entity(h, |e| {
                 if let EntityKind::Insert(i) = &mut e.kind {
@@ -65,12 +66,13 @@ impl Drawing {
             return false;
         }
         self.drop_unreferenced_hvac_block(&old);
+        self.label_block_renamed(h, &old, &name_kept);
         true
     }
 }
 
 /// An object drawn by CadCraft: a reference to an anonymous block that carries CadCraft's data.
-fn is_ours(e: &crate::Entity) -> bool {
+pub(super) fn is_ours(e: &crate::Entity) -> bool {
     matches!(&e.kind, EntityKind::Insert(i) if i.block.starts_with("*U"))
         && e.common.xdata.iter().any(|t| t.code == 1001 && t.value.trim().to_ascii_uppercase().starts_with("CADCRAFT_"))
 }

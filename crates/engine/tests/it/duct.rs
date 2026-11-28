@@ -1082,9 +1082,9 @@ fn duct_grips_stretch_an_end_move_the_run_and_drag_the_runs_that_meet_there() {
     let hs: Vec<Handle> = r["handles"].as_array().unwrap().iter().map(hd).collect();
     let ends = |s: &Session, h: Handle| s.doc().unwrap().duct_ends(h).map(|(p, a, b)| (p.length, a, b)).unwrap();
     let grips = s.grips_of(hs[0]).unwrap_or_default();
-    assert_eq!(grips.len(), 3, "grips_of gives the duct's two ends and its middle, as the drawing does");
+    assert_eq!(grips.len(), 4, "grips_of gives the duct's two ends, its middle and its label, as the drawing does");
     let d = s.doc().unwrap();
-    assert_eq!(d.entity_grips(d.entity(hs[0]).unwrap()).len(), 3);
+    assert_eq!(d.entity_grips(d.entity(hs[0]).unwrap()).len(), 4);
     // Select both runs, drag the shared corner: both follow.
     s.set_selection(hs.clone());
     s.grip_edit(hs[0], 2, cadcraft_geom::Vec2::new(5000.0, 500.0), cadcraft_engine::grips::GripMode::Stretch).unwrap();
@@ -1722,7 +1722,7 @@ fn a_reducers_cone_has_a_grip_at_each_corner_and_takes_any_shape_until_told_to_g
         d.entity_grips(d.entity(hd(&last)).unwrap())
     };
     let before = grips(&s);
-    assert_eq!(before.len(), 8, "three for the run, one for the cone's length, one at each corner of the cone");
+    assert_eq!(before.len(), 9, "three for the run, one for the cone's length, one at each corner of the cone, then the label's");
     // The corners are across the run from each other (near the junction: the round duct's width; at the far end: the run's).
     assert!(before[4].y > before[5].y && before[6].y > before[7].y && (before[6].y - before[7].y) > (before[4].y - before[5].y));
     // The far corner above goes on along the run: the cone gets longer on that side only.
@@ -1742,7 +1742,7 @@ fn a_reducers_cone_has_a_grip_at_each_corner_and_takes_any_shape_until_told_to_g
     // It goes back to the symmetric cone when asked.
     s.execute("ductedit", &json!({"handles": [last.clone()], "coneAuto": true})).unwrap();
     assert!(params(&s).reducer_shape.is_none() && params(&s).reducer.is_some());
-    assert_eq!(grips(&s).len(), 8);
+    assert_eq!(grips(&s).len(), 9);
 }
 
 #[test]
@@ -1987,4 +1987,31 @@ fn ducts_and_cables_have_sub_networks_with_their_length_and_a_duct_an_extra_leng
     let subs = e["subnetworks"].as_array().unwrap();
     assert_eq!((subs.len(), subs[0]["name"].as_str(), subs[0]["kind"].as_str()), (1, Some("Prises bureau"), Some("cable")), "{subs:?}");
     assert!(s.execute("elecedit", &json!({"handles": [c], "subnetworkColour": "red"})).is_err());
+}
+
+#[test]
+fn the_label_of_any_object_moves_by_its_grip_and_stays_where_it_was_put_when_the_object_changes() {
+    let mut s = metric();
+    let unit = s.execute("ahuadd", &json!({"at": [0, 0], "rotation": 30})).unwrap()["handle"].clone();
+    let duct = s.execute("ductadd", &json!({"points": [[0, 5000], [4000, 5000]], "diameter": 315})).unwrap()["handles"][0].clone();
+    let grip = |s: &Session, h: &Value| {
+        let d = s.doc().unwrap();
+        let e = d.entity(hd(h)).unwrap();
+        (d.label_grip_index(e).unwrap(), d.label_grip(e).unwrap())
+    };
+    for (h, edit, change) in [(&unit, "ahuedit", json!({"name": "CTA bureaux"})), (&duct, "ductedit", json!({"diameter": 400}))] {
+        let (i, at) = grip(&s, h);
+        let to = at + cadcraft_geom::Vec2::new(300.0, 700.0);
+        s.execute("grip.stretch", &json!({"handle": h, "index": i, "to": [to.x, to.y]})).unwrap();
+        assert!(grip(&s, h).1.dist(to) < 1.0, "{edit}: the label is where it was put");
+        // Changed and drawn again: the label stays moved (its text may be longer, its middle about the same).
+        let mut change = change;
+        change["handle"] = h.clone();
+        s.execute(edit, &change).unwrap();
+        assert!(grip(&s, h).1.dist(to) < 400.0, "{edit}: still moved after the change: {:?} against {to:?}", grip(&s, h).1);
+        // The object moved: the label goes with it.
+        let before = grip(&s, h).1;
+        s.execute("move", &json!({"handles": [h], "delta": [1000, 0]})).unwrap();
+        assert!(grip(&s, h).1.dist(before + cadcraft_geom::Vec2::new(1000.0, 0.0)) < 1e-6, "{edit}: the label goes with the object");
+    }
 }

@@ -128,6 +128,10 @@ pub(crate) fn after_command(s: &mut Session, before: Option<&std::sync::Arc<Draw
         std::sync::Arc::make_mut(&mut st.doc).refresh_control_schemas();
     }
     // Every label of an object added, changed or turned reads left to right or from the bottom up, never upside down.
+    // The labels moved by their grip are moved again on the objects drawn again.
+    if st.doc.labels_to_move_since(b, &space) {
+        std::sync::Arc::make_mut(&mut st.doc).keep_moved_labels_since(b, &space);
+    }
     let upside_down = st.doc.upside_down_labels_since(b, &space);
     if !upside_down.is_empty() {
         let d = std::sync::Arc::make_mut(&mut st.doc);

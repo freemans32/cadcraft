@@ -1881,6 +1881,19 @@ impl crate::Drawing {
     /// The grips of an object: those of a duct or pipe run are its two ends and its middle (0 and 2 stretch
     /// an end, 1 moves the run); any other object has its own shape's grips.
     pub fn entity_grips(&self, e: &crate::Entity) -> Vec<Vec2> {
+        let mut grips = self.shape_grips(e);
+        // The label of an object drawn by CadCraft has a grip of its own, after the others.
+        grips.extend(self.label_grip(e));
+        grips
+    }
+
+    /// The index of the label grip of `e` among [`Self::entity_grips`], when it has one.
+    pub fn label_grip_index(&self, e: &crate::Entity) -> Option<usize> {
+        self.label_grip(e).map(|_| self.shape_grips(e).len())
+    }
+
+    /// The grips of an object without its label's.
+    fn shape_grips(&self, e: &crate::Entity) -> Vec<Vec2> {
         if let EntityKind::Insert(i) = &e.kind
             && let Some(p) = duct_of(e)
         {

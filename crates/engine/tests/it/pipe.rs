@@ -252,7 +252,7 @@ fn the_three_grips_of_a_pipe_and_a_duct_work_one_by_one_and_hot() {
     let next = hd(&s.execute("pipeadd", &json!({"points": [[4000, 0], [4000, 3000]], "service": "chilledWater", "dn": 25})).unwrap()["handles"][0]);
     let duct = hd(&s.execute("ductadd", &json!({"points": [[0, 2000], [3000, 2000]], "diameter": 200})).unwrap()["handles"][0]);
     for h in [pipe, duct] {
-        assert_eq!(s.grips_of(h).unwrap().len(), 3, "the ends and the middle");
+        assert_eq!(s.grips_of(h).unwrap().len(), 4, "the ends, the middle and the label");
     }
     // Hot grip on the end of the first pipe, the second pipe selected with it: it follows its end.
     s.set_selection(vec![pipe, next]);
@@ -273,7 +273,8 @@ fn the_three_grips_of_a_pipe_and_a_duct_work_one_by_one_and_hot() {
     // The single-grip command takes the same indices, and refuses one that does not exist.
     s.execute("grip.stretch", &json!({"handle": duct.hex(), "index": 2, "to": [3500, 2000]})).unwrap();
     assert_eq!(run_ends(&s, duct).1, (3500.0, 2000.0));
-    assert!(s.execute("grip.stretch", &json!({"handle": duct.hex(), "index": 3, "to": [0, 0]})).is_err());
+    // (grip 3 of a duct without a cone is its label's.)
+    assert!(s.execute("grip.stretch", &json!({"handle": duct.hex(), "index": 4, "to": [0, 0]})).is_err());
 }
 
 #[test]
