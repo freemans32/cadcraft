@@ -220,6 +220,12 @@ pub struct CableParams {
     /// is not sized.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub written: Option<String>,
+    /// The part of the network the run belongs to, named by the user: listed with its length in the take-off.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub subnetwork: String,
+    /// The colour of the sub-network ("#rrggbb"), when it has its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subnetwork_colour: Option<String>,
     #[serde(default)]
     pub units: HvacUnits,
 }
@@ -247,11 +253,14 @@ impl CableParams {
             hide_label: false,
             label_below: false,
             written: None,
+            subnetwork: String::new(),
+            subnetwork_colour: None,
             units,
         }
     }
 
     pub fn validate(&self) -> Result<()> {
+        super::check_subnetwork(&self.subnetwork, self.subnetwork_colour.as_deref())?;
         if !(self.length.is_finite() && self.length > 0.0 && self.length <= 1e9) {
             return Err(invalid("A cable has a usable length."));
         }
@@ -328,7 +337,7 @@ impl CableParams {
     /// put on) and its colour.
     pub fn generate(&self, flip_label: bool) -> Result<Vec<HvacPiece>> {
         self.validate()?;
-        let layer = "0";
+        let layer = super::subnetwork_layer("0", self.subnetwork_colour.as_deref());
         let mut pieces = vec![HvacPiece { layer, kind: line((0.0, 0.0), (self.length, 0.0)) }];
         let text = self.label_text();
         if !text.is_empty() && !self.hide_label {

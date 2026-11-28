@@ -93,7 +93,10 @@ pub struct PipeQuantity {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubnetworkQuantity {
-    /// The network it is part of, or empty.
+    /// What its runs are: "pipe", "duct" or "cable".
+    #[serde(default)]
+    pub kind: String,
+    /// The network it is part of (a duct's air, a cable's circuit), or empty.
     pub network: String,
     pub name: String,
     /// The sizes of its runs, "DN50" or the tubes of a link, in the order met.
@@ -623,6 +626,10 @@ fn tr(lang: &str, key: &str) -> String {
         "Pipework part" => "Pièce de tuyauterie",
         "Ducts" => "Gaines",
         "Pipes" => "Tuyauteries",
+        "Cables" => "Câbles",
+        "Sub-networks" => "Sous-réseaux",
+        "Sub-network" => "Sous-réseau",
+        "Sizes" => "Tailles",
         "Network" => "Réseau",
         "Pipe count" => "Nombre de tuyaux",
         "Pipe length (m)" => "Longueur de tuyauterie (m)",
@@ -737,9 +744,10 @@ impl Takeoff {
             return Ok(());
         }
         let t = |k: &str| tr(lang, k);
-        let mut rows = vec![["Network", "Sub-network", "Sizes", "Count", "Length (m)"].iter().map(|c| C::head(t(c))).collect::<Vec<_>>()];
+        let mut rows = vec![["Kind", "Network", "Sub-network", "Sizes", "Count", "Length (m)"].iter().map(|c| C::head(t(c))).collect::<Vec<_>>()];
         for q in &self.subnetworks {
             rows.push(vec![
+                C::text(t(subnetwork_kind(&q.kind))),
                 C::text(q.network.clone()),
                 C::text(q.name.clone()),
                 C::text(q.sizes.join(" + ")),
@@ -1123,9 +1131,9 @@ impl Takeoff {
         if !self.subnetworks.is_empty() {
             row(&[]);
             row(&["Sub-networks".into()]);
-            row(&["Network".into(), "Sub-network".into(), "Sizes".into(), "Count".into(), "Length (m)".into()]);
+            row(&["Kind".into(), "Network".into(), "Sub-network".into(), "Sizes".into(), "Count".into(), "Length (m)".into()]);
             for q in &self.subnetworks {
-                row(&[q.network.clone(), q.name.clone(), q.sizes.join(" + "), q.count.to_string(), num(q.length_m)]);
+                row(&[subnetwork_kind(&q.kind).into(), q.network.clone(), q.name.clone(), q.sizes.join(" + "), q.count.to_string(), num(q.length_m)]);
             }
         }
         for (title, list) in
@@ -1223,36 +1231,57 @@ impl Takeoff {
     }
 }
 
+/// The English name of a kind of sub-network, as tables write it.
+pub fn subnetwork_kind(kind: &str) -> &'static str {
+    match kind {
+        "duct" => "Ducts",
+        "cable" => "Cables",
+        _ => "Pipes",
+    }
+}
+
+/// Counts a run of `kind` of `network`, of `size` and `length_m`, in its sub-network `name` (nothing for a run in none).
+pub(super) fn add_subnetwork(out: &mut Vec<SubnetworkQuantity>, kind: &str, network: &str, name: &str, size: String, length_m: f64) {
+    let name = name.trim();
+    if name.is_empty() {
+        return;
+    }
+    let i = match out.iter().position(|q| q.kind == kind && super::same_network(&q.network, network) && q.name.eq_ignore_ascii_case(name)) {
+        Some(i) => i,
+        None => {
+            out.push(SubnetworkQuantity { kind: kind.into(), network: network.trim().to_string(), name: name.to_string(), ..Default::default() });
+            out.len() - 1
+        }
+    };
+    let q = &mut out[i];
+    q.count += 1;
+    q.length_m += length_m;
+    if !q.sizes.contains(&size) {
+        q.sizes.push(size);
+    }
+}
+
+/// The sub-networks by kind, network and name, lengths to the centimetre.
+pub(super) fn sorted_subnetworks(mut out: Vec<SubnetworkQuantity>) -> Vec<SubnetworkQuantity> {
+    for q in &mut out {
+        q.length_m = (q.length_m * 100.0).round() / 100.0;
+    }
+    out.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.network.cmp(&b.network)).then(a.name.cmp(&b.name)));
+    out
+}
+
 impl crate::Drawing {
     /// The named sub-networks of the pipes of model space, by network and name, lengths to the centimetre.
     fn subnetwork_quantities(&self) -> Vec<SubnetworkQuantity> {
         let mut out: Vec<SubnetworkQuantity> = Vec::new();
         for e in self.model.iter() {
-            let Some((p, ..)) = self.pipe_ends(e.handle) else { continue };
-            let name = p.subnetwork.trim();
-            if name.is_empty() {
-                continue;
-            }
-            let q = match out.iter().position(|q| super::same_network(&q.network, &p.network) && q.name.eq_ignore_ascii_case(name)) {
-                Some(i) => &mut out[i],
-                None => {
-                    out.push(SubnetworkQuantity { network: p.network.trim().to_string(), name: name.to_string(), ..Default::default() });
-                    let last = out.len() - 1;
-                    &mut out[last]
-                }
-            };
-            q.count += 1;
-            q.length_m += p.length_m();
-            let size = p.size_text();
-            if !q.sizes.contains(&size) {
-                q.sizes.push(size);
+            if let Some((p, ..)) = self.pipe_ends(e.handle) {
+                add_subnetwork(&mut out, "pipe", &p.network, &p.subnetwork, p.size_text(), p.length_m());
+            } else if let Some(p) = super::duct_of(e) {
+                add_subnetwork(&mut out, "duct", p.air.name(), &p.subnetwork, p.size_label(), p.length_m());
             }
         }
-        for q in &mut out {
-            q.length_m = (q.length_m * 100.0).round() / 100.0;
-        }
-        out.sort_by(|a, b| a.network.cmp(&b.network).then(a.name.cmp(&b.name)));
-        out
+        sorted_subnetworks(out)
     }
 
     /// The pipes of model space, by network, service and leg, size and insulation, lengths to the centimetre. The lines of the pipe risers

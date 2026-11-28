@@ -321,9 +321,12 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open_flag: &mut bool) {
                 let subs: Vec<Vec<String>> = t
                     .subnetworks
                     .iter()
-                    .map(|q| vec![q.network.clone(), q.name.clone(), q.sizes.join(" + "), q.count.to_string(), num(q.length_m)])
+                    .map(|q| {
+                        let kind = crate::i18n::t(cadcraft_doc::subnetwork_kind(&q.kind)).to_string();
+                        vec![kind, q.network.clone(), q.name.clone(), q.sizes.join(" + "), q.count.to_string(), num(q.length_m)]
+                    })
                     .collect();
-                table(ui, "subnetworks", "Sub-networks", &["Network", "Sub-network", "Sizes", "Count", "Length (m)"], subs);
+                table(ui, "subnetworks", "Sub-networks", &["Kind", "Network", "Sub-network", "Sizes", "Count", "Length (m)"], subs);
             }
             let mut ducts: Vec<Vec<String>> = t
                 .ducts

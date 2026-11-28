@@ -241,18 +241,8 @@ fn run_pipeedit(s: &mut Session, p: &Value) -> Result<Value> {
     let hs = super::arch::handles_param(CMD, p)?;
     let label = super::elec::label_param(CMD, p)?;
     let extra = number(CMD, p, "extra", 0.0)?;
-    // The sub-network the runs are named into ("" takes them out of one), and its colour ("#rrggbb"; null: the network's).
-    let subnetwork = match p.get("subnetwork") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(t)) => Some(t.trim().to_string()),
-        Some(_) => return Err(bad(CMD, "`subnetwork` must be text")),
-    };
-    let sub_colour: Option<Option<String>> = match p.get("subnetworkColour") {
-        None => None,
-        Some(Value::Null) => Some(None),
-        Some(Value::String(t)) if cadcraft_doc::parse_hex_colour(t.trim()).is_some() => Some(Some(t.trim().to_ascii_lowercase())),
-        Some(_) => return Err(bad(CMD, "`subnetworkColour` must be a colour written #rrggbb, or null")),
-    };
+    let sub = super::subnet::SubnetEdit::read(CMD, p)?;
+    let sub_colour = sub.colour.clone();
     if hs.is_empty() || hs.len() > MAX_EDITED {
         return Err(bad(CMD, format!("select 1 to {MAX_EDITED} pipes")));
     }
@@ -328,11 +318,8 @@ fn run_pipeedit(s: &mut Session, p: &Value) -> Result<Value> {
             pp.hide_label = !show;
         }
         pp.extra_m = extra.unwrap_or(pp.extra_m);
-        if let Some(n) = &subnetwork {
-            // A run named into a sub-network that has a colour takes it.
-            pp.subnetwork_colour = if n.is_empty() { None } else { subnetwork_colour(d, &pp.network, n).or(pp.subnetwork_colour.take()) };
-            pp.subnetwork.clone_from(n);
-        }
+        let network = pp.network.clone();
+        sub.name_run(&mut pp.subnetwork, &mut pp.subnetwork_colour, |n| subnetwork_colour(d, &network, n));
         pp.validate().map_err(doc_err)?;
         next.push((*h, pp));
     }

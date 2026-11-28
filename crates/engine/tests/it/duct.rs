@@ -1960,3 +1960,31 @@ fn the_label_of_a_duct_or_a_pipe_can_be_left_off_and_shown_again() {
         assert!(s.execute(edit, &json!({"handles": [h], "label": "no"})).is_err());
     }
 }
+
+#[test]
+fn ducts_and_cables_have_sub_networks_with_their_length_and_a_duct_an_extra_length() {
+    let mut s = metric();
+    let r = s.execute("ductadd", &json!({"points": [[0, 0], [4000, 0], [4000, 3000]], "diameter": 315})).unwrap();
+    let ducts: Vec<Value> = r["handles"].as_array().unwrap().clone();
+    let drawn = duct_of(s.doc().unwrap().entity(hd(&ducts[0])).unwrap()).unwrap().length_m();
+    s.execute("ductedit", &json!({"handles": [ducts[0]], "extra": 1.5})).unwrap();
+    let longer = duct_of(s.doc().unwrap().entity(hd(&ducts[0])).unwrap()).unwrap().length_m();
+    assert!((longer - drawn - 1.5).abs() < 1e-9, "the duct's extra length is counted");
+    s.execute("ductedit", &json!({"handles": [ducts[0]], "subnetwork": "Bureaux", "subnetworkColour": "#00a0ff"})).unwrap();
+    s.execute("ductedit", &json!({"handles": [ducts[1]], "subnetwork": "bureaux"})).unwrap();
+    let colour = |s: &Session, h: &Value| duct_of(s.doc().unwrap().entity(hd(h)).unwrap()).unwrap().subnetwork_colour;
+    assert_eq!(colour(&s, &ducts[1]).as_deref(), Some("#00a0ff"), "a duct named into it takes its colour");
+    let t = s.execute("hvactakeoff", &json!({})).unwrap();
+    let subs = t["subnetworks"].as_array().unwrap();
+    assert_eq!(subs.len(), 1, "{subs:?}");
+    assert_eq!((subs[0]["kind"].as_str(), subs[0]["count"].as_u64()), (Some("duct"), Some(2)));
+    assert!(subs[0]["lengthM"].as_f64().unwrap() > 7.0, "{subs:?}");
+    // A cable's sub-network is in the electrical take-off.
+    let c =
+        s.execute("cableadd", &json!({"points": [[0, 5000], [6000, 5000]], "circuit": "TD1-C1", "usage": "power"})).unwrap()["handles"][0].clone();
+    s.execute("elecedit", &json!({"handles": [c], "subnetwork": "Prises bureau", "subnetworkColour": "#ff0000"})).unwrap();
+    let e = s.execute("electakeoff", &json!({})).unwrap();
+    let subs = e["subnetworks"].as_array().unwrap();
+    assert_eq!((subs.len(), subs[0]["name"].as_str(), subs[0]["kind"].as_str()), (1, Some("Prises bureau"), Some("cable")), "{subs:?}");
+    assert!(s.execute("elecedit", &json!({"handles": [c], "subnetworkColour": "red"})).is_err());
+}

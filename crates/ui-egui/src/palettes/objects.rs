@@ -164,6 +164,46 @@ fn line_label(tag: &str) -> String {
     }
 }
 
+/// The sub-network the selected runs are named into (a link, a branch), listed with its length in the take-off (empty takes them out), and its colour,
+/// chosen as a layer's (none: the network's); `cmd` edits them.
+fn subnetwork_rows(ui: &mut egui::Ui, cmd: &'static str, ids: &[String], runs: Vec<(String, Option<String>)>, action: &mut Action) {
+    let edit = |key: &str, value: Value| Some((cmd, json!({ "handles": ids, key: value })));
+    let sub = shared(&runs.iter().map(|r| r.0.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
+    prop_row(ui, "Sub-network", |ui| {
+        if let Some(n) = edit_field(ui, ui.scope_id().with(("subnetwork", cmd, ids)), sub.clone()).filter(|n| n != VARIES && n.trim() != sub.trim()) {
+            *action = edit("subnetwork", json!(n.trim()));
+        }
+    });
+    if sub.is_empty() || sub == VARIES {
+        return;
+    }
+    let own = shared(&runs.iter().map(|r| r.1.clone()).collect::<Vec<_>>()).flatten();
+    prop_row(ui, "Sub-network colour", |ui| {
+        let id = ui.scope_id().with(("subnetwork_colour", cmd, ids));
+        let width = (ui.available_width() - 30.0).max(60.0);
+        let rgb = own.as_deref().and_then(cadcraft_doc::parse_hex_colour).map(|(r, g, b)| cadcraft_color::Rgb(r, g, b));
+        let picked = match rgb {
+            Some(rgb) => crate::layers::color_button(ui, id, cadcraft_color::Color::True(rgb), false, width),
+            None => crate::layers::color_button_resolved(
+                ui,
+                id,
+                cadcraft_color::Color::ByLayer,
+                cadcraft_color::Rgb(255, 255, 255),
+                "Network colour",
+                false,
+                width,
+            ),
+        };
+        if let Some(c) = picked {
+            let cadcraft_color::Rgb(r, g, b) = c.resolve(cadcraft_color::Color::WHITE, cadcraft_color::Color::WHITE);
+            *action = edit("subnetworkColour", json!(format!("#{r:02x}{g:02x}{b:02x}")));
+        }
+        if own.is_some() && ui.small_button("×").on_hover_text(crate::i18n::t("Back to the network colour")).clicked() {
+            *action = edit("subnetworkColour", Value::Null);
+        }
+    });
+}
+
 /// The rows of the network a pipe is on: its name (typed, it is the name of the whole network), and the colour and the line type of the
 /// network's style. The colour is chosen from the palette, and shown as a swatch.
 fn network_rows(ui: &mut egui::Ui, ids: &[String], networks: Vec<String>, styles: &[cadcraft_doc::NetworkStyle], action: &mut Action) {
@@ -608,6 +648,7 @@ fn cable_section(ui: &mut egui::Ui, d: &Drawing, sel: &[Handle], cs: &[cadcraft_
         &mut action,
     );
     elec_number(ui, ("elecedit", "Extra length (m)", "extra", false), &ids, cs.iter().map(|c| Some(c.extra_m)).collect(), bad, &mut action);
+    subnetwork_rows(ui, "elecedit", &ids, cs.iter().map(|c| (c.subnetwork.clone(), c.subnetwork_colour.clone())).collect(), &mut action);
     let len: f64 = cs.iter().map(|c| c.length_m()).sum();
     prop_row(ui, "Length (m)", |ui| read_only(ui, &format!("{len:.2}")));
     action
@@ -1059,42 +1100,7 @@ fn pipe_section(
         }
     });
     network_rows(ui, &ids, ps.iter().map(|p| p.network.clone()).collect(), styles, &mut action);
-    // The sub-network the selected runs are named into (a link, a branch), listed with its length in the take-off; empty takes them out.
-    let sub = shared(&ps.iter().map(|p| p.subnetwork.clone()).collect::<Vec<_>>()).unwrap_or_else(|| VARIES.into());
-    prop_row(ui, "Sub-network", |ui| {
-        if let Some(n) = edit_field(ui, ui.scope_id().with(("pipe_subnetwork", &ids)), sub.clone()).filter(|n| n != VARIES && n.trim() != sub.trim())
-        {
-            action = edit("subnetwork", json!(n.trim()));
-        }
-    });
-    // Its colour, chosen as a layer's: none, the network's.
-    if !sub.is_empty() && sub != VARIES {
-        let own = shared(&ps.iter().map(|p| p.subnetwork_colour.clone()).collect::<Vec<_>>()).flatten();
-        prop_row(ui, "Sub-network colour", |ui| {
-            let id = ui.scope_id().with(("pipe_subnetwork_colour", &ids));
-            let width = (ui.available_width() - 30.0).max(60.0);
-            let rgb = own.as_deref().and_then(cadcraft_doc::parse_hex_colour).map(|(r, g, b)| cadcraft_color::Rgb(r, g, b));
-            let picked = match rgb {
-                Some(rgb) => crate::layers::color_button(ui, id, cadcraft_color::Color::True(rgb), false, width),
-                None => crate::layers::color_button_resolved(
-                    ui,
-                    id,
-                    cadcraft_color::Color::ByLayer,
-                    cadcraft_color::Rgb(255, 255, 255),
-                    "Network colour",
-                    false,
-                    width,
-                ),
-            };
-            if let Some(c) = picked {
-                let cadcraft_color::Rgb(r, g, b) = c.resolve(cadcraft_color::Color::WHITE, cadcraft_color::Color::WHITE);
-                action = edit("subnetworkColour", json!(format!("#{r:02x}{g:02x}{b:02x}")));
-            }
-            if own.is_some() && ui.small_button("×").on_hover_text(crate::i18n::t("Back to the network colour")).clicked() {
-                action = edit("subnetworkColour", Value::Null);
-            }
-        });
-    }
+    subnetwork_rows(ui, "pipeedit", &ids, ps.iter().map(|p| (p.subnetwork.clone(), p.subnetwork_colour.clone())).collect(), &mut action);
     let source = shared(&ps.iter().map(|p| p.source).collect::<Vec<_>>());
     prop_row(ui, "Starts at the source", |ui| {
         let mut on = source == Some(true);
@@ -2442,9 +2448,12 @@ fn duct_section(ui: &mut egui::Ui, sel: &[Handle], ds: &[DuctParams], len: &dyn 
             }
         }
     });
+    // The length the run has beyond its drawing (rises, drops), counted in its losses and its take-off.
+    elec_number(ui, ("ductedit", "Extra length (m)", "extra", false), &ids, ds.iter().map(|p| Some(p.extra_m)).collect(), bad, &mut action);
+    subnetwork_rows(ui, "ductedit", &ids, ds.iter().map(|p| (p.subnetwork.clone(), p.subnetwork_colour.clone())).collect(), &mut action);
     if let [p] = ds {
         prop_row(ui, "Length", |ui| read_only(ui, &len(p.length)));
-        if p.rise_mm().abs() > 0.5 {
+        if p.rise_mm().abs() > 0.5 || p.extra_m > 0.0 {
             prop_row(ui, "True length (m)", |ui| read_only(ui, &format!("{:.2}", p.length_m())));
         }
         // The flow the run carries: typed here, sizing keeps it and sizes the run for it; empty gives it back to the terminals.

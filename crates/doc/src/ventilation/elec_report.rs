@@ -218,6 +218,9 @@ pub struct HvacLoad {
 pub struct ElecTakeoff {
     pub level: String,
     pub cables: Vec<CableQuantity>,
+    /// The sub-networks of cables, each with its length (its cables are also in `cables`).
+    #[serde(default)]
+    pub subnetworks: Vec<super::SubnetworkQuantity>,
     pub devices: Vec<DeviceQuantity>,
     pub panels: Vec<String>,
     pub hvac: Vec<HvacLoad>,
@@ -239,6 +242,7 @@ impl crate::Drawing {
         for e in self.model.iter() {
             if let Some(c) = cable_of(e) {
                 let size = if c.section_mm2.is_some() { c.size_text() } else { "to size".to_string() };
+                super::takeoff::add_subnetwork(&mut t.subnetworks, "cable", &c.circuit, &c.subnetwork, size.clone(), c.length_m());
                 let usage = c.usage.name().to_string();
                 match t.cables.iter_mut().find(|q| q.size == size && q.usage == usage) {
                     Some(q) => {
@@ -292,6 +296,7 @@ impl crate::Drawing {
             q.length_m = round2(q.length_m);
         }
         t.cables.sort_by(|a, b| a.usage.cmp(&b.usage).then(a.size.cmp(&b.size)));
+        t.subnetworks = super::takeoff::sorted_subnetworks(std::mem::take(&mut t.subnetworks));
         t.devices.sort_by(|a, b| a.name.cmp(&b.name));
         t.panels.sort();
         t.hvac.sort_by(|a, b| a.name.cmp(&b.name));
@@ -358,6 +363,13 @@ impl ElecTakeoff {
         let mut rows = vec![head(&["Size", "Use", "Count", "Length (m)"])];
         rows.extend(self.cables.iter().map(|q| vec![C::text(q.size.clone()), C::text(q.usage.clone()), C::Num(q.count as f64), num(q.length_m)]));
         wb.sheet("Cables", rows)?;
+        if !self.subnetworks.is_empty() {
+            let mut rows = vec![head(&["Circuit", "Sub-network", "Sizes", "Count", "Length (m)"])];
+            rows.extend(self.subnetworks.iter().map(|q| {
+                vec![C::text(q.network.clone()), C::text(q.name.clone()), C::text(q.sizes.join(" + ")), C::Num(q.count as f64), num(q.length_m)]
+            }));
+            wb.sheet("Sub-networks", rows)?;
+        }
         let mut rows = vec![head(&["Device", "Count", "Power (W)", "Flux (lm)"])];
         rows.extend(self.devices.iter().map(|q| vec![C::text(q.name.clone()), C::Num(q.count as f64), num(q.power_w), num(q.flux_lm)]));
         wb.sheet("Devices", rows)?;

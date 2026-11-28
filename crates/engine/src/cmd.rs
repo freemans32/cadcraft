@@ -40,6 +40,7 @@ mod sanitary;
 mod section;
 mod slab;
 mod structure;
+mod subnet;
 mod takeoff;
 mod titleblock;
 mod zone;

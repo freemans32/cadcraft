@@ -475,12 +475,7 @@ impl PipeParams {
             return Err(invalid("What an elbow takes of a pipe is 0 to its length."));
         }
         self.units.validate()?;
-        if self.subnetwork.chars().count() > 80 {
-            return Err(invalid("The name of a sub-network is at most 80 characters."));
-        }
-        if self.subnetwork_colour.as_deref().is_some_and(|c| super::parse_hex_colour(c).is_none()) {
-            return Err(invalid("The colour of a sub-network is written #rrggbb."));
-        }
+        super::check_subnetwork(&self.subnetwork, self.subnetwork_colour.as_deref())?;
         if !(self.extra_m.is_finite() && (0.0..=1000.0).contains(&self.extra_m)) {
             return Err(invalid("The extra length of a pipe is 0 to 1000 m."));
         }
@@ -637,10 +632,7 @@ impl PipeParams {
         self.validate()?;
         let r = self.units.to_units(self.plan_width_mm()) / 2.0;
         // A sub-network with its own colour: the run's pieces (and its tubes) take it, on their layers.
-        let coloured = |l: &'static str| match self.subnetwork_colour.as_deref() {
-            Some(c) => intern(format!("{l}|ByLayer|{c}")).unwrap_or(l),
-            None => l,
-        };
+        let coloured = |l: &'static str| super::subnetwork_layer(l, self.subnetwork_colour.as_deref());
         let layer = coloured(self.layer());
         let line = |layer: &'static str, a: Vec2, b: Vec2| HvacPiece { layer, kind: EntityKind::Line(Line { a: v3(a), b: v3(b) }) };
         let tubes = self.tubes();

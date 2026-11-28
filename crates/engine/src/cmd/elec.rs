@@ -36,7 +36,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|s| Ok(Box::new(CableAddM::new(s)))),
         CommandSpec::new("elecedit", "Edit Electrical Object", run_edit).params(
             "{handle | handles, for a device: name?, circuit?, address? (on its KNX or DALI line), power? (W), flux? (lm or null), height? (mm; a board's underside), boardHeight? / boardWidth? / boardDepth? (mm, a board), supply? (A or null); for a cable: circuit?, usage?, phases?, conductor?, insulation?, laying?, \
-             section? (mm², null or auto: to be sized; or the cable as it is written: 3G1.5, 5G2.5, 2x0.75 blindé), cableType? (a cable type of the library: its cable and its use), protection? (A or null), cosPhi?, ambient?, grouped?, extra?, label? (whether its label is drawn), labelSide? (above|below)} → {changed}",
+             section? (mm², null or auto: to be sized; or the cable as it is written: 3G1.5, 5G2.5, 2x0.75 blindé), cableType? (a cable type of the library: its cable and its use), protection? (A or null), cosPhi?, ambient?, grouped?, extra?, label? (whether its label is drawn), labelSide? (above|below), subnetwork? (a name, \"\" to take the cables out), subnetworkColour? (#rrggbb for every cable of the sub-network, or null)} → {changed}",
         ),
         CommandSpec::new("cabletypeadd", "Save Cable Type", run_cabletype_add)
             .params("{name, spec (the cable as it is written: 3G1.5, 5G2.5, 2x0.75 blindé), usage? (power, lighting, data, safety, bus, remote)} → {types}: keeps it in the drawing, for other cables"),
@@ -491,6 +491,9 @@ fn run_edit(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let change = change_of(CMD, p, s.doc()?)?;
     let circuit = str_param(p, "circuit").map(|c| c.trim().to_string());
+    let sub = super::subnet::SubnetEdit::read(CMD, p)?;
+    let known: Vec<(String, Option<String>)> =
+        s.doc()?.model.iter().filter_map(|e| cable_of(e)).map(|x| (x.subnetwork, x.subnetwork_colour)).collect();
     let mut done: Vec<(Handle, Option<CableParams>, Option<DeviceParams>)> = Vec::new();
     for h in hs {
         let e = s.doc()?.entity(h).cloned().ok_or_else(|| bad(CMD, "no such object"))?;
@@ -505,6 +508,9 @@ fn run_edit(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(n) = &circuit {
                 c.circuit = n.clone();
             }
+            sub.name_run(&mut c.subnetwork, &mut c.subnetwork_colour, |n| {
+                super::subnet::known_colour(known.iter().map(|(a, b)| (a.as_str(), b.as_deref())), n)
+            });
             c.validate().map_err(doc_err)?;
             done.push((h, Some(c), None));
         } else if let Some(mut d) = device_of(&e) {
@@ -535,6 +541,30 @@ fn run_edit(s: &mut Session, p: &Value) -> Result<Value> {
         } else {
             return Err(bad(CMD, "select cables and electrical devices only"));
         }
+    }
+    // A colour given to a sub-network of cables goes to all of its cables, selected or not.
+    if let Some(col) = &sub.colour {
+        let names: Vec<String> = done.iter().filter_map(|(_, c, _)| c.as_ref()).map(|c| c.subnetwork.clone()).filter(|n| !n.is_empty()).collect();
+        if names.is_empty() {
+            return Err(bad(CMD, "name a sub-network before giving it a colour"));
+        }
+        for c in done.iter_mut().filter_map(|(_, c, _)| c.as_mut()).filter(|c| !c.subnetwork.is_empty()) {
+            c.subnetwork_colour.clone_from(col);
+        }
+        let d = s.doc()?;
+        let picked: Vec<Handle> = done.iter().map(|(h, ..)| *h).collect();
+        let others: Vec<(Handle, Option<CableParams>, Option<DeviceParams>)> = d
+            .model
+            .iter()
+            .filter(|e| !picked.contains(&e.handle))
+            .filter_map(|e| cable_of(e).map(|c| (e.handle, c)))
+            .filter(|(_, c)| names.iter().any(|n| n.eq_ignore_ascii_case(&c.subnetwork)))
+            .map(|(h, mut c)| {
+                c.subnetwork_colour.clone_from(col);
+                (h, Some(c), None)
+            })
+            .collect();
+        done.extend(others);
     }
     let doc = s.doc_mut()?;
     for (h, c, d) in &done {

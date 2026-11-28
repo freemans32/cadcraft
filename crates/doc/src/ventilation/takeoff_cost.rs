@@ -173,7 +173,11 @@ impl Takeoff {
                 }
             }
             for q in &l.subnetworks {
-                match b.subnetworks.iter_mut().find(|x| super::same_network(&x.network, &q.network) && x.name.eq_ignore_ascii_case(&q.name)) {
+                match b
+                    .subnetworks
+                    .iter_mut()
+                    .find(|x| x.kind == q.kind && super::same_network(&x.network, &q.network) && x.name.eq_ignore_ascii_case(&q.name))
+                {
                     Some(x) => {
                         x.count += q.count;
                         x.length_m = round2(x.length_m + q.length_m);

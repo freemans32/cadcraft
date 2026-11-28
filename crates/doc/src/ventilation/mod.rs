@@ -397,6 +397,25 @@ pub(crate) fn by_block(layer: &'static str) -> &'static str {
     }
 }
 
+/// Checks the name of a sub-network (at most 80 characters) and its colour ("#rrggbb").
+pub(crate) fn check_subnetwork(name: &str, colour: Option<&str>) -> crate::Result<()> {
+    if name.chars().count() > 80 {
+        return Err(invalid("The name of a sub-network is at most 80 characters."));
+    }
+    if colour.is_some_and(|c| parse_hex_colour(c).is_none()) {
+        return Err(invalid("The colour of a sub-network is written #rrggbb."));
+    }
+    Ok(())
+}
+
+/// The piece layer of `layer` drawn in a sub-network's own colour, when it has one.
+pub(crate) fn subnetwork_layer(layer: &'static str, colour: Option<&str>) -> &'static str {
+    match colour {
+        Some(c) => pipe_networks::intern(format!("{layer}|ByLayer|{c}")).unwrap_or(layer),
+        None => layer,
+    }
+}
+
 #[cfg(test)]
 mod accessory_tests;
 #[cfg(test)]

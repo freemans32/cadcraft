@@ -38,7 +38,7 @@ pub fn specs() -> Vec<CommandSpec> {
             )
             .interactive(|s| Ok(Box::new(DuctAddM::new(s)))),
         CommandSpec::new("ductedit", "Edit Duct", run_ductedit)
-            .params("{handle | handles, diameter? (mm, or auto: sizing chooses the size) | width? and/or height? (mm; a rectangular section: a side alone changes that side), kind?, air?, flexible? (true or false), shape? (round or rectangular: each duct keeps its size and takes the other shape), insulation? (outside, inside or none), insulationThickness? (mm, default 30), coneAuto? (true: a reducer's cone goes back to the symmetric 15 degree one, after its corners were set by hand), cutStart? / cutEnd? (degrees, -75 to 75, or 0 or null: the end of the run cut on the slant, a whistle; not drawn at an end with an elbow or a cone), flow? (m³/h: sizing keeps it and sizes the run for it; auto gives it back), altitude? (m: the underside, or null), endAltitude? (m, or null for a level run: the altitude of the underside at the far end, so that the run slopes from its altitude to this one; its true length, longer than its length in plan, is the one that loses pressure and is counted), label? (false: the label is not drawn)} → {changed}"),
+            .params("{handle | handles, diameter? (mm, or auto: sizing chooses the size) | width? and/or height? (mm; a rectangular section: a side alone changes that side), kind?, air?, flexible? (true or false), shape? (round or rectangular: each duct keeps its size and takes the other shape), insulation? (outside, inside or none), insulationThickness? (mm, default 30), coneAuto? (true: a reducer's cone goes back to the symmetric 15 degree one, after its corners were set by hand), cutStart? / cutEnd? (degrees, -75 to 75, or 0 or null: the end of the run cut on the slant, a whistle; not drawn at an end with an elbow or a cone), flow? (m³/h: sizing keeps it and sizes the run for it; auto gives it back), altitude? (m: the underside, or null), endAltitude? (m, or null for a level run: the altitude of the underside at the far end, so that the run slopes from its altitude to this one; its true length, longer than its length in plan, is the one that loses pressure and is counted), label? (false: the label is not drawn), extra? (m: the run is longer than drawn by this, rises and drops, 0 to 1000), subnetwork? (a name for the ducts given, \"\" to take them out: listed with its length in the take-off), subnetworkColour? (#rrggbb for every duct of the sub-network, or null)} → {changed}"),
         CommandSpec::new("ductconnect", "Connect Terminals", run_ductconnect).menu(&["Draw", "HVAC", "Connect Terminals"]).params(
             "{terminals? (handles; default every terminal no duct reaches), maxDistance? (mm, default 3000)} → {created (flexible ducts), skipped}",
         ),
@@ -652,6 +652,9 @@ fn duct_params(s: &Session, last: &DuctLastUsed, label_mm: f64) -> Result<DuctPa
         label_shift_mm: None,
         kept_edge: None,
         hide_label: false,
+        extra_m: 0.0,
+        subnetwork: String::new(),
+        subnetwork_colour: None,
         cut_deg: [0.0, 0.0],
         elbow: None,
         trim_start_mm: 0.0,
@@ -995,6 +998,14 @@ fn run_ductedit(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "ductedit";
     let hs = super::arch::handles_param(CMD, p)?;
     let label = super::elec::label_param(CMD, p)?;
+    let sub = super::subnet::SubnetEdit::read(CMD, p)?;
+    // The sub-networks of the ducts and their colours, for a duct named into one.
+    let known: Vec<(String, Option<String>)> =
+        s.doc()?.model.iter().filter_map(|e| cadcraft_doc::duct_of(e)).map(|x| (x.subnetwork, x.subnetwork_colour)).collect();
+    let extra = match p.get("extra") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(v.as_f64().filter(|x| x.is_finite() && *x >= 0.0).ok_or_else(|| bad(CMD, "`extra` must be a number of metres, 0 or more"))?),
+    };
     if hs.is_empty() || hs.len() > MAX_EDITED {
         return Err(bad(CMD, format!("select 1 to {MAX_EDITED} ducts")));
     }
@@ -1111,8 +1122,38 @@ fn run_ductedit(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(show) = label {
             dp.hide_label = !show;
         }
+        dp.extra_m = extra.unwrap_or(dp.extra_m);
+        sub.name_run(&mut dp.subnetwork, &mut dp.subnetwork_colour, |n| {
+            super::subnet::known_colour(known.iter().map(|(a, b)| (a.as_str(), b.as_deref())), n)
+        });
         dp.validate().map_err(doc_err)?;
         next.push((*h, dp));
+    }
+    // A colour given to a sub-network goes to all of its runs, selected or not.
+    if let Some(c) = &sub.colour {
+        let names: Vec<String> = next.iter().map(|(_, x)| x.subnetwork.clone()).filter(|n| !n.is_empty()).collect();
+        if names.is_empty() {
+            return Err(bad(CMD, "name a sub-network before giving it a colour"));
+        }
+        for (_, x) in &mut next {
+            if !x.subnetwork.is_empty() {
+                x.subnetwork_colour.clone_from(c);
+            }
+        }
+        let d = s.doc()?;
+        let picked: Vec<Handle> = next.iter().map(|(h, _)| *h).collect();
+        let others: Vec<(Handle, DuctParams)> = d
+            .model
+            .iter()
+            .filter(|e| !picked.contains(&e.handle))
+            .filter_map(|e| cadcraft_doc::duct_of(e).map(|x| (e.handle, x)))
+            .filter(|(_, x)| names.iter().any(|n| n.eq_ignore_ascii_case(&x.subnetwork)))
+            .map(|(h, mut x)| {
+                x.subnetwork_colour.clone_from(c);
+                (h, x)
+            })
+            .collect();
+        next.extend(others);
     }
     let d = s.doc_mut()?;
     for (h, dp) in &next {
@@ -1225,6 +1266,9 @@ fn run_ductconnect(s: &mut Session, p: &Value) -> Result<Value> {
             label_shift_mm: None,
             kept_edge: None,
             hide_label: false,
+            extra_m: 0.0,
+            subnetwork: String::new(),
+            subnetwork_colour: None,
             cut_deg: [0.0, 0.0],
             elbow: None,
             trim_start_mm: 0.0,

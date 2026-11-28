@@ -834,6 +834,15 @@ pub struct DuctParams {
     /// The label is not drawn (the run keeps its size, flow and sums).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hide_label: bool,
+    /// The run's own length is longer than its drawing by this much (rises, drops), metres: counted in its losses and its take-off.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub extra_m: f64,
+    /// The part of the network the run belongs to, named by the user: listed with its length in the take-off.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub subnetwork: String,
+    /// The colour of the sub-network ("#rrggbb"), when it has its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subnetwork_colour: Option<String>,
     /// The end cut on the slant (a whistle), degrees, at the start and at the far end: 0 is square. Drawn only at an end with no elbow or cone.
     #[serde(default, skip_serializing_if = "is_square")]
     pub cut_deg: [f64; 2],
@@ -997,6 +1006,10 @@ const MAX_BELLOWS_VERTICES: usize = 2_000;
 
 impl DuctParams {
     pub fn validate(&self) -> Result<()> {
+        super::check_subnetwork(&self.subnetwork, self.subnetwork_colour.as_deref())?;
+        if !(self.extra_m.is_finite() && (0.0..=1000.0).contains(&self.extra_m)) {
+            return Err(invalid("The extra length of a duct is 0 to 1000 m."));
+        }
         check_label_height(self.label_height_mm)?;
         self.units.validate()?;
         if self.reducer_shape.is_some_and(|s| !s.near_mm.iter().chain(&s.far_mm).all(|v| v.is_finite() && v.abs() <= 1.0e6)) {
@@ -1280,7 +1293,7 @@ impl DuctParams {
 
     /// The true length of the run, metres: its length in plan, and its rise if it slopes. It is what loses pressure and what is bought.
     pub fn length_m(&self) -> f64 {
-        self.plan_length_m().hypot(self.rise_mm() / 1000.0)
+        self.plan_length_m().hypot(self.rise_mm() / 1000.0) + self.extra_m
     }
 
     /// A step: two 45° elbows, with the inclined run between them, and the change of altitude and the angle written above it. Each elbow is drawn as the
@@ -1451,7 +1464,7 @@ impl DuctParams {
     pub fn generate(&self, flip_label: bool) -> Result<Vec<HvacPiece>> {
         self.validate()?;
         let r = self.units.to_units(self.plan_width_mm()) / 2.0;
-        let layer = self.layer();
+        let layer = super::subnetwork_layer(self.layer(), self.subnetwork_colour.as_deref());
         let mut pieces = Vec::new();
         // What an elbow takes at each end; a cone is drawn only where no elbow is.
         let cone = self.cone(r);

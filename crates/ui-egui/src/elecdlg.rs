@@ -194,6 +194,18 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open_flag: &mut bool) {
                     &["Size", "Use", "Count", "Length (m)"],
                     t.cables.iter().map(|q| vec![q.size.clone(), q.usage.clone(), q.count.to_string(), num(q.length_m)]).collect(),
                 );
+                if !t.subnetworks.is_empty() {
+                    table(
+                        ui,
+                        "subnetworks",
+                        "Sub-networks",
+                        &["Circuit", "Sub-network", "Sizes", "Count", "Length (m)"],
+                        t.subnetworks
+                            .iter()
+                            .map(|q| vec![q.network.clone(), q.name.clone(), q.sizes.join(" + "), q.count.to_string(), num(q.length_m)])
+                            .collect(),
+                    );
+                }
                 table(
                     ui,
                     "devices",
