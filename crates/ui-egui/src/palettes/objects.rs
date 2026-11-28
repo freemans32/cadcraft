@@ -953,6 +953,14 @@ fn pipe_section(
     let mut action: Action = None;
     let edit = |key: &str, value: Value| Some(("pipeedit", json!({ "handles": ids, key: value })));
     group(ui, "Pipe");
+    // Unticked: the runs are drawn without their label (ticked only when all of them show it).
+    let shown = ps.iter().all(|p| !p.hide_label);
+    prop_row(ui, "Show the label", |ui| {
+        let mut on = shown;
+        if ui.checkbox(&mut on, "").changed() {
+            action = edit("label", json!(on));
+        }
+    });
     let service = shared(&ps.iter().map(|p| p.service).collect::<Vec<_>>());
     prop_row(ui, "Service", |ui| {
         let items = [
@@ -2213,6 +2221,14 @@ fn duct_section(ui: &mut egui::Ui, sel: &[Handle], ds: &[DuctParams], len: &dyn 
     let mut action: Action = None;
     let edit = |key: &str, value: Value| Some(("ductedit", json!({ "handles": ids, key: value })));
     group(ui, "Duct");
+    // Unticked: the runs are drawn without their label (ticked only when all of them show it).
+    let shown = ds.iter().all(|p| !p.hide_label);
+    prop_row(ui, "Show the label", |ui| {
+        let mut on = shown;
+        if ui.checkbox(&mut on, "").changed() {
+            action = edit("label", json!(on));
+        }
+    });
     let imposed = shared(&ds.iter().map(|p| p.imposed).collect::<Vec<_>>());
     prop_row(ui, "Size set by", |ui| {
         let shown = imposed.map_or(VARIES, |i| if i { "User" } else { "Sizing" });

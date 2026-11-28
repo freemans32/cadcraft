@@ -831,6 +831,9 @@ pub struct DuctParams {
     /// other); `None` for a run laid on its axis. When the run's width changes its axis moves, so that this edge stays on the line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kept_edge: Option<f64>,
+    /// The label is not drawn (the run keeps its size, flow and sums).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hide_label: bool,
     /// The end cut on the slant (a whistle), degrees, at the start and at the far end: 0 is square. Drawn only at an end with no elbow or cone.
     #[serde(default, skip_serializing_if = "is_square")]
     pub cut_deg: [f64; 2],
@@ -1578,7 +1581,9 @@ impl DuctParams {
         if let EntityKind::Text(x) = &mut t {
             x.rotation = if flip_label { std::f64::consts::PI } else { 0.0 };
         }
-        pieces.push(HvacPiece { layer, kind: t });
+        if !self.hide_label {
+            pieces.push(HvacPiece { layer, kind: t });
+        }
         Ok(pieces)
     }
 

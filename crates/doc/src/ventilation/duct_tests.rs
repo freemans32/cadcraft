@@ -56,6 +56,7 @@ fn duct(diameter_mm: f64) -> DuctParams {
         reducer_shape: None,
         label_shift_mm: None,
         kept_edge: None,
+        hide_label: false,
         cut_deg: [0.0, 0.0],
         elbow: None,
         trim_start_mm: 0.0,

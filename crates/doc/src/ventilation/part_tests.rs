@@ -191,3 +191,17 @@ fn a_branch_box_is_chosen_by_its_number_of_outlets_in_the_refrigerant_of_the_las
     assert_eq!(branch_box_with_outlets(4, "Check valve").unwrap().name, "Branch box, 4 outlets (R32 heat recovery)");
     assert!(branch_box_with_outlets(7, "Branch box, 6 outlets (R32 heat recovery)").is_none());
 }
+
+#[test]
+fn the_small_tanks_and_the_decoupling_bottles_hold_about_what_they_are_said_to() {
+    // The cylinder of the model's outer diameter and height holds at least the volume given, and not much more than twice it (a tank's insulation).
+    for m in standard_part_models() {
+        let (PartKind::Tank | PartKind::DecouplingBottle, Some(v)) = (m.kind, m.volume_l) else { continue };
+        if v > 100.0 {
+            continue;
+        }
+        let d = m.length_mm.min(m.width_mm) / 1000.0;
+        let litres = std::f64::consts::PI * d * d / 4.0 * (m.height_mm / 1000.0) * 1000.0;
+        assert!(litres > v * 0.95 && litres < v * 2.5, "{}: {litres:.1} l for {v} l", m.name);
+    }
+}

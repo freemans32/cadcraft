@@ -240,7 +240,7 @@ fn label_side_param(cmd: &str, p: &Value) -> Result<Option<bool>> {
     }
 }
 
-fn label_param(cmd: &str, p: &Value) -> Result<Option<bool>> {
+pub(super) fn label_param(cmd: &str, p: &Value) -> Result<Option<bool>> {
     match p.get("label") {
         None | Some(Value::Null) => Ok(None),
         Some(v) => v.as_bool().map(Some).ok_or_else(|| bad(cmd, "`label` must be true or false")),

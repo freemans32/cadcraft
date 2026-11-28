@@ -38,7 +38,7 @@ pub fn specs() -> Vec<CommandSpec> {
             )
             .interactive(|s| Ok(Box::new(DuctAddM::new(s)))),
         CommandSpec::new("ductedit", "Edit Duct", run_ductedit)
-            .params("{handle | handles, diameter? (mm, or auto: sizing chooses the size) | width? and/or height? (mm; a rectangular section: a side alone changes that side), kind?, air?, flexible? (true or false), shape? (round or rectangular: each duct keeps its size and takes the other shape), insulation? (outside, inside or none), insulationThickness? (mm, default 30), coneAuto? (true: a reducer's cone goes back to the symmetric 15 degree one, after its corners were set by hand), cutStart? / cutEnd? (degrees, -75 to 75, or 0 or null: the end of the run cut on the slant, a whistle; not drawn at an end with an elbow or a cone), flow? (m³/h: sizing keeps it and sizes the run for it; auto gives it back), altitude? (m: the underside, or null), endAltitude? (m, or null for a level run: the altitude of the underside at the far end, so that the run slopes from its altitude to this one; its true length, longer than its length in plan, is the one that loses pressure and is counted)} → {changed}"),
+            .params("{handle | handles, diameter? (mm, or auto: sizing chooses the size) | width? and/or height? (mm; a rectangular section: a side alone changes that side), kind?, air?, flexible? (true or false), shape? (round or rectangular: each duct keeps its size and takes the other shape), insulation? (outside, inside or none), insulationThickness? (mm, default 30), coneAuto? (true: a reducer's cone goes back to the symmetric 15 degree one, after its corners were set by hand), cutStart? / cutEnd? (degrees, -75 to 75, or 0 or null: the end of the run cut on the slant, a whistle; not drawn at an end with an elbow or a cone), flow? (m³/h: sizing keeps it and sizes the run for it; auto gives it back), altitude? (m: the underside, or null), endAltitude? (m, or null for a level run: the altitude of the underside at the far end, so that the run slopes from its altitude to this one; its true length, longer than its length in plan, is the one that loses pressure and is counted), label? (false: the label is not drawn)} → {changed}"),
         CommandSpec::new("ductconnect", "Connect Terminals", run_ductconnect).menu(&["Draw", "HVAC", "Connect Terminals"]).params(
             "{terminals? (handles; default every terminal no duct reaches), maxDistance? (mm, default 3000)} → {created (flexible ducts), skipped}",
         ),
@@ -651,6 +651,7 @@ fn duct_params(s: &Session, last: &DuctLastUsed, label_mm: f64) -> Result<DuctPa
         reducer_shape: None,
         label_shift_mm: None,
         kept_edge: None,
+        hide_label: false,
         cut_deg: [0.0, 0.0],
         elbow: None,
         trim_start_mm: 0.0,
@@ -993,6 +994,7 @@ fn insulation_param(cmd: &str, p: &Value, current: Option<DuctInsulation>) -> Re
 fn run_ductedit(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "ductedit";
     let hs = super::arch::handles_param(CMD, p)?;
+    let label = super::elec::label_param(CMD, p)?;
     if hs.is_empty() || hs.len() > MAX_EDITED {
         return Err(bad(CMD, format!("select 1 to {MAX_EDITED} ducts")));
     }
@@ -1105,6 +1107,9 @@ fn run_ductedit(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let Some(a) = altitude {
             dp.level_mm = a;
+        }
+        if let Some(show) = label {
+            dp.hide_label = !show;
         }
         dp.validate().map_err(doc_err)?;
         next.push((*h, dp));
@@ -1219,6 +1224,7 @@ fn run_ductconnect(s: &mut Session, p: &Value) -> Result<Value> {
             reducer_shape: None,
             label_shift_mm: None,
             kept_edge: None,
+            hide_label: false,
             cut_deg: [0.0, 0.0],
             elbow: None,
             trim_start_mm: 0.0,

@@ -128,6 +128,7 @@ fn ducted(accessory_at: Option<(AccessoryKind, f64, f64)>) -> (Drawing, Option<H
         reducer_shape: None,
         label_shift_mm: None,
         kept_edge: None,
+        hide_label: false,
         cut_deg: [0.0, 0.0],
         elbow: None,
         trim_start_mm: 0.0,

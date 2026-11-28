@@ -383,6 +383,9 @@ pub struct PipeParams {
     pub trim_end_mm: f64,
     #[serde(default = "default_label_mm")]
     pub label_height_mm: f64,
+    /// The label is not drawn (the run keeps its size, flow and sums).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hide_label: bool,
     /// The colours the run is drawn in (its band along the axis depends on it).
     #[serde(default, skip_serializing_if = "ColourConvention::is_plan")]
     pub colours: ColourConvention,
@@ -416,6 +419,7 @@ impl PipeParams {
             trim_start_mm: 0.0,
             trim_end_mm: 0.0,
             label_height_mm: default_label_mm(),
+            hide_label: false,
             colours: ColourConvention::Plan,
             units,
         }
@@ -675,7 +679,9 @@ impl PipeParams {
         if let EntityKind::Text(x) = &mut t {
             x.rotation = if flip_label { std::f64::consts::PI } else { 0.0 };
         }
-        pieces.push(HvacPiece { layer, kind: t });
+        if !self.hide_label {
+            pieces.push(HvacPiece { layer, kind: t });
+        }
         Ok(pieces)
     }
 

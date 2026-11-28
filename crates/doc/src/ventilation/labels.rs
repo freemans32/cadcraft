@@ -41,7 +41,8 @@ impl Drawing {
             .into_iter()
             .flat_map(|s| s.iter())
             .filter_map(|e| match (&e.kind, super::duct_of(e)) {
-                (EntityKind::Insert(i), Some(p)) => Some((e.handle, p, Vec2::new(i.insert.x, i.insert.y), i.rotation, i.scale.x)),
+                // A run whose label is left off takes no room and is not moved.
+                (EntityKind::Insert(i), Some(p)) if !p.hide_label => Some((e.handle, p, Vec2::new(i.insert.x, i.insert.y), i.rotation, i.scale.x)),
                 _ => None,
             })
             .take(MAX_DUCTS + 1)

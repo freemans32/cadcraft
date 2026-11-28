@@ -41,7 +41,7 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         CommandSpec::new("pipeedit", "Edit Pipe", run_pipeedit).params(
             "{handle | handles, service?, leg?, dn? (mm, inches for a refrigerant tube, or auto: sizing chooses the size), gas? (mm or inches: the gas tube of a link), hpGas? (the high/low-pressure gas tube of a heat-recovery link), insulation? (mm), altitude? (m or null), load? (kW, l/h for a condensate drain, or null), \
-             source? (true or false), network? (a name: it is the name of the whole network of each pipe), slope? (% of a drain, or null)} → {changed}",
+             source? (true or false), network? (a name: it is the name of the whole network of each pipe), slope? (% of a drain, or null), label? (false: the label is not drawn)} → {changed}",
         ),
     ]
 }
@@ -239,6 +239,7 @@ fn run_pipeadd(s: &mut Session, p: &Value) -> Result<Value> {
 fn run_pipeedit(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "pipeedit";
     let hs = super::arch::handles_param(CMD, p)?;
+    let label = super::elec::label_param(CMD, p)?;
     if hs.is_empty() || hs.len() > MAX_EDITED {
         return Err(bad(CMD, format!("select 1 to {MAX_EDITED} pipes")));
     }
@@ -310,6 +311,9 @@ fn run_pipeedit(s: &mut Session, p: &Value) -> Result<Value> {
             pp.load_kw = l;
         }
         pp.source = source.unwrap_or(pp.source);
+        if let Some(show) = label {
+            pp.hide_label = !show;
+        }
         pp.validate().map_err(doc_err)?;
         next.push((*h, pp));
     }

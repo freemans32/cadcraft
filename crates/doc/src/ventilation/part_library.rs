@@ -351,13 +351,62 @@ pub fn standard_part_models() -> Vec<PartModel> {
         m("Variable-speed pump", "Pompe à vitesse variable", C::Pumps, K::Pump).dn(65.0),
         m("Base-mounted pump", "Pompe sur socle", C::Pumps, K::Pump).dn(80.0).size(450.0, 300.0),
         // Vessels and tanks.
+        // Sizes rounded from makers' public data sheets (diameter by height, mm); no maker's drawing is used.
+        m("Expansion vessel 15 l", "Vase d'expansion 15 l", C::VesselsAndTanks, K::ExpansionVessel).volume(15.0).size(280.0, 280.0).height(340.0),
+        m("Expansion vessel 18 l", "Vase d'expansion 18 l", C::VesselsAndTanks, K::ExpansionVessel).volume(18.0).size(290.0, 290.0).height(375.0),
         m("Expansion vessel 24 l", "Vase d'expansion 24 l", C::VesselsAndTanks, K::ExpansionVessel).volume(24.0).size(300.0, 300.0),
+        m("Expansion vessel 50 l", "Vase d'expansion 50 l", C::VesselsAndTanks, K::ExpansionVessel).volume(50.0).size(390.0, 390.0).height(610.0),
         m("Expansion vessel 80 l", "Vase d'expansion 80 l", C::VesselsAndTanks, K::ExpansionVessel).volume(80.0).size(450.0, 450.0),
+        m("Expansion vessel 100 l", "Vase d'expansion 100 l", C::VesselsAndTanks, K::ExpansionVessel).volume(100.0).size(480.0, 480.0).height(680.0),
         m("Expansion vessel 300 l", "Vase d'expansion 300 l", C::VesselsAndTanks, K::ExpansionVessel).volume(300.0).size(650.0, 650.0),
+        m("Buffer tank 15 l", "Ballon tampon 15 l", C::VesselsAndTanks, K::Tank).volume(15.0).size(300.0, 300.0).height(400.0),
+        m("Buffer tank 25 l", "Ballon tampon 25 l", C::VesselsAndTanks, K::Tank).volume(25.0).size(360.0, 360.0).height(530.0),
+        m("Buffer tank 50 l", "Ballon tampon 50 l", C::VesselsAndTanks, K::Tank).volume(50.0).size(450.0, 450.0).height(600.0),
         m("Buffer tank 300 l", "Ballon tampon 300 l", C::VesselsAndTanks, K::Tank).volume(300.0).size(600.0, 600.0).height(1300.0),
         m("Buffer tank 500 l", "Ballon tampon 500 l", C::VesselsAndTanks, K::Tank).volume(500.0).size(750.0, 750.0).height(1600.0),
         m("Buffer tank 1000 l", "Ballon tampon 1000 l", C::VesselsAndTanks, K::Tank).volume(1000.0).size(950.0, 950.0).height(1900.0),
         m("Decoupling bottle", "Bouteille de découplage", C::VesselsAndTanks, K::DecouplingBottle).dn(80.0),
+        // Body diameter by height; the volume follows from them, about 0.1 m/s inside at the flow given.
+        m(
+            "Decoupling bottle 15 l (DN50, up to 8 m³/h)",
+            "Bouteille de découplage 15 l (DN50, jusqu'à 8 m³/h)",
+            C::VesselsAndTanks,
+            K::DecouplingBottle,
+        )
+        .dn(50.0)
+        .volume(15.0)
+        .size(170.0, 700.0)
+        .height(700.0),
+        m(
+            "Decoupling bottle 25 l (DN65, up to 11 m³/h)",
+            "Bouteille de découplage 25 l (DN65, jusqu'à 11 m³/h)",
+            C::VesselsAndTanks,
+            K::DecouplingBottle,
+        )
+        .dn(65.0)
+        .volume(25.0)
+        .size(200.0, 800.0)
+        .height(800.0),
+        m(
+            "Decoupling bottle 50 l (DN80, up to 21 m³/h)",
+            "Bouteille de découplage 50 l (DN80, jusqu'à 21 m³/h)",
+            C::VesselsAndTanks,
+            K::DecouplingBottle,
+        )
+        .dn(80.0)
+        .volume(50.0)
+        .size(270.0, 900.0)
+        .height(900.0),
+        m(
+            "Decoupling bottle 100 l (DN100, up to 31 m³/h)",
+            "Bouteille de découplage 100 l (DN100, jusqu'à 31 m³/h)",
+            C::VesselsAndTanks,
+            K::DecouplingBottle,
+        )
+        .dn(100.0)
+        .volume(100.0)
+        .size(330.0, 1200.0)
+        .height(1200.0),
         m("Domestic hot water cylinder 300 l", "Ballon d'eau chaude sanitaire 300 l", C::VesselsAndTanks, K::Tank)
             .volume(300.0)
             .size(650.0, 650.0)

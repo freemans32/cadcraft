@@ -1938,3 +1938,25 @@ fn the_pipe_or_cable_joined_to_a_dragged_end_follows_it_unless_asked_to_stay() {
         assert!(start(&s, b).dist(cadcraft_geom::Vec2::new(4000.0, 0.0)) < 1e-6, "{add}: Alone, the joined run stays");
     }
 }
+
+#[test]
+fn the_label_of_a_duct_or_a_pipe_can_be_left_off_and_shown_again() {
+    let mut s = metric();
+    let duct = s.execute("ductadd", &json!({"points": [[0, 0], [4000, 0]], "diameter": 315})).unwrap()["handles"][0].clone();
+    let pipe =
+        s.execute("pipeadd", &json!({"points": [[0, 2000], [4000, 2000]], "service": "chilledWater", "dn": 50})).unwrap()["handles"][0].clone();
+    let texts = |s: &Session, h: &Value| {
+        let d = s.doc().unwrap();
+        let EntityKind::Insert(i) = &d.entity(hd(h)).unwrap().kind else { panic!() };
+        d.block(&i.block).unwrap().entities.iter().filter(|e| matches!(e.kind, EntityKind::Text(_))).count()
+    };
+    for (edit, h) in [("ductedit", &duct), ("pipeedit", &pipe)] {
+        let shown = texts(&s, h);
+        assert!(shown > 0, "{edit}: a label at first");
+        s.execute(edit, &json!({"handles": [h], "label": false})).unwrap();
+        assert!(texts(&s, h) < shown, "{edit}: the label is left off");
+        s.execute(edit, &json!({"handles": [h], "label": true})).unwrap();
+        assert_eq!(texts(&s, h), shown, "{edit}: shown again");
+        assert!(s.execute(edit, &json!({"handles": [h], "label": "no"})).is_err());
+    }
+}
